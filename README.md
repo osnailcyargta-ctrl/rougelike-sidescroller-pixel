@@ -29,6 +29,7 @@ The repository root *is* the site. In **Settings → Pages**, choose
 | --- | --- |
 | `A` / `D` | Move left / right |
 | double-tap `A` / `D` | Dash in that direction (i-frames) |
+| `Shift` | Dash as well — one key, aimed by the direction you're holding |
 | `W` | Jump |
 | `S` | Drop through a platform |
 | double-tap `S` in the air | Ground slam (25 damage AoE + shockwave) |
@@ -47,6 +48,9 @@ centre activates as a third spawn pad. When wave 2 ends, an item drops on that
 centre platform and a gate opens on the right — right-click the drop to take
 it, right-click the gate to descend into the next room. Rooms get denser and
 add new enemy types as you go.
+
+Clearing a wave restores **25% of max HP**, and stepping through the gate into
+the next room restores you to **full HP**.
 
 ### Classes
 

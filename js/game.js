@@ -13,7 +13,13 @@ import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, panel, button } 
 import { drawText, drawTextShadow } from './font.js';
 import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, drawControls } from './screens.js';
 
+// Health restored to the player after every cleared wave; clearing a room and
+// stepping through the gate restores the rest.
+const WAVE_HEAL = 0.25;
+
 export class Game {
+  static get WAVE_HEAL() { return WAVE_HEAL; }
+
   constructor(root) {
     this.display = root.querySelector('#screen');
     this.scene = document.createElement('canvas');
@@ -187,14 +193,17 @@ export class Game {
     this.player.x = 120;
     this.player.y = GROUND_Y;
     this.player.vx = this.player.vy = 0;
+    this.player.dashBuffer = 0;
+    const healed = index > 1 ? this.player.healPct(1, 'FULLY RESTORED') : 0;
     this.startWave(1);
-    this.showBanner(`ROOM ${index}`, 'SURVIVE 2 WAVES', Theme.uiAccent);
+    this.showBanner(`ROOM ${index}`, healed > 0 ? 'HEALTH RESTORED' : 'SURVIVE 2 WAVES', Theme.uiAccent);
   }
 
   startWave(n) {
     this.waveIndex = n;
     this.pendingSpawns = buildWave(this.roomIndex, n);
     this.waveTimer = 0;
+    this.waveCooldown = null;
     if (n === 2) this.showBanner('WAVE 2', 'CENTER PAD ACTIVE', Theme.enemyBrute);
     Sfx.wave();
   }
@@ -380,14 +389,17 @@ export class Game {
       this.enemies.push(new Enemy(s.type, s.x, s.y, this));
     }
     if (this.pendingSpawns.length === 0 && this.enemies.every((e) => e.dead)) {
-      if (this.waveIndex < WAVES.perRoom) {
-        this.waveCooldown = (this.waveCooldown ?? WAVES.interWaveDelay) - dt;
-        if (this.waveCooldown <= 0) {
-          this.waveCooldown = null;
-          this.startWave(this.waveIndex + 1);
-        }
-      } else {
-        this.clearRoom();
+      if (this.waveCooldown === null || this.waveCooldown === undefined) {
+        // wave just ended: patch the player up before the next one lands
+        this.waveCooldown = WAVES.interWaveDelay;
+        const healed = this.player.healPct(WAVE_HEAL, 'WAVE CLEAR');
+        this.showBanner('WAVE CLEAR', healed > 0 ? `+${healed} HP RECOVERED` : 'FULL HEALTH', '#8ce88c');
+      }
+      this.waveCooldown -= dt;
+      if (this.waveCooldown <= 0) {
+        this.waveCooldown = null;
+        if (this.waveIndex < WAVES.perRoom) this.startWave(this.waveIndex + 1);
+        else this.clearRoom();
       }
     }
   }

@@ -1,13 +1,24 @@
 // Keyboard / mouse state. Double-tap detection lives here so gameplay code
 // only has to ask "did a dash / slam get requested this frame?".
-const DOUBLE_TAP_WINDOW = 0.28;
+// Two ways to register a double tap, because measuring only from the first
+// keydown makes dashes feel like they "eat" inputs:
+//   1. two keydowns inside DOUBLE_TAP_WINDOW (classic tap-tap), or
+//   2. a keydown within RELEASE_WINDOW of releasing a short tap of the same
+//      key - this is what saves the "tap, tap" you did slightly too slowly.
+// A hold longer than MAX_TAP_HOLD is treated as walking, never as a tap, so
+// simply letting go of a run key and pressing it again never dashes you.
+const DOUBLE_TAP_WINDOW = 0.32;
+const RELEASE_WINDOW = 0.20;
+const MAX_TAP_HOLD = 0.30;
 
 export const Input = {
   keys: new Set(),
   pressed: new Set(),      // edge-triggered, cleared each frame
   released: new Set(),
   doubleTap: new Set(),    // edge-triggered double tap of a key
-  lastTap: new Map(),
+  lastTap: new Map(),      // key -> time of last keydown that could start a tap
+  lastUp: new Map(),       // key -> time of last keyup
+  lastHold: new Map(),     // key -> how long the previous press was held
   mouse: { x: 0, y: 0, sx: 0, sy: 0, left: false, right: false },
   mouseDown: { left: false, right: false },   // edge
   mouseUp: { left: false, right: false },
@@ -28,12 +39,19 @@ export function initInput(view) {
     if (e.repeat) return;
     Input.keys.add(k);
     Input.pressed.add(k);
-    const last = Input.lastTap.get(k) ?? -99;
-    if (Input.time - last < DOUBLE_TAP_WINDOW) {
+    const now = Input.time;
+    const lastDown = Input.lastTap.get(k) ?? -99;
+    const lastUp = Input.lastUp.get(k) ?? -99;
+    const lastHold = Input.lastHold.get(k) ?? 99;
+    const tapTap = now - lastDown < DOUBLE_TAP_WINDOW;
+    const releaseTap = now - lastUp < RELEASE_WINDOW && lastHold <= MAX_TAP_HOLD;
+    if (tapTap || releaseTap) {
       Input.doubleTap.add(k);
+      // consume both anchors so a third tap needs a fresh pair
       Input.lastTap.set(k, -99);
+      Input.lastUp.set(k, -99);
     } else {
-      Input.lastTap.set(k, Input.time);
+      Input.lastTap.set(k, now);
     }
   });
 
@@ -41,9 +59,17 @@ export function initInput(view) {
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     Input.keys.delete(k);
     Input.released.add(k);
+    const down = Input.lastTap.get(k);
+    Input.lastHold.set(k, down === undefined || down < 0 ? 99 : Input.time - down);
+    Input.lastUp.set(k, Input.time);
   });
 
-  addEventListener('blur', () => { Input.keys.clear(); });
+  addEventListener('blur', () => {
+    Input.keys.clear();
+    Input.lastTap.clear();
+    Input.lastUp.clear();
+    Input.lastHold.clear();
+  });
 
   el.addEventListener('contextmenu', (e) => e.preventDefault());
 

@@ -562,6 +562,8 @@ export class Player {
     this.invuln = 0;
     this.dashT = 0;
     this.dashCd = 0;
+    this.dashBuffer = 0;
+    this.dashBufferDir = 0;
     this.dropT = 0;
     this.slamming = false;
     this.attackCd = 0;
@@ -621,6 +623,23 @@ export class Player {
   heal(n) {
     this.hp = clamp(this.hp + n, 0, this.maxHp);
     floatText(this.cx, this.cy - 14, `+${n}`, '#8ce88c');
+  }
+
+  // Restores a fraction of max HP. Returns how much was actually restored.
+  healPct(frac, label) {
+    if (this.dead) return 0;
+    const before = this.hp;
+    this.hp = clamp(this.hp + this.maxHp * frac, 0, this.maxHp);
+    const gained = Math.round(this.hp - before);
+    if (gained <= 0) return 0;
+    floatText(this.cx, this.cy - 16, `+${gained} HP`, '#8ce88c', { life: 1.1, crit: true });
+    if (label) floatText(this.cx, this.cy - 28, label, '#8ce88c', { life: 1.2, scale: 0.8, vy: -18 });
+    burst(this.cx, this.cy, 18, {
+      color: '#8ce88c', color2: '#ffffff', speedMin: 18, speedMax: 90,
+      lifeMin: 0.3, lifeMax: 0.8, gravity: -90, sizeMax: 2,
+    });
+    Sfx.pickup();
+    return gained;
   }
 
   update(dt, input) {
@@ -685,10 +704,18 @@ export class Player {
       }
     }
 
-    // --- dash (double tap A / D)
-    if (c && this.dashCd <= 0) {
-      if (c.doubleTap.has('a')) this.startDash(-1);
-      else if (c.doubleTap.has('d')) this.startDash(1);
+    // --- dash. The request is buffered instead of consumed on the spot, so a
+    // double tap made a hair early (still dashing, or a few frames before the
+    // cooldown ends) fires the moment it becomes legal rather than vanishing.
+    this.dashBuffer = Math.max(0, this.dashBuffer - dt);
+    if (c) {
+      if (c.doubleTap.has('a')) this.requestDash(-1);
+      else if (c.doubleTap.has('d')) this.requestDash(1);
+      else if (c.pressed.has('Shift')) this.requestDash(move !== 0 ? move : this.facing);
+    }
+    if (this.dashBuffer > 0 && this.dashCd <= 0 && this.dashT <= 0) {
+      this.dashBuffer = 0;
+      this.startDash(this.dashBufferDir);
     }
 
     // --- jump
@@ -731,6 +758,11 @@ export class Player {
     const before = this.onGround;
     moveAndCollide(this, dt, { ignorePlatforms: this.dropT > 0 });
     if (!before && this.onGround) this.onLand();
+  }
+
+  requestDash(dir) {
+    this.dashBufferDir = dir || this.facing;
+    this.dashBuffer = 0.2;
   }
 
   startDash(dir) {

@@ -66,6 +66,7 @@ export function drawControls(ctx, game, t) {
   const rows = [
     ['A / D', 'MOVE LEFT / RIGHT'],
     ['DOUBLE A / D', 'DASH (I-FRAMES)'],
+    ['SHIFT', 'DASH (ONE-KEY VERSION)'],
     ['W', 'JUMP'],
     ['S', 'DROP THROUGH PLATFORM'],
     ['DOUBLE S (AIR)', 'GROUND SLAM'],
@@ -82,7 +83,7 @@ export function drawControls(ctx, game, t) {
     drawText(ctx, v, 168, y, Theme.ui, 1);
     y += 12;
   }
-  if (button(ctx, 'back', (VIEW_W - 90) / 2, VIEW_H - 28, 90, 18, 'BACK')) game.screen = 'menu';
+  if (button(ctx, 'back', (VIEW_W - 90) / 2, 202, 90, 18, 'BACK')) game.screen = 'menu';
 }
 
 export function drawSettings(ctx, game, t) {
