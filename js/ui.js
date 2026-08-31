@@ -106,34 +106,11 @@ export function drawHUD(ctx, game) {
   ctx.strokeRect(10.5, 17.5, bw + 1, 6);
   drawTextShadow(ctx, `${Math.ceil(p.hp)}/${p.maxHp}`, 11 + bw, 9, Theme.ui, 1, 'right');
 
-  // room / wave
-  const label = game.roomCleared ? 'CLEARED' : `WAVE ${game.waveIndex}/2`;
-  drawTextShadow(ctx, `ROOM ${game.roomIndex}`, VIEW_W - 7, 8, Theme.ui, 1, 'right');
-  drawTextShadow(ctx, label, VIEW_W - 7, 18, game.roomCleared ? Theme.uiAccent : Theme.uiDim, 1, 'right');
-  const alive = game.enemies.filter((e) => !e.dead).length;
-  if (!game.roomCleared) {
-    drawTextShadow(ctx, `LEFT ${alive + game.pendingSpawns.length}`, VIEW_W - 7, 28, Theme.uiDim, 1, 'right');
-  }
-
-  // dash cooldown pip
-  const dashReady = p.dashCd <= 0;
-  drawText(ctx, 'DASH', 11, 31, dashReady ? Theme.platformGlow : Theme.uiDim, 1);
-  pxRect(ctx, 36, 32, 24, 3, rgba('#000000', 0.6));
-  pxRect(ctx, 36, 32, Math.round(24 * (1 - p.dashCd / PLAYER.dashCooldown)), 3, dashReady ? Theme.platformGlow : Theme.uiDim);
+  // depth marker only - no wave counter, no tutorial readouts
+  drawTextShadow(ctx, `ROOM ${game.roomIndex}`, VIEW_W - 7, 8, Theme.uiDim, 1, 'right');
 
   drawHotbar(ctx, game);
   drawPerkStrip(ctx, game);
-
-  // banner
-  if (game.banner && game.bannerT > 0) {
-    const k = clamp(game.bannerT / 0.5, 0, 1);
-    const a = clamp(game.bannerT, 0, 1);
-    ctx.globalAlpha = a;
-    const scale = 2;
-    drawTextShadow(ctx, game.banner, VIEW_W / 2, 66 - (1 - k) * 6, game.bannerColor || Theme.uiAccent, scale, 'center');
-    if (game.bannerSub) drawTextShadow(ctx, game.bannerSub, VIEW_W / 2, 66 + 20, Theme.ui, 1, 'center');
-    ctx.globalAlpha = 1;
-  }
 }
 
 function slotBox(ctx, x, y, s, selected, item, t) {
@@ -190,7 +167,7 @@ function drawPerkStrip(ctx, game) {
     if (n > 0) perks.push([id, n]);
   }
   if (!perks.length) return;
-  const y = 44;
+  const y = 34;
   for (let i = 0; i < perks.length; i++) {
     const x = 8, yy = y + i * 15;
     ctx.fillStyle = rgba('#000000', 0.35);
@@ -212,7 +189,7 @@ export function drawInventory(ctx, game) {
   const gh = INV_ROWS * s + (INV_ROWS - 1) * gap;
   const px = Math.round((VIEW_W - gw) / 2) - 12;
   const py = 54;
-  panel(ctx, px, py - 22, gw + 24, gh + 52);
+  panel(ctx, px, py - 22, gw + 24, gh + 32);
   drawTextShadow(ctx, 'INVENTORY', px + (gw + 24) / 2, py - 16, Theme.uiAccent, 1, 'center');
 
   let hoverIdx = -1;
@@ -231,9 +208,6 @@ export function drawInventory(ctx, game) {
       if (item) UI.tooltip = { id: item.id, x: x + s / 2, y: y - 4 };
     }
   }
-
-  drawTextShadow(ctx, 'ROW 1 = HOTBAR (SCROLL / 1-4)', VIEW_W / 2, py + gh + 8, Theme.uiDim, 1, 'center');
-  drawTextShadow(ctx, 'DRAG TO MOVE - E / ESC TO CLOSE', VIEW_W / 2, py + gh + 20, Theme.uiDim, 1, 'center');
 
   // drag & drop
   if (Input.mouseDown.left && hoverIdx >= 0 && inv.slots[hoverIdx] && !UI.drag) {
@@ -255,19 +229,16 @@ export function drawInventory(ctx, game) {
   if (UI.tooltip) drawTooltip(ctx, UI.tooltip);
 }
 
+// Name and rarity only. What an item actually does is for the player to find
+// out by using it.
 export function drawTooltip(ctx, tip) {
   const def = ITEMS[tip.id];
   if (!def) return;
-  const lines = def.desc;
-  const w = Math.max(textWidth(def.name, 1), ...lines.map((l) => textWidth(l, 1))) + 12;
-  const h = 12 + lines.length * 9 + 12;
-  let x = clamp(tip.x - w / 2, 3, VIEW_W - w - 3);
-  let y = tip.below ? tip.y : tip.y - h;
-  y = clamp(y, 3, VIEW_H - h - 3);
+  const w = Math.max(textWidth(def.name, 1), textWidth(RARITY[def.rarity].name, 1)) + 12;
+  const h = 24;
+  const x = clamp(tip.x - w / 2, 3, VIEW_W - w - 3);
+  const y = clamp(tip.below ? tip.y : tip.y - h, 3, VIEW_H - h - 3);
   panel(ctx, x, y, w, h, { alpha: 0.95, accent: RARITY[def.rarity].color });
   drawText(ctx, def.name, x + 6, y + 5, RARITY[def.rarity].color, 1);
   drawText(ctx, RARITY[def.rarity].name, x + 6, y + 14, Theme.uiDim, 1);
-  for (let i = 0; i < lines.length; i++) {
-    drawText(ctx, lines[i], x + 6, y + 25 + i * 9, Theme.ui, 1);
-  }
 }

@@ -158,11 +158,11 @@ export function drawClassSelect(ctx, game, t) {
   const cards = [
     {
       id: 'melee', name: 'BLADE', item: 'sword', color: Theme.hp,
-      lines: ['SWORD  -  3 BLOCK REACH', '10 DAMAGE PER SWING', 'FAST 0.45S SWING'],
+      lines: ['IRON SWORD'],
     },
     {
       id: 'ranger', name: 'RANGER', item: 'bow', color: Theme.platformGlow,
-      lines: ['BOW  -  10 BLOCK RANGE', '5 DAMAGE  -  10 AMMO', '0.4S SHOT  -  2S RELOAD'],
+      lines: ['HUNTER BOW'],
     },
   ];
   const cw = 168, ch = 130;
@@ -209,7 +209,7 @@ export function drawGameOver(ctx, game, t) {
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   if (game.deathT < 0.6) return;
   drawTextShadow(ctx, 'YOU DIED', VIEW_W / 2, 62, Theme.hp, 3, 'center');
-  drawTextShadow(ctx, `ROOM ${game.roomIndex}  -  WAVE ${game.waveIndex}`, VIEW_W / 2, 96, Theme.ui, 1, 'center');
+  drawTextShadow(ctx, `ROOM ${game.roomIndex}`, VIEW_W / 2, 96, Theme.ui, 1, 'center');
   drawTextShadow(ctx, `KILLS ${game.kills}`, VIEW_W / 2, 108, Theme.ui, 1, 'center');
   const bw = 120, x = VIEW_W / 2 - bw / 2;
   if (button(ctx, 'retry', x, 132, bw, 18, 'RETRY')) game.goClassSelect();

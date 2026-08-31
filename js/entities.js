@@ -493,15 +493,11 @@ export class Projectile {
     if (this.team === 'player') {
       if (this.kind === 'slime') {
         target.applySlow(PERK.slimeSlow, PERK.slimeSlowDuration);
-        floatText(target.cx, target.cy - 10, 'SLOW', Theme.slime, { life: 0.6, scale: 0.8 });
         Sfx.slime();
         burst(this.x, this.y, 10, { color: Theme.slime, speedMin: 20, speedMax: 90, lifeMin: 0.2, lifeMax: 0.5, gravity: 260 });
       } else {
         target.damage(this.damage, { angle: this.angle, spread: 0.9, knockback: 30, dir: sign(this.vx) });
-        if (this.mark) {
-          target.applyMark();
-          floatText(target.cx, target.cy - 16, 'MARKED', Theme.lightning, { life: 0.55, scale: 0.75 });
-        }
+        if (this.mark) target.applyMark();
       }
     } else {
       target.hurt(this.damage, this.x);
@@ -626,14 +622,13 @@ export class Player {
   }
 
   // Restores a fraction of max HP. Returns how much was actually restored.
-  healPct(frac, label) {
+  healPct(frac) {
     if (this.dead) return 0;
     const before = this.hp;
     this.hp = clamp(this.hp + this.maxHp * frac, 0, this.maxHp);
     const gained = Math.round(this.hp - before);
     if (gained <= 0) return 0;
-    floatText(this.cx, this.cy - 16, `+${gained} HP`, '#8ce88c', { life: 1.1, crit: true });
-    if (label) floatText(this.cx, this.cy - 28, label, '#8ce88c', { life: 1.2, scale: 0.8, vy: -18 });
+    floatText(this.cx, this.cy - 16, `+${gained}`, '#8ce88c', { life: 1.1, crit: true });
     burst(this.cx, this.cy, 18, {
       color: '#8ce88c', color2: '#ffffff', speedMin: 18, speedMax: 90,
       lifeMin: 0.3, lifeMax: 0.8, gravity: -90, sizeMax: 2,
@@ -704,16 +699,21 @@ export class Player {
       }
     }
 
-    // --- dash. The request is buffered instead of consumed on the spot, so a
-    // double tap made a hair early (still dashing, or a few frames before the
-    // cooldown ends) fires the moment it becomes legal rather than vanishing.
-    this.dashBuffer = Math.max(0, this.dashBuffer - dt);
-    if (c) {
-      if (c.doubleTap.has('a')) this.requestDash(-1);
-      else if (c.doubleTap.has('d')) this.requestDash(1);
-      else if (c.pressed.has('Shift')) this.requestDash(move !== 0 ? move : this.facing);
+    // --- dash. It only ever fires while the direction key is still held: the
+    // second tap must still be down, and a request waiting out the cooldown is
+    // thrown away the instant the key comes up. Letting go never dashes you.
+    const dashKey = (dir) => (dir < 0 ? 'a' : 'd');
+    const holding = (dir) => !!c && c.keys.has(dashKey(dir));
+    if (this.dashBuffer > 0) {
+      this.dashBuffer -= dt;
+      if (!holding(this.dashBufferDir)) this.dashBuffer = 0;
     }
-    if (this.dashBuffer > 0 && this.dashCd <= 0 && this.dashT <= 0) {
+    if (c) {
+      if (c.doubleTap.has('a') && c.keys.has('a')) this.requestDash(-1);
+      else if (c.doubleTap.has('d') && c.keys.has('d')) this.requestDash(1);
+      else if (c.pressed.has('Shift') && move !== 0) this.requestDash(move);
+    }
+    if (this.dashBuffer > 0 && this.dashCd <= 0 && this.dashT <= 0 && holding(this.dashBufferDir)) {
       this.dashBuffer = 0;
       this.startDash(this.dashBufferDir);
     }
@@ -761,8 +761,9 @@ export class Player {
   }
 
   requestDash(dir) {
-    this.dashBufferDir = dir || this.facing;
-    this.dashBuffer = 0.2;
+    if (!dir) return;
+    this.dashBufferDir = dir;
+    this.dashBuffer = 0.15;
   }
 
   startDash(dir) {
@@ -811,7 +812,6 @@ export class Player {
       if (this.reloadT <= 0) {
         this.ammo = BOW.ammo;
         Sfx.reload();
-        floatText(this.cx, this.cy - 20, 'RELOADED', Theme.uiAccent, { life: 0.6, scale: 0.8 });
       }
     }
   }
@@ -913,7 +913,6 @@ export class Player {
       });
       if (burned && !e.dead) {
         e.applyBurn();
-        floatText(e.cx, e.cy - 16, 'BURN', Theme.fire, { life: 0.6, scale: 0.8 });
         burst(e.cx, e.cy, 10, { color: Theme.fireHot, color2: Theme.fire, speedMin: 20, speedMax: 90, lifeMin: 0.2, lifeMax: 0.6, gravity: -60 });
       }
     }

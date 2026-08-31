@@ -51,10 +51,6 @@ export class Game {
     this.roomCleared = false;
     this.waveTimer = 0;
     this.kills = 0;
-    this.banner = null;
-    this.bannerSub = null;
-    this.bannerT = 0;
-    this.bannerColor = null;
     this.invOpen = false;
     this.hint = null;
     this.hintT = 0;
@@ -194,9 +190,8 @@ export class Game {
     this.player.y = GROUND_Y;
     this.player.vx = this.player.vy = 0;
     this.player.dashBuffer = 0;
-    const healed = index > 1 ? this.player.healPct(1, 'FULLY RESTORED') : 0;
+    if (index > 1) this.player.healPct(1);
     this.startWave(1);
-    this.showBanner(`ROOM ${index}`, healed > 0 ? 'HEALTH RESTORED' : 'SURVIVE 2 WAVES', Theme.uiAccent);
   }
 
   startWave(n) {
@@ -204,15 +199,7 @@ export class Game {
     this.pendingSpawns = buildWave(this.roomIndex, n);
     this.waveTimer = 0;
     this.waveCooldown = null;
-    if (n === 2) this.showBanner('WAVE 2', 'CENTER PAD ACTIVE', Theme.enemyBrute);
     Sfx.wave();
-  }
-
-  showBanner(text, sub, color) {
-    this.banner = text;
-    this.bannerSub = sub;
-    this.bannerColor = color || Theme.uiAccent;
-    this.bannerT = 2.0;
   }
 
   onEnemyKilled() {
@@ -307,7 +294,6 @@ export class Game {
 
   update(dt) {
     updateWorld(dt);
-    if (this.bannerT > 0) this.bannerT -= dt;
     if (this.screen === 'gameover') this.deathT += dt;
 
     const p = this.player;
@@ -392,8 +378,7 @@ export class Game {
       if (this.waveCooldown === null || this.waveCooldown === undefined) {
         // wave just ended: patch the player up before the next one lands
         this.waveCooldown = WAVES.interWaveDelay;
-        const healed = this.player.healPct(WAVE_HEAL, 'WAVE CLEAR');
-        this.showBanner('WAVE CLEAR', healed > 0 ? `+${healed} HP RECOVERED` : 'FULL HEALTH', '#8ce88c');
+        this.player.healPct(WAVE_HEAL);
       }
       this.waveCooldown -= dt;
       if (this.waveCooldown <= 0) {
@@ -406,7 +391,6 @@ export class Game {
 
   clearRoom() {
     this.roomCleared = true;
-    this.showBanner('ROOM CLEAR', 'RIGHT CLICK THE DROP', Theme.uiAccent);
     const id = rollDrop();
     this.pickups.push(new Pickup(id, DROP_POINT.x, DROP_POINT.y));
     burst(DROP_POINT.x, DROP_POINT.y - 12, 26, {
@@ -425,13 +409,12 @@ export class Game {
     for (let i = 0; i < this.pickups.length; i++) {
       const pk = this.pickups[i];
       if (dist(mx, my, pk.x, pk.y - 12) > 22) continue;
-      if (dist(p.x, p.cy, pk.x, pk.y - 12) > 64) { this.toast('TOO FAR AWAY'); return; }
-      if (!p.inventory.canAccept(pk.itemId)) { this.toast('INVENTORY FULL'); return; }
+      if (dist(p.x, p.cy, pk.x, pk.y - 12) > 64) return;
+      if (!p.inventory.canAccept(pk.itemId)) { Sfx.ui(); return; }
       p.inventory.add(pk.itemId, 1);
       p.recomputeStats();
       const def = ITEMS[pk.itemId];
-      floatText(pk.x, pk.y - 26, def.name.toUpperCase(), RARITY[def.rarity].color, { life: 1.2 });
-      burst(pk.x, pk.y - 12, 20, { color: RARITY[def.rarity].color, speedMin: 20, speedMax: 120, lifeMin: 0.2, lifeMax: 0.6 });
+      burst(pk.x, pk.y - 12, 26, { color: RARITY[def.rarity].color, color2: '#ffffff', speedMin: 20, speedMax: 130, lifeMin: 0.2, lifeMax: 0.7 });
       Sfx.pickup();
       this.pickups.splice(i, 1);
       return;
@@ -439,14 +422,13 @@ export class Game {
     // portal
     if (this.portal && this.roomCleared) {
       if (dist(mx, my, this.portal.x, this.portal.y - 18) < 26) {
-        if (dist(p.x, p.cy, this.portal.x, this.portal.y - 18) > 70) { this.toast('MOVE CLOSER TO THE GATE'); return; }
+        if (dist(p.x, p.cy, this.portal.x, this.portal.y - 18) > 70) return;
         burst(this.portal.x, this.portal.y - 18, 30, { color: Theme.platformGlow, speedMin: 30, speedMax: 160, lifeMin: 0.3, lifeMax: 0.7 });
         Camera.add(6);
         this.startRoom(this.roomIndex + 1);
         return;
       }
     }
-    this.toast('NOTHING THERE');
   }
 
   // --- render ------------------------------------------------------------
@@ -505,7 +487,6 @@ export class Game {
     }
 
     drawHUD(ctx, this);
-    if (this.roomCleared) this.drawInteractHints(ctx);
     if (this.invOpen) drawInventory(ctx, this);
     else if (UI.tooltip) drawTooltip(ctx, UI.tooltip);
 
@@ -531,19 +512,6 @@ export class Game {
     }
     pxRect(ctx, m.x, m.y, 1, 1, Theme.uiAccent);
     ctx.restore();
-  }
-
-  drawInteractHints(ctx) {
-    const p = this.player;
-    for (const pk of this.pickups) {
-      if (dist(p.x, p.cy, pk.x, pk.y - 12) < 64) {
-        drawTextShadow(ctx, 'RIGHT CLICK', pk.x, pk.y - 34, Theme.uiAccent, 1, 'center');
-      }
-    }
-    if (this.portal && dist(p.x, p.cy, this.portal.x, this.portal.y - 18) < 70) {
-      drawTextShadow(ctx, 'RIGHT CLICK', this.portal.x, this.portal.y - 44, Theme.platformGlow, 1, 'center');
-      drawTextShadow(ctx, 'NEXT ROOM', this.portal.x, this.portal.y - 34, Theme.ui, 1, 'center');
-    }
   }
 
   drawToast(ctx) {

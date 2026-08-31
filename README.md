@@ -28,8 +28,8 @@ The repository root *is* the site. In **Settings → Pages**, choose
 | Input | Action |
 | --- | --- |
 | `A` / `D` | Move left / right |
-| double-tap `A` / `D` | Dash in that direction (i-frames) |
-| `Shift` | Dash as well — one key, aimed by the direction you're holding |
+| double-tap `A` / `D` | Dash in that direction (i-frames) — only fires while the key is held |
+| `Shift` | Dash as well, in the direction you are currently holding |
 | `W` | Jump |
 | `S` | Drop through a platform |
 | double-tap `S` in the air | Ground slam (25 damage AoE + shockwave) |
@@ -51,6 +51,11 @@ add new enemy types as you go.
 
 Clearing a wave restores **25% of max HP**, and stepping through the gate into
 the next room restores you to **full HP**.
+
+The game explains none of this to you. There are no banners, no objective
+text, no "press X to..." prompts, and item tooltips show only a name and a
+rarity — the effects are for you to discover. The Controls screen in the main
+menu is the one and only place anything is spelled out.
 
 ### Classes
 

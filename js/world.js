@@ -1,7 +1,7 @@
 // Arena backdrop, platforms, pickups, portal and the wave composer.
 import { clamp, lerp, rand, randInt, choice, rgba, TAU, dist } from './util.js';
 import { Theme } from './theme.js';
-import { pxRect, glowDot, spawnParticle, burst, floatText } from './gfx.js';
+import { pxRect, glowDot, spawnParticle, burst } from './gfx.js';
 import { VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER, BLOCK } from './config.js';
 import { ITEMS, RARITY, drawItemIcon } from './items.js';
 import { Sfx } from './audio.js';
