@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Aether Descent — Pixel Roguelike Sidescroller</title>
+<meta name="description" content="A pixel-art roguelike sidescroller with wave arenas, perks and loadable .shdr shader packs.">
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%2310101f'/><rect x='6' y='2' width='4' height='9' fill='%23dfe9ff'/><rect x='4' y='11' width='8' height='2' fill='%23ffd76a'/></svg>">
+</head>
+<body>
+  <div id="root">
+    <canvas id="screen" width="960" height="540"></canvas>
+    <input id="shaderFile" type="file" accept=".shdr,text/plain" hidden>
+    <div id="boot">
+      <div class="boot-inner">
+        <h1>AETHER DESCENT</h1>
+        <p>Click to start</p>
+      </div>
+    </div>
+    <noscript><p class="fallback">This game needs JavaScript enabled.</p></noscript>
+  </div>
+  <script type="module">
+    import { Game } from './js/game.js';
+    import { resumeAudio } from './js/audio.js';
+    const root = document.getElementById('root');
+    const boot = document.getElementById('boot');
+    const game = new Game(root);
+    window.__game = game;
+    const start = () => { resumeAudio(); boot.classList.add('gone'); };
+    boot.addEventListener('click', start);
+    addEventListener('keydown', start, { once: true });
+  </script>
+</body>
+</html>

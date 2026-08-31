@@ -1,0 +1,54 @@
+/*@theme
+{
+  "name": "Neon Veil",
+  "bgFar": "#12001f", "bgMid": "#1c0033", "bgNear": "#2a0047",
+  "fog": "#3d0a63", "ground": "#2b0246", "groundTop": "#ff2bd6",
+  "groundEdge": "#00ffe1", "platform": "#33055a", "platformTop": "#ff2bd6",
+  "platformGlow": "#00ffe1", "player": "#ffffff", "cloth": "#ff2bd6",
+  "clothDark": "#8a0f6d", "skin": "#ffd9f2", "steel": "#00ffe1",
+  "enemyGrunt": "#ffe600", "enemyBrute": "#ff5c00", "enemyStinger": "#00ff85",
+  "uiAccent": "#00ffe1", "ui": "#ffe6fb", "uiPanel": "#1a0030",
+  "bloomStrength": 1.7, "bloomThreshold": 0.42, "scanline": 0.35,
+  "chroma": 1.2, "saturation": 1.35, "vignette": 0.7, "animSpeed": 1.15
+}
+@*/
+precision mediump float;
+varying vec2 vUv;
+uniform sampler2D uScene;
+uniform sampler2D uBloom;
+uniform vec2  uResolution;
+uniform float uTime;
+uniform float uBloomStrength;
+uniform float uVignette;
+uniform float uChroma;
+uniform float uScanline;
+uniform float uSaturation;
+uniform float uHit;
+
+void main() {
+  vec2 uv = vUv;
+  vec2 c = uv - 0.5;
+  float r2 = dot(c, c);
+
+  // wavy neon distortion
+  uv.x += sin(uv.y * 40.0 + uTime * 2.0) * 0.0015;
+
+  vec2 off = c * r2 * 0.02 * uChroma;
+  vec3 col;
+  col.r = texture2D(uScene, uv + off).r;
+  col.g = texture2D(uScene, uv).g;
+  col.b = texture2D(uScene, uv - off).b;
+
+  vec3 bloom = texture2D(uBloom, uv).rgb;
+  col += bloom * uBloomStrength * vec3(1.1, 0.85, 1.3);
+
+  float l = dot(col, vec3(0.299, 0.587, 0.114));
+  col = mix(vec3(l), col, uSaturation);
+  col *= mix(vec3(1.0), vec3(1.15, 0.8, 1.25), 0.5);
+  col += vec3(0.6, 0.0, 0.15) * uHit;
+
+  float scan = 1.0 - uScanline * 0.6 * (0.5 + 0.5 * sin(uv.y * uResolution.y * 3.14159));
+  col *= scan;
+  col *= 1.0 - uVignette * r2 * 1.2;
+  gl_FragColor = vec4(col, 1.0);
+}

@@ -1,0 +1,83 @@
+:root {
+  --bg: #06060d;
+  --edge: #1d2440;
+  --accent: #ffd76a;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: #dff3ff;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  display: grid;
+  place-items: center;
+  /* subtle room glow behind the framed screen */
+  background:
+    radial-gradient(120% 90% at 50% 10%, #141a33 0%, #06060d 70%),
+    var(--bg);
+}
+
+#root {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+#screen {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background: #000;
+  border: 2px solid var(--edge);
+  border-radius: 3px;
+  box-shadow:
+    0 0 0 1px #000,
+    0 12px 44px rgba(0, 0, 0, 0.85),
+    0 0 90px rgba(90, 160, 255, 0.10);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+#boot {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(4, 4, 10, 0.92);
+  cursor: pointer;
+  transition: opacity 0.35s ease, visibility 0.35s;
+  z-index: 5;
+}
+
+#boot.gone { opacity: 0; visibility: hidden; }
+
+.boot-inner { text-align: center; }
+
+.boot-inner h1 {
+  margin: 0 0 10px;
+  font-size: clamp(18px, 3vw, 34px);
+  letter-spacing: 0.28em;
+  color: var(--accent);
+  text-shadow: 0 0 18px rgba(255, 215, 106, 0.45);
+}
+
+.boot-inner p {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  color: #7f92b8;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+
+.fallback { color: #ff5470; }
