@@ -1,7 +1,10 @@
 // Game shell: canvas setup, main loop, run/room/wave state machine.
 import { clamp, lerp, rand, randInt, dist, distToSegment, rgba, sign } from './util.js';
 import { Theme, applyTheme, resetTheme, DEFAULT_THEME } from './theme.js';
-import { Camera, updateFx, drawParticles, drawTexts, clearFx, burst, floatText, spawnParticle, boltPath, strokeBolt, glowDot, pxRect } from './gfx.js';
+import {
+  Camera, updateFx, drawParticles, drawTexts, drawRings, clearFx, burst, floatText,
+  spawnParticle, impactRing, boltPath, strokeBolt, glowDot, pxRect,
+} from './gfx.js';
 import { Input, initInput, inputTick, inputEndFrame } from './input.js';
 import { Sfx, resumeAudio, setVolume, AudioCfg } from './audio.js';
 import { PostFX, parseShaderPack, DEFAULT_COMPOSITE } from './postfx.js';
@@ -90,10 +93,11 @@ export class Game {
 
   toWorld(sx, sy) {
     const r = this.display.getBoundingClientRect();
-    return {
-      x: clamp((sx / r.width) * VIEW_W, 0, VIEW_W),
-      y: clamp((sy / r.height) * VIEW_H, 0, VIEW_H),
-    };
+    const vx = (sx / r.width) * VIEW_W;
+    const vy = (sy / r.height) * VIEW_H;
+    // undo the camera so aiming stays exact through shake and zoom punches
+    const w = Camera.unproject(vx, vy);
+    return { x: clamp(w.x, -40, VIEW_W + 40), y: clamp(w.y, -40, VIEW_H + 40) };
   }
 
   setupShaderInput(root) {
@@ -204,6 +208,7 @@ export class Game {
     this.player.x = 120;
     this.player.y = GROUND_Y;
     this.player.vx = this.player.vy = 0;
+    this.player.resetChains();
     if (index > 1) this.player.healPct(1);
     this.startWave(1);
   }
@@ -247,6 +252,9 @@ export class Game {
     this.bolts.push({ pts, t: 0, life: 0.3 });
     Sfx.zap();
     Camera.add(3);
+    impactRing(a.cx, a.cy, { color: Theme.lightning, r1: 24, life: 0.3, width: 2 });
+    impactRing(b.cx, b.cy, { color: Theme.lightning, r1: 24, life: 0.3, width: 2 });
+    Camera.punch(0.8);
     for (const e of [a, b]) {
       e.damage(PERK.chainDamage, { color: Theme.lightning, shake: 0 });
       if (!e.dead) e.applyElectrified();
@@ -493,6 +501,7 @@ export class Game {
     // portal
     if (this.portal && this.roomCleared) {
       if (dist(mx, my, this.portal.x, this.portal.y - 18) < 26) {
+        Camera.punch(-1.6);
         if (dist(p.x, p.cy, this.portal.x, this.portal.y - 18) > 70) return;
         burst(this.portal.x, this.portal.y - 18, 30, { color: Theme.platformGlow, speedMin: 30, speedMax: 160, lifeMin: 0.3, lifeMax: 0.7 });
         Camera.add(6);
@@ -517,7 +526,7 @@ export class Game {
     if (this.screen === 'classSelect') { drawClassSelect(ctx, this, this.time); if (this.debugOpen) drawDebugMenu(ctx, this); this.drawToast(ctx); return; }
 
     ctx.save();
-    ctx.translate(Camera.ox, Camera.oy);
+    Camera.apply(ctx);
     drawBackground(ctx, this.time, this.roomIndex);
     drawArena(ctx, this.time);
     if (!this.roomCleared) drawSpawnPads(ctx, this.time, activeSpawnPads(this.waveIndex));
@@ -551,13 +560,13 @@ export class Game {
     }
 
     drawParticles(ctx);
+    drawRings(ctx);
     drawTexts(ctx);
-    ctx.restore();
-
-    // aim reticle
+    // aim reticle lives inside the camera so it tracks the cursor exactly
     if (this.screen === 'playing' && !this.invOpen && this.player && !this.player.dead) {
       this.drawReticle(ctx);
     }
+    ctx.restore();
 
     drawHUD(ctx, this);
     if (this.invOpen) drawInventory(ctx, this);

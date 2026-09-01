@@ -1,7 +1,7 @@
 // Arena backdrop, platforms, pickups, portal and the wave composer.
-import { clamp, lerp, rand, randInt, choice, rgba, TAU, dist } from './util.js';
+import { clamp, lerp, rand, randInt, choice, rgba, mixHex, TAU, dist } from './util.js';
 import { Theme } from './theme.js';
-import { pxRect, glowDot, spawnParticle, burst } from './gfx.js';
+import { pxRect, glowDot, spawnParticle, burst, linGrad } from './gfx.js';
 import { VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER, BLOCK } from './config.js';
 import { ITEMS, RARITY, drawItemIcon } from './items.js';
 import { Sfx } from './audio.js';
@@ -10,11 +10,56 @@ import { Sfx } from './audio.js';
 
 const stars = [];
 const motes = [];
-for (let i = 0; i < 70; i++) {
-  stars.push({ x: rand(VIEW_W), y: rand(GROUND_Y - 20), s: Math.random() < 0.25 ? 2 : 1, p: rand(TAU), sp: rand(0.6, 2.2) });
+const fog = [];
+// Three tower layers at different depths; each scrolls at its own rate.
+const TOWER_LAYERS = [
+  { count: 9, minH: 70, maxH: 130, minW: 18, maxW: 30, alpha: 0.34, par: 0.10, tint: 0.0, lit: 0.10 },
+  { count: 7, minH: 100, maxH: 175, minW: 26, maxW: 44, alpha: 0.52, par: 0.22, tint: 0.30, lit: 0.26 },
+  { count: 5, minH: 130, maxH: 215, minW: 34, maxW: 58, alpha: 0.72, par: 0.38, tint: 0.6, lit: 0.45 },
+];
+const towers = [];
+
+for (let i = 0; i < 90; i++) {
+  stars.push({
+    x: rand(VIEW_W), y: rand(GROUND_Y - 30), s: Math.random() < 0.2 ? 2 : 1,
+    p: rand(TAU), sp: rand(0.6, 2.4), warm: Math.random() < 0.25,
+  });
 }
-for (let i = 0; i < 40; i++) {
-  motes.push({ x: rand(VIEW_W), y: rand(VIEW_H), vy: rand(-9, -3), vx: rand(-6, 6), s: Math.random() < 0.2 ? 2 : 1, p: rand(TAU) });
+for (let i = 0; i < 46; i++) {
+  motes.push({
+    x: rand(VIEW_W), y: rand(VIEW_H), vy: rand(-11, -3), vx: rand(-7, 7),
+    s: Math.random() < 0.18 ? 2 : 1, p: rand(TAU), depth: rand(0.4, 1),
+    warm: Math.random() < 0.3,
+  });
+}
+for (let i = 0; i < 7; i++) {
+  fog.push({ x: rand(VIEW_W), y: rand(GROUND_Y - 90, GROUND_Y + 10), r: rand(60, 130), vx: rand(-5, 5), a: rand(0.05, 0.12) });
+}
+
+// Deterministic per-room tower layout, rebuilt only when the room changes.
+let towerRoom = -1;
+function buildTowers(roomIndex) {
+  towers.length = 0;
+  let seed = roomIndex * 9871 + 13;
+  const rnd = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+  for (let l = 0; l < TOWER_LAYERS.length; l++) {
+    const L = TOWER_LAYERS[l];
+    for (let i = 0; i < L.count; i++) {
+      const w = L.minW + rnd() * (L.maxW - L.minW);
+      towers.push({
+        layer: l,
+        x: (i + rnd() * 0.7) * (VIEW_W / L.count) - 20,
+        w,
+        h: L.minH + rnd() * (L.maxH - L.minH),
+        seed: rnd() * 10,
+        windows: Math.floor(2 + rnd() * 4),
+      });
+    }
+  }
+  towerRoom = roomIndex;
 }
 
 export function updateWorld(dt) {
@@ -29,87 +74,184 @@ export function updateWorld(dt) {
     p.dx = p.x - before;
   }
   for (const m of motes) {
-    m.x += m.vx * dt;
-    m.y += m.vy * dt;
+    m.x += m.vx * dt * m.depth;
+    m.y += m.vy * dt * m.depth;
     if (m.y < -4) { m.y = VIEW_H + 4; m.x = rand(VIEW_W); }
     if (m.x < -4) m.x = VIEW_W + 4;
     if (m.x > VIEW_W + 4) m.x = -4;
   }
+  for (const f of fog) {
+    f.x += f.vx * dt;
+    if (f.x < -f.r) f.x = VIEW_W + f.r;
+    if (f.x > VIEW_W + f.r) f.x = -f.r;
+  }
 }
 
 export function drawBackground(ctx, t, roomIndex) {
-  // sky gradient
-  const g = ctx.createLinearGradient(0, 0, 0, VIEW_H);
-  g.addColorStop(0, Theme.bgFar);
-  g.addColorStop(0.55, Theme.bgMid);
-  g.addColorStop(1, Theme.bgNear);
-  ctx.fillStyle = g;
+  // --- sky
+  ctx.fillStyle = linGrad(ctx, 'sky', 0, 0, 0, VIEW_H, [
+    [0, Theme.bgFar], [0.45, Theme.bgMid], [0.82, Theme.bgNear], [1, Theme.fog],
+  ]);
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
-  // stars
+  // horizon bloom behind the skyline
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const hg = ctx.createRadialGradient(VIEW_W / 2, GROUND_Y - 10, 0, VIEW_W / 2, GROUND_Y - 10, 260);
+  hg.addColorStop(0, rgba(Theme.platformGlow, 0.08));
+  hg.addColorStop(1, rgba(Theme.platformGlow, 0));
+  ctx.fillStyle = hg;
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.restore();
+
+  // --- stars
   for (const s of stars) {
-    const a = 0.35 + 0.45 * Math.sin(t * s.sp + s.p);
-    pxRect(ctx, s.x, s.y, s.s, s.s, rgba(Theme.star, a));
+    const a = 0.3 + 0.5 * Math.sin(t * s.sp + s.p);
+    pxRect(ctx, s.x, s.y, s.s, s.s, rgba(s.warm ? Theme.uiAccent : Theme.star, a));
   }
 
-  // far arches / pillars (parallax by room so each room reads differently)
-  const seed = roomIndex * 37;
+  // --- light shafts falling from above
   ctx.save();
-  ctx.globalAlpha = 0.5;
-  for (let i = 0; i < 6; i++) {
-    const w = 26 + ((seed + i * 53) % 5) * 6;
-    const x = ((i * 97 + seed * 13) % (VIEW_W + 60)) - 30;
-    const h = 90 + ((seed + i * 31) % 7) * 12;
-    pxRect(ctx, x, GROUND_Y - h, w, h, Theme.fog);
-    pxRect(ctx, x, GROUND_Y - h, w, 3, rgba(Theme.platformGlow, 0.25));
-    // window slits
-    for (let k = 0; k < 3; k++) {
-      pxRect(ctx, x + w / 2 - 2, GROUND_Y - h + 18 + k * 22, 4, 8, rgba(Theme.platformGlow, 0.18 + 0.12 * Math.sin(t * 1.5 + i + k)));
-    }
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 3; i++) {
+    const x = ((i * 173 + roomIndex * 61) % VIEW_W);
+    const sway = Math.sin(t * 0.35 + i * 2) * 12;
+    const w = 26 + i * 10;
+    const sg = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+    sg.addColorStop(0, rgba(Theme.platformGlow, 0.05));
+    sg.addColorStop(1, rgba(Theme.platformGlow, 0));
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    ctx.moveTo(x - w / 3 + sway, 0);
+    ctx.lineTo(x + w / 3 + sway, 0);
+    ctx.lineTo(x + w + sway * 1.6, GROUND_Y);
+    ctx.lineTo(x - w + sway * 1.6, GROUND_Y);
+    ctx.closePath();
+    ctx.fill();
   }
   ctx.restore();
 
-  // nearer haze band
-  ctx.fillStyle = rgba(Theme.bgNear, 0.55);
-  ctx.fillRect(0, GROUND_Y - 46, VIEW_W, 46);
-
-  // floating motes
-  for (const m of motes) {
-    const a = 0.25 + 0.35 * Math.sin(t * 2 + m.p);
-    pxRect(ctx, m.x, m.y, m.s, m.s, rgba(Theme.platformGlow, a));
+  // --- parallax skyline
+  if (towerRoom !== roomIndex) buildTowers(roomIndex);
+  for (let l = 0; l < TOWER_LAYERS.length; l++) {
+    const L = TOWER_LAYERS[l];
+    ctx.save();
+    ctx.globalAlpha = L.alpha;
+    for (const tw of towers) {
+      if (tw.layer !== l) continue;
+      const x = Math.round(tw.x + Math.sin(t * 0.05 + tw.seed) * 2 * L.par);
+      const top = Math.round(GROUND_Y - tw.h);
+      const body = mixHex(mixHex(Theme.fog, Theme.bgFar, 0.45), Theme.bgNear, 1 - L.tint);
+      pxRect(ctx, x, top, tw.w, tw.h, body);
+      // lit cap and a rim on the light side
+      pxRect(ctx, x, top, tw.w, 2, rgba(Theme.platformGlow, 0.10 + L.lit * 0.20));
+      pxRect(ctx, x, top, 1, tw.h, rgba(Theme.platformGlow, 0.06 + L.lit * 0.10));
+      // windows
+      for (let k = 0; k < tw.windows; k++) {
+        const wy = top + 14 + k * 26;
+        if (wy > GROUND_Y - 14) break;
+        const flick = 0.10 + L.lit * 0.35 * (0.6 + 0.4 * Math.sin(t * (1 + k * 0.4) + tw.seed * 3));
+        pxRect(ctx, x + 4, wy, 3, 6, rgba(Theme.platformGlow, flick));
+        if (tw.w > 30) pxRect(ctx, x + tw.w - 8, wy + 6, 3, 6, rgba(Theme.uiAccent, flick * 0.6));
+      }
+    }
+    ctx.restore();
   }
+
+  // --- fog banks
+  ctx.save();
+  for (const f of fog) {
+    const fg = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.r);
+    fg.addColorStop(0, rgba(Theme.fog, f.a));
+    fg.addColorStop(1, rgba(Theme.fog, 0));
+    ctx.fillStyle = fg;
+    ctx.beginPath();
+    ctx.arc(f.x, f.y, f.r, 0, TAU);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // near haze band just above the floor
+  ctx.fillStyle = linGrad(ctx, 'haze', 0, GROUND_Y - 52, 0, GROUND_Y, [
+    [0, rgba(Theme.bgNear, 0)], [1, rgba(Theme.bgNear, 0.5)],
+  ]);
+  ctx.fillRect(0, GROUND_Y - 52, VIEW_W, 52);
+
+  // --- ambient motes, brighter the closer they are
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const m of motes) {
+    const a = (0.16 + 0.34 * Math.sin(t * 2 + m.p)) * m.depth;
+    pxRect(ctx, m.x, m.y, m.s, m.s, rgba(m.warm ? Theme.uiAccent : Theme.platformGlow, a));
+  }
+  ctx.restore();
 }
 
 export function drawArena(ctx, t) {
-  // ground
-  pxRect(ctx, 0, GROUND_Y, VIEW_W, VIEW_H - GROUND_Y, Theme.ground);
-  pxRect(ctx, 0, GROUND_Y, VIEW_W, 3, Theme.groundTop);
-  // glowing rune line along the floor
+  // --- floor
+  ctx.fillStyle = linGrad(ctx, 'floor', 0, GROUND_Y, 0, VIEW_H, [
+    [0, Theme.ground], [1, mixHex(Theme.ground, '#000000', 0.45)],
+  ]);
+  ctx.fillRect(0, GROUND_Y, VIEW_W, VIEW_H - GROUND_Y);
+  pxRect(ctx, 0, GROUND_Y, VIEW_W, 1, Theme.groundTop);
+  pxRect(ctx, 0, GROUND_Y + 1, VIEW_W, 2, mixHex(Theme.groundTop, Theme.ground, 0.5));
+
+  // wet sheen: a soft reflection of the light above the floor line
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = linGrad(ctx, 'sheen', 0, GROUND_Y, 0, GROUND_Y + 16, [
+    [0, rgba(Theme.groundEdge, 0.16)], [1, rgba(Theme.groundEdge, 0)],
+  ]);
+  ctx.fillRect(0, GROUND_Y, VIEW_W, 16);
+  ctx.restore();
+
+  // glow line and travelling runes along the floor
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = rgba(Theme.groundEdge, 0.14);
+  ctx.fillRect(0, GROUND_Y - 5, VIEW_W, 5);
+  ctx.restore();
   for (let x = 6; x < VIEW_W; x += BLOCK) {
-    const a = 0.25 + 0.35 * Math.sin(t * 2 + x * 0.07);
+    const a = 0.2 + 0.4 * Math.sin(t * 2 + x * 0.07);
     pxRect(ctx, x, GROUND_Y + 5, 4, 1, rgba(Theme.groundEdge, a));
   }
-  // floor bricks
-  for (let x = 0; x < VIEW_W; x += 16) {
-    pxRect(ctx, x, GROUND_Y + 3, 1, VIEW_H - GROUND_Y - 3, rgba('#000000', 0.25));
+  // brick seams, offset per row
+  for (let row = 0; row < 3; row++) {
+    const y = GROUND_Y + 3 + row * 11;
+    if (y > VIEW_H) break;
+    pxRect(ctx, 0, y, VIEW_W, 1, rgba('#000000', 0.22));
+    for (let x = row % 2 ? 0 : 8; x < VIEW_W; x += 16) {
+      pxRect(ctx, x, y, 1, 11, rgba('#000000', 0.26));
+      pxRect(ctx, x + 1, y + 1, 1, 9, rgba(Theme.groundTop, 0.05));
+    }
   }
-  ctx.fillStyle = rgba(Theme.groundEdge, 0.12);
-  ctx.fillRect(0, GROUND_Y - 6, VIEW_W, 6);
 
-  // platforms
+  // --- platforms
   for (const p of PLATFORMS) {
-    pxRect(ctx, p.x, p.y, p.w, p.h, Theme.platform);
-    pxRect(ctx, p.x, p.y, p.w, 2, Theme.platformTop);
+    // light pooling on the ground beneath each platform
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const pool = ctx.createRadialGradient(p.x + p.w / 2, p.y + p.h + 6, 0, p.x + p.w / 2, p.y + p.h + 6, p.w * 0.6);
+    pool.addColorStop(0, rgba(Theme.platformGlow, 0.10));
+    pool.addColorStop(1, rgba(Theme.platformGlow, 0));
+    ctx.fillStyle = pool;
+    ctx.fillRect(p.x - 20, p.y, p.w + 40, 40);
+    ctx.restore();
+
+    ctx.fillStyle = linGrad(ctx, 'plat' + p.y, 0, p.y, 0, p.y + p.h, [
+      [0, Theme.platformTop], [0.3, Theme.platform], [1, mixHex(Theme.platform, '#000000', 0.4)],
+    ]);
+    ctx.fillRect(Math.round(p.x), Math.round(p.y), Math.round(p.w), Math.round(p.h));
+    pxRect(ctx, p.x, p.y, p.w, 1, mixHex(Theme.platformTop, Theme.platformGlow, 0.45));   // rim light
     const a = 0.35 + 0.3 * Math.sin(t * 2.4 + p.x * 0.05);
     pxRect(ctx, p.x, p.y + p.h, p.w, 1, rgba(Theme.platformGlow, a));
+
     if (p.drift) {
-      // no struts - it floats, with thrusters underneath
       const pulse = 0.35 + 0.25 * Math.sin(t * 8 + p.x * 0.1);
       for (const ox of [10, p.w / 2, p.w - 10]) {
         pxRect(ctx, p.x + ox - 1, p.y + p.h, 2, 3, rgba(Theme.platformGlow, pulse));
-        glowDot(ctx, p.x + ox, p.y + p.h + 3, 7, Theme.platformGlow, pulse * 0.5);
+        glowDot(ctx, p.x + ox, p.y + p.h + 3, 8, Theme.platformGlow, pulse * 0.55);
       }
-      // direction chevrons on the deck
       const dir = p.drift.dir;
       for (let i = 0; i < 3; i++) {
         const cx2 = p.x + p.w / 2 + (i - 1) * 8 + Math.sin(t * 3 + i) * 1;
@@ -117,13 +259,12 @@ export function drawArena(ctx, t) {
         pxRect(ctx, cx2 + dir * 2, p.y + 4, 2, 2, rgba(Theme.groundEdge, 0.3));
       }
     } else {
-      // support struts
       pxRect(ctx, p.x + 4, p.y + p.h, 2, 5, rgba(Theme.platform, 0.7));
       pxRect(ctx, p.x + p.w - 6, p.y + p.h, 2, 5, rgba(Theme.platform, 0.7));
     }
-    // block seams (4-block center platform reads clearly)
     for (let x = p.x + BLOCK; x < p.x + p.w; x += BLOCK) {
       pxRect(ctx, x, p.y, 1, p.h, rgba('#000000', 0.28));
+      pxRect(ctx, x + 1, p.y + 1, 1, p.h - 2, rgba(Theme.platformTop, 0.12));
     }
   }
 }

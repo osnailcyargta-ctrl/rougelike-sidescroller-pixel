@@ -82,6 +82,13 @@ void main() {
   col *= scan;
   col *= 1.0 - uVignette * r2 * 1.15;
 
+  // a whisper of grain so flat gradients do not band
+  float grain = fract(sin(dot(uv * uResolution + uTime, vec2(12.9898, 78.233))) * 43758.5453);
+  col += (grain - 0.5) * 0.018;
+
+  // roll off only the highlights, so the darks stay deep
+  col = mix(col, col / (col + vec3(0.75)) * 1.32, smoothstep(0.55, 1.15, max(col.r, max(col.g, col.b))));
+
   gl_FragColor = vec4(col, 1.0);
 }`;
 
@@ -229,8 +236,8 @@ export class PostFX {
     gl.uniform1f(this.uni(this.pBright, 'uThreshold'), Theme.bloomThreshold);
     this.drawQuad(this.pBright);
 
-    // blur A -> B -> A (two ping-pong iterations)
-    for (let i = 0; i < 2; i++) {
+    // blur A -> B -> A (three widening ping-pong iterations for a softer halo)
+    for (let i = 0; i < 3; i++) {
       this.blurPass(this.rtA, this.rtB, 1 / this.rtA.w * (1 + i), 0);
       this.blurPass(this.rtB, this.rtA, 0, 1 / this.rtA.h * (1 + i));
     }

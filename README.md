@@ -5,6 +5,12 @@ build step, no dependencies, no asset downloads. Every sprite, particle and
 glyph is drawn procedurally at a 480x270 internal resolution and pushed through
 a WebGL bloom pipeline, so the art stays crisp at any window size.
 
+The presentation leans on motion rather than frame counts: characters squash and
+stretch, cloth hangs off verlet chains, the blade leaves a tapered ribbon, hits
+throw expanding rings and streak sparks, the camera punches inward on impact,
+and the backdrop is a three-layer parallax skyline with light shafts, fog banks
+and drifting embers.
+
 ![Main menu](docs/screenshot-menu.png)
 ![Gameplay](docs/screenshot-play.png)
 
