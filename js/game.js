@@ -212,6 +212,7 @@ export class Game {
     this.waveCooldown = null;
     if (this.isBossRoom() && n === WAVES.bossRoomWaves) {
       this.pendingSpawns = [];
+      this.player.healPct(1);      // full HP going into the boss
       this.boss = makeBoss(this, this.roomIndex);
       Camera.add(10);
     } else {

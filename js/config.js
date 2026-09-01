@@ -34,6 +34,7 @@ export const PLAYER = {
   slamDamage: 25,
   slamRadius: 46,
   invulnTime: 0.8,
+  regenPerSecond: 1,        // natural regeneration
   dropTime: 0.22,
   punchDamage: 3,
 };

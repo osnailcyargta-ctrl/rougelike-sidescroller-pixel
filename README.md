@@ -56,8 +56,9 @@ step up **once every two rooms**: +18% max HP and +12% damage per step, so a
 Ghoul is 80 HP / 12 damage until room 5, 94 / 13 in rooms 6–7, and 123 / 17 by
 rooms 10–11.
 
-Clearing a wave restores **25% of max HP**, and stepping through the gate into
-the next room restores you to **full HP**.
+You regenerate **1 HP per second** at all times. Clearing a wave restores **25%
+of max HP**, stepping through the gate into the next room restores you to
+**full HP**, and the boss wave in a boss room also starts you at full.
 
 Nothing is announced. There are no banners, no wave-clear notifications and no
 "press X to..." prompts — you find out what happened by watching the screen.

@@ -941,6 +941,7 @@ export class Player {
     }
 
     this.recomputeStats();
+    if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + PLAYER.regenPerSecond * dt);
     this.updateReload(dt);
     this.updatePerks(dt);
 
