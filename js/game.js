@@ -13,7 +13,7 @@ import { Player, Enemy, Projectile } from './entities.js';
 import { makeBoss } from './boss.js';
 import { drawBackground, drawArena, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal } from './world.js';
 import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
-import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, panel, button } from './ui.js';
+import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, panel, button } from './ui.js';
 import { drawText, drawTextShadow } from './font.js';
 import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, drawControls } from './screens.js';
 
@@ -57,6 +57,8 @@ export class Game {
     this.waveTimer = 0;
     this.kills = 0;
     this.invOpen = false;
+    this.debugOpen = false;
+    this.debug = { god: false, infHealth: false };
     this.hint = null;
     this.hintT = 0;
 
@@ -287,8 +289,13 @@ export class Game {
     // One bad frame must never end the run: log it and keep the loop alive.
     try {
       this.handleGlobalKeys();
-      if (this.screen === 'playing' || this.screen === 'gameover') this.update(gdt);
-      else updateWorld(dt);
+      if (this.debugOpen) {
+        updateWorld(dt);
+      } else if (this.screen === 'playing' || this.screen === 'gameover') {
+        this.update(gdt);
+      } else {
+        updateWorld(dt);
+      }
 
       updateFx(this.screen === 'playing' || this.screen === 'gameover' ? gdt : dt);
       Camera.update(this.screenShake ? dt : 0);
@@ -307,7 +314,12 @@ export class Game {
   }
 
   handleGlobalKeys() {
+    if (Input.pressed.has('ctrl+m')) {
+      this.debugOpen = !this.debugOpen;
+      Sfx.ui();
+    }
     if (!Input.pressed.has('Escape')) return;
+    if (this.debugOpen) { this.debugOpen = false; return; }
     if (this.screen === 'playing') {
       if (this.invOpen) this.invOpen = false;
       else this.screen = 'paused';
@@ -321,6 +333,7 @@ export class Game {
 
   update(dt) {
     updateWorld(dt);
+    this.carryRiders();
     if (this.screen === 'gameover') this.deathT += dt;
 
     const p = this.player;
@@ -393,6 +406,15 @@ export class Game {
     for (let i = this.bolts.length - 1; i >= 0; i--) {
       this.bolts[i].t += dt;
       if (this.bolts[i].t > this.bolts[i].life) this.bolts.splice(i, 1);
+    }
+  }
+
+  // Anything standing on a drifting platform moves with it.
+  carryRiders() {
+    for (const e of [this.player, ...this.enemies]) {
+      if (!e || e.dead) continue;
+      const p = e.platform;
+      if (p && p.dx) e.x = clamp(e.x + p.dx, e.w / 2, VIEW_W - e.w / 2);
     }
   }
 
@@ -489,10 +511,10 @@ export class Game {
     ctx.fillStyle = Theme.bgFar;
     ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
-    if (this.screen === 'menu') { drawMainMenu(ctx, this, this.time); this.drawToast(ctx); return; }
-    if (this.screen === 'settings') { drawSettings(ctx, this, this.time); this.drawToast(ctx); return; }
-    if (this.screen === 'controls') { drawControls(ctx, this, this.time); this.drawToast(ctx); return; }
-    if (this.screen === 'classSelect') { drawClassSelect(ctx, this, this.time); this.drawToast(ctx); return; }
+    if (this.screen === 'menu') { drawMainMenu(ctx, this, this.time); if (this.debugOpen) drawDebugMenu(ctx, this); this.drawToast(ctx); return; }
+    if (this.screen === 'settings') { drawSettings(ctx, this, this.time); if (this.debugOpen) drawDebugMenu(ctx, this); this.drawToast(ctx); return; }
+    if (this.screen === 'controls') { drawControls(ctx, this, this.time); if (this.debugOpen) drawDebugMenu(ctx, this); this.drawToast(ctx); return; }
+    if (this.screen === 'classSelect') { drawClassSelect(ctx, this, this.time); if (this.debugOpen) drawDebugMenu(ctx, this); this.drawToast(ctx); return; }
 
     ctx.save();
     ctx.translate(Camera.ox, Camera.oy);
@@ -543,6 +565,7 @@ export class Game {
 
     if (this.screen === 'paused') drawPause(ctx, this, this.time);
     if (this.screen === 'gameover') drawGameOver(ctx, this, this.time);
+    if (this.debugOpen) drawDebugMenu(ctx, this);
     this.drawToast(ctx);
   }
 

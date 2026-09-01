@@ -18,6 +18,16 @@ for (let i = 0; i < 40; i++) {
 }
 
 export function updateWorld(dt) {
+  // drifting platforms: record dx so riders can be carried with them
+  for (const p of PLATFORMS) {
+    if (!p.drift) continue;
+    const d = p.drift;
+    const before = p.x;
+    p.x += d.speed * d.dir * dt;
+    if (p.x <= d.min) { p.x = d.min; d.dir = 1; }
+    if (p.x >= d.max) { p.x = d.max; d.dir = -1; }
+    p.dx = p.x - before;
+  }
   for (const m of motes) {
     m.x += m.vx * dt;
     m.y += m.vy * dt;
@@ -92,9 +102,25 @@ export function drawArena(ctx, t) {
     pxRect(ctx, p.x, p.y, p.w, 2, Theme.platformTop);
     const a = 0.35 + 0.3 * Math.sin(t * 2.4 + p.x * 0.05);
     pxRect(ctx, p.x, p.y + p.h, p.w, 1, rgba(Theme.platformGlow, a));
-    // support struts
-    pxRect(ctx, p.x + 4, p.y + p.h, 2, 5, rgba(Theme.platform, 0.7));
-    pxRect(ctx, p.x + p.w - 6, p.y + p.h, 2, 5, rgba(Theme.platform, 0.7));
+    if (p.drift) {
+      // no struts - it floats, with thrusters underneath
+      const pulse = 0.35 + 0.25 * Math.sin(t * 8 + p.x * 0.1);
+      for (const ox of [10, p.w / 2, p.w - 10]) {
+        pxRect(ctx, p.x + ox - 1, p.y + p.h, 2, 3, rgba(Theme.platformGlow, pulse));
+        glowDot(ctx, p.x + ox, p.y + p.h + 3, 7, Theme.platformGlow, pulse * 0.5);
+      }
+      // direction chevrons on the deck
+      const dir = p.drift.dir;
+      for (let i = 0; i < 3; i++) {
+        const cx2 = p.x + p.w / 2 + (i - 1) * 8 + Math.sin(t * 3 + i) * 1;
+        pxRect(ctx, cx2, p.y + 3, 2, 2, rgba(Theme.groundEdge, 0.5));
+        pxRect(ctx, cx2 + dir * 2, p.y + 4, 2, 2, rgba(Theme.groundEdge, 0.3));
+      }
+    } else {
+      // support struts
+      pxRect(ctx, p.x + 4, p.y + p.h, 2, 5, rgba(Theme.platform, 0.7));
+      pxRect(ctx, p.x + p.w - 6, p.y + p.h, 2, 5, rgba(Theme.platform, 0.7));
+    }
     // block seams (4-block center platform reads clearly)
     for (let x = p.x + BLOCK; x < p.x + p.w; x += BLOCK) {
       pxRect(ctx, x, p.y, 1, p.h, rgba('#000000', 0.28));

@@ -280,3 +280,75 @@ export function drawTooltip(ctx, tip) {
     drawText(ctx, lines[i], x + 6, y + 25 + i * 9, Theme.ui, 1);
   }
 }
+
+
+// --- debug menu (ctrl+m) -------------------------------------------------
+
+const DEBUG_ITEMS = [
+  'sword', 'bow', 'lifecrystal', 'fireyblade',
+  'lightningarrow', 'wetslime', 'bloodstone', 'aegis',
+];
+
+export function drawDebugMenu(ctx, game) {
+  ctx.fillStyle = rgba('#000000', 0.55);
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+  const w = 268, h = 152;
+  const x = Math.round((VIEW_W - w) / 2);
+  const y = Math.round((VIEW_H - h) / 2);
+  panel(ctx, x, y, w, h, { accent: '#8ce88c' });
+  drawTextShadow(ctx, 'DEBUG', x + w / 2, y + 7, '#8ce88c', 2, 'center');
+
+  const d = game.debug;
+  if (button(ctx, 'dbg-god', x + 12, y + 30, 116, 16, `GOD MODE: ${d.god ? 'ON' : 'OFF'}`, { selected: d.god })) {
+    d.god = !d.god;
+  }
+  if (button(ctx, 'dbg-inf', x + 140, y + 30, 116, 16, `INF HEALTH: ${d.infHealth ? 'ON' : 'OFF'}`, { selected: d.infHealth })) {
+    d.infHealth = !d.infHealth;
+  }
+
+  const live = !!game.player && game.screen !== 'menu' && game.screen !== 'classSelect';
+  drawText(ctx, 'SPAWN ITEM', x + 12, y + 54, live ? Theme.uiAccent : Theme.uiDim, 1);
+  if (!live) drawText(ctx, '(START A RUN FIRST)', x + 88, y + 54, Theme.uiDim, 1);
+
+  const cell = 26, gap = 4, cols = 8;
+  const gx = x + 12, gy = y + 66;
+  for (let i = 0; i < DEBUG_ITEMS.length; i++) {
+    const id = DEBUG_ITEMS[i];
+    const cx = gx + (i % cols) * (cell + gap);
+    const cy = gy + Math.floor(i / cols) * (cell + gap);
+    const hot = live && Input.mouse.x >= cx && Input.mouse.x < cx + cell &&
+      Input.mouse.y >= cy && Input.mouse.y < cy + cell;
+    ctx.fillStyle = rgba('#000000', hot ? 0.25 : 0.5);
+    ctx.fillRect(cx, cy, cell, cell);
+    ctx.strokeStyle = hot ? Theme.uiAccent : rgba(Theme.uiDim, live ? 0.8 : 0.35);
+    ctx.strokeRect(cx + 0.5, cy + 0.5, cell - 1, cell - 1);
+    ctx.save();
+    if (!live) ctx.globalAlpha = 0.35;
+    drawItemIcon(ctx, id, cx + (cell - 14) / 2, cy + (cell - 14) / 2, 14, UI.t);
+    ctx.restore();
+    if (hot) {
+      // parked under the panel so it never covers the buttons
+      UI.tooltip = { id, x: VIEW_W / 2, y: y + h + 4, below: true };
+      if (Input.mouseDown.left) {
+        game.player.inventory.add(id, 1);
+        game.player.recomputeStats();
+        Sfx.pickup();
+      }
+    }
+  }
+
+  drawText(ctx, 'CLICK AN ICON TO ADD ONE', x + 12, y + 102, Theme.uiDim, 1);
+  if (live && button(ctx, 'dbg-heal', x + 12, y + 116, 78, 16, 'FULL HEAL')) {
+    game.player.hp = game.player.maxHp;
+    game.player.shield = game.player.shieldMax;
+  }
+  if (live && button(ctx, 'dbg-kill', x + 96, y + 116, 78, 16, 'KILL WAVE')) {
+    game.pendingSpawns.length = 0;
+    for (const e of [...game.enemies]) if (!e.dead) e.kill();
+  }
+  if (button(ctx, 'dbg-close', x + w - 84, y + 116, 72, 16, 'CLOSE')) game.debugOpen = false;
+
+  drawTextShadow(ctx, 'CTRL+M', x + w - 8, y + 7, Theme.uiDim, 1, 'right');
+  if (UI.tooltip) drawTooltip(ctx, UI.tooltip);
+}

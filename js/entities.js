@@ -857,6 +857,7 @@ export class Player {
 
   hurt(amount, fromX) {
     if (this.dead || this.invuln > 0 || this.dashT > 0) return;
+    if (this.game.debug?.god) return;
     this.shieldRegenT = PERK.aegisRegenDelay;
     if (this.shield > 0) {
       const soaked = Math.min(this.shield, amount);
@@ -941,7 +942,12 @@ export class Player {
     }
 
     this.recomputeStats();
-    if (this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + PLAYER.regenPerSecond * dt);
+    if (this.game.debug?.infHealth) {
+      this.hp = this.maxHp;
+      this.shield = this.shieldMax;
+    } else if (this.hp < this.maxHp) {
+      this.hp = Math.min(this.maxHp, this.hp + PLAYER.regenPerSecond * dt);
+    }
     this.updateReload(dt);
     this.updatePerks(dt);
 

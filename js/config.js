@@ -7,11 +7,16 @@ export const GRAVITY = 950;
 
 export const GROUND_Y = 236;              // top surface of the floor
 
-// One-way platforms: { x, y, w, h }
+// One-way platforms: { x, y, w, h }. The 'drift' one slides along X and
+// carries whatever is standing on it; dx is filled in each frame.
 export const PLATFORMS = [
   { x: 40, y: 170, w: 96, h: 8, tag: 'left' },
   { x: VIEW_W - 136, y: 170, w: 96, h: 8, tag: 'right' },
   { x: VIEW_W / 2 - 32, y: 206, w: 64, h: 8, tag: 'center' },  // 4 blocks
+  {
+    x: VIEW_W / 2 - 32, y: 100, w: 64, h: 8, tag: 'drift', dx: 0,
+    drift: { min: 96, max: VIEW_W - 160, speed: 42, dir: 1 },
+  },
 ];
 
 export const SPAWN_LEFT = { x: 88, y: 170 };
@@ -91,11 +96,11 @@ export const ENEMY_TYPES = {
   },
   // Boss parts live in the normal enemy list so every existing hit test works.
   golemBody: {
-    id: 'golemBody', name: 'Aether Golem', hp: 600, speed: 0, damage: 18, w: 34, h: 44,
-    attackCooldown: 1, attackRange: 24, boss: true,
+    id: 'golemBody', name: 'Aether Golem', hp: 600, speed: 0, damage: 18, w: 48, h: 60,
+    attackCooldown: 1, attackRange: 30, boss: true,
   },
   golemHead: {
-    id: 'golemHead', name: 'Golem Head', hp: 600, speed: 88, damage: 16, w: 24, h: 20,
+    id: 'golemHead', name: 'Golem Head', hp: 600, speed: 88, damage: 16, w: 32, h: 27,
     attackCooldown: 1, attackRange: 240, flying: true, boss: true,
   },
 };
@@ -105,14 +110,14 @@ export const BOSS_TYPES = {
   golem: {
     id: 'golem', name: 'Aether Golem', kind: 'lasers',
     hp: 600, phase2Hp: 280,
-    bodyW: 34, bodyH: 44, headW: 24, headH: 20,
+    bodyW: 48, bodyH: 60, headW: 32, headH: 27,
     contactDamage: 18,
     smallLaser: { count: 4, interval: 0.2, speed: 250, damage: 12, windUp: 0.45 },
     bigLaser: { duration: 2.0, shortDuration: 1.0, lag: 0.3, damage: 22, width: 5, windUp: 0.6 },
-    slam: { jumpVel: 470, fallAccel: 2200, damage: 26, radius: 76, windUp: 0.4 },
+    slam: { jumpVel: 470, fallAccel: 2200, damage: 26, radius: 92, windUp: 0.4 },
     dash: { speed: 290, time: 0.55, damage: 24, windUp: 0.45 },
     headSpeed: 88, headHover: 74,
-    recovery: 0.75,
+    attackDelay: 3.0,   // pause between one attack ending and the next starting
   },
 };
 

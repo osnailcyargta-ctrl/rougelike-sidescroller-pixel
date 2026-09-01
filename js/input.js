@@ -32,6 +32,12 @@ export function initInput(view) {
     if (['Tab', ' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault();
     // e.repeat is the browser's auto-repeat flag; the keys.has check is the
     // backstop for platforms where it is not set reliably.
+    // hidden debug chord
+    if (e.ctrlKey && k === 'm') {
+      e.preventDefault();
+      if (!e.repeat) Input.pressed.add('ctrl+m');
+      return;
+    }
     if (e.repeat || Input.keys.has(k)) return;
     Input.keys.add(k);
     Input.pressed.add(k);

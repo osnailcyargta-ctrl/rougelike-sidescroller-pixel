@@ -39,7 +39,15 @@ The repository root *is* the site. In **Settings → Pages**, choose
 | `R` | Reload the bow |
 | `Esc` | Pause |
 
+There is one shortcut the game never mentions: **`Ctrl+M`** opens a debug menu
+with god mode, infinite health, an item spawner, full heal and kill-wave. It is
+deliberately absent from the in-game Controls screen.
+
 ## Run structure
+
+The arena has three static one-way platforms (left, right, and the raised
+4-block platform at the bottom centre) plus a **drifting platform high in the
+centre** that slides left and right and carries whatever is standing on it.
 
 Each **room** runs **two waves**. The opening is a soft on-ramp — room 1 sends
 one enemy then two, room 2 sends two then three — and from room 3 the normal
@@ -74,6 +82,9 @@ arena. When it dies, **two perks** appear on the centre platform and you may
 take **one** — the moment you claim one the other greys out for good.
 
 **Aether Golem** (600 HP, +40% per boss room). Two phases sharing one pool:
+
+It is a large target — a 48x60 body with a 32x27 head — and it waits **3
+seconds between attacks**, so its openings are readable.
 
 * *Phase 1* — head fused to the body. Loops: four small lasers 0.2s apart → one
   heavy beam that tracks your position with a 0.3s delay for 2s → a high jump

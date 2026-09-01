@@ -126,7 +126,7 @@ export class GolemBoss {
     this.game.enemies.push(this.head);
     this.step = 0;
     this.bodyState = 'idle';
-    this.bodyT = 0.8;
+    this.bodyT = this.def.attackDelay;
   }
 
   die() {
@@ -379,7 +379,7 @@ export class GolemBoss {
 
     switch (this.state) {
       case 'wait':
-        if (this.stateT > this.def.recovery) this.beginStep(this.step % 3);
+        if (this.stateT > this.def.attackDelay) this.beginStep(this.step % 3);
         break;
       case 'small':
         this.shotT -= dt * slow;
@@ -432,7 +432,7 @@ export class GolemBoss {
     // --- head script: small x4 -> turn -> long beam -> short beam (+ body)
     switch (this.state) {
       case 'wait':
-        if (this.stateT > this.def.recovery * 0.8) this.beginHeadStep(this.step % 4);
+        if (this.stateT > this.def.attackDelay) this.beginHeadStep(this.step % 4);
         break;
       case 'small':
         this.shotT -= dt * slow;
@@ -457,8 +457,9 @@ export class GolemBoss {
     if (this.bodyT <= 0 && !this.slamming && this.dashT <= 0) {
       const pick = this.syncDash ? 'dash' : choice(['slamHigh', 'slam', 'dash']);
       this.syncDash = false;
-      if (pick === 'dash') { this.startDash(); this.bodyT = 1.5; }
-      else { this.startSlam(pick === 'slamHigh'); this.bodyT = pick === 'slamHigh' ? 2.0 : 1.4; }
+      const delay = this.def.attackDelay;
+      if (pick === 'dash') { this.startDash(); this.bodyT = delay; }
+      else { this.startSlam(pick === 'slamHigh'); this.bodyT = delay; }
     }
   }
 
@@ -513,50 +514,54 @@ export class GolemBoss {
     const core = 0.5 + 0.5 * Math.sin(t * 4);
 
     // legs
-    const stance = this.slamming ? 5 : 0;
-    limb(ctx, x - 9, y - 14 + stance, Math.PI / 2 - 0.12, 15 - stance, 9, C('#3a3358'));
-    limb(ctx, x + 9, y - 14 + stance, Math.PI / 2 + 0.12, 15 - stance, 9, C('#3a3358'));
-    pxRect(ctx, x - 14, y - 3, 10, 3, C('#2a2444'));
-    pxRect(ctx, x + 4, y - 3, 10, 3, C('#2a2444'));
+    const stance = this.slamming ? 7 : 0;
+    limb(ctx, x - 12, y - 20 + stance, Math.PI / 2 - 0.12, 21 - stance, 12, C('#3a3358'));
+    limb(ctx, x + 12, y - 20 + stance, Math.PI / 2 + 0.12, 21 - stance, 12, C('#3a3358'));
+    pxRect(ctx, x - 19, y - 4, 13, 4, C('#2a2444'));
+    pxRect(ctx, x + 6, y - 4, 13, 4, C('#2a2444'));
 
     // torso slab
-    pxRect(ctx, x - w / 2, y - h + 8, w, h - 22, C('#4a3f78'));
-    pxRect(ctx, x - w / 2, y - h + 8, w, 4, C('#6a5aa8'));
-    pxRect(ctx, x - w / 2 + 3, y - h + 14, w - 6, 3, C('#2a2444'));
+    pxRect(ctx, x - w / 2, y - h + 10, w, h - 30, C('#4a3f78'));
+    pxRect(ctx, x - w / 2, y - h + 10, w, 5, C('#6a5aa8'));
+    pxRect(ctx, x - w / 2 + 4, y - h + 19, w - 8, 4, C('#2a2444'));
     // shoulders
-    pxRect(ctx, x - w / 2 - 5, y - h + 10, 6, 12, C('#3a3358'));
-    pxRect(ctx, x + w / 2 - 1, y - h + 10, 6, 12, C('#3a3358'));
+    pxRect(ctx, x - w / 2 - 7, y - h + 13, 8, 17, C('#3a3358'));
+    pxRect(ctx, x + w / 2 - 1, y - h + 13, 8, 17, C('#3a3358'));
     // arms
     const swing = Math.sin(t * 2) * 0.14 + (this.dashT > 0 ? 0.7 : 0);
-    limb(ctx, x - w / 2 - 2, y - h + 18, Math.PI / 2 + swing, 17, 7, C('#4a3f78'));
-    limb(ctx, x + w / 2 + 2, y - h + 18, Math.PI / 2 - swing, 17, 7, C('#4a3f78'));
+    limb(ctx, x - w / 2 - 3, y - h + 24, Math.PI / 2 + swing, 24, 10, C('#4a3f78'));
+    limb(ctx, x + w / 2 + 3, y - h + 24, Math.PI / 2 - swing, 24, 10, C('#4a3f78'));
+    // fists
+    const fy = y - h + 24 + Math.cos(swing) * 24;
+    pxRect(ctx, x - w / 2 - 8, fy - 5, 11, 10, C('#2a2444'));
+    pxRect(ctx, x + w / 2 - 2, fy - 5, 11, 10, C('#2a2444'));
 
     // core
-    const cy = y - h + 20;
-    glowDot(ctx, x, cy, 10 + core * 5, Theme.lightning, 0.35 + core * 0.25);
-    pxRect(ctx, x - 4, cy - 4, 8, 8, C(Theme.lightning));
-    pxRect(ctx, x - 2, cy - 2, 4, 4, '#ffffff');
+    const cy = y - h + 28;
+    glowDot(ctx, x, cy, 14 + core * 7, Theme.lightning, 0.35 + core * 0.25);
+    pxRect(ctx, x - 6, cy - 6, 12, 12, C(Theme.lightning));
+    pxRect(ctx, x - 3, cy - 3, 6, 6, '#ffffff');
 
     if (this.phase === 1) {
       // head fused to the shoulders
-      const hy = y - h - 4;
-      pxRect(ctx, x - 12, hy, 24, 16, C('#54487f'));
-      pxRect(ctx, x - 12, hy, 24, 4, C('#7a68bd'));
-      pxRect(ctx, x - 8, hy + 6, 16, 5, C('#1d1836'));
+      const hy = y - h - 6;
+      pxRect(ctx, x - 16, hy, 32, 21, C('#54487f'));
+      pxRect(ctx, x - 16, hy, 32, 5, C('#7a68bd'));
+      pxRect(ctx, x - 11, hy + 8, 22, 7, C('#1d1836'));
       const eye = charging ? 1 : 0.45 + 0.3 * Math.sin(t * 5);
-      pxRect(ctx, x - 7, hy + 7, 5, 3, rgba(charging ? Theme.hp : Theme.lightning, eye));
-      pxRect(ctx, x + 2, hy + 7, 5, 3, rgba(charging ? Theme.hp : Theme.lightning, eye));
-      glowDot(ctx, x, hy + 8, charging ? 18 : 10, charging ? Theme.hp : Theme.lightning, 0.3 * eye + 0.15);
+      pxRect(ctx, x - 9, hy + 9, 7, 4, rgba(charging ? Theme.hp : Theme.lightning, eye));
+      pxRect(ctx, x + 3, hy + 9, 7, 4, rgba(charging ? Theme.hp : Theme.lightning, eye));
+      glowDot(ctx, x, hy + 10, charging ? 24 : 13, charging ? Theme.hp : Theme.lightning, 0.3 * eye + 0.15);
       // crown horns
-      pxRect(ctx, x - 14, hy - 5, 4, 7, C('#3a3358'));
-      pxRect(ctx, x + 10, hy - 5, 4, 7, C('#3a3358'));
+      pxRect(ctx, x - 19, hy - 7, 5, 10, C('#3a3358'));
+      pxRect(ctx, x + 14, hy - 7, 5, 10, C('#3a3358'));
     } else {
       // open neck socket, arcing where the head used to sit
-      const ny = y - h + 4;
-      pxRect(ctx, x - 10, ny, 20, 6, C('#2a2444'));
-      pxRect(ctx, x - 7, ny - 2, 14, 3, C('#1d1836'));
-      glowDot(ctx, x, ny, 14, Theme.lightning, 0.35 + core * 0.2);
-      const pts = boltPath(x - 8, ny, x + 8, ny - 4, 4, 5, this.game.time * 20);
+      const ny = y - h + 5;
+      pxRect(ctx, x - 13, ny, 26, 8, C('#2a2444'));
+      pxRect(ctx, x - 9, ny - 3, 18, 4, C('#1d1836'));
+      glowDot(ctx, x, ny, 18, Theme.lightning, 0.35 + core * 0.2);
+      const pts = boltPath(x - 11, ny, x + 11, ny - 5, 5, 5, this.game.time * 20);
       strokeBolt(ctx, pts, Theme.lightning, 1, 0.7);
     }
   }
@@ -576,21 +581,21 @@ export class GolemBoss {
     ctx.strokeStyle = rgba(Theme.lightning, 0.25 + 0.2 * Math.sin(t * 5));
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.ellipse(x, y + 14, 16, 4, 0, 0, TAU);
+    ctx.ellipse(x, y + 19, 21, 5, 0, 0, TAU);
     ctx.stroke();
     ctx.restore();
 
-    pxRect(ctx, x - 12, y - 10, 24, 16, C('#54487f'));
-    pxRect(ctx, x - 12, y - 10, 24, 4, C('#7a68bd'));
-    pxRect(ctx, x - 8, y - 4, 16, 5, C('#1d1836'));
+    pxRect(ctx, x - 16, y - 13, 32, 21, C('#54487f'));
+    pxRect(ctx, x - 16, y - 13, 32, 5, C('#7a68bd'));
+    pxRect(ctx, x - 11, y - 5, 22, 7, C('#1d1836'));
     const eye = charging ? 1 : 0.5 + 0.3 * Math.sin(t * 6);
-    pxRect(ctx, x - 7, y - 3, 5, 3, rgba(eyeCol, eye));
-    pxRect(ctx, x + 2, y - 3, 5, 3, rgba(eyeCol, eye));
-    pxRect(ctx, x - 14, y - 15, 4, 7, C('#3a3358'));
-    pxRect(ctx, x + 10, y - 15, 4, 7, C('#3a3358'));
+    pxRect(ctx, x - 9, y - 4, 7, 4, rgba(eyeCol, eye));
+    pxRect(ctx, x + 3, y - 4, 7, 4, rgba(eyeCol, eye));
+    pxRect(ctx, x - 19, y - 19, 5, 10, C('#3a3358'));
+    pxRect(ctx, x + 14, y - 19, 5, 10, C('#3a3358'));
     // jaw
-    pxRect(ctx, x - 9, y + 6, 18, 4, C('#3a3358'));
-    glowDot(ctx, x, y, charging ? 22 : 13, eyeCol, 0.3 + 0.25 * eye);
+    pxRect(ctx, x - 12, y + 8, 24, 5, C('#3a3358'));
+    glowDot(ctx, x, y, charging ? 28 : 17, eyeCol, 0.3 + 0.25 * eye);
   }
 }
 
