@@ -121,7 +121,7 @@ until their patterns exist, later boss rooms send a stronger golem.
 
 | Class | Weapon | Numbers |
 | --- | --- | --- |
-| Blade | Iron Sword | 3-block reach, 10 damage, 0.45s swing |
+| Melee | Iron Sword | 3-block reach, 10 damage, 0.45s swing |
 | Ranger | Hunter Bow | 10-block range, 5 damage, 10 ammo, 2s reload, 0.4s between shots |
 
 At the end of its 10 blocks an arrow does not blink out: it loses its drive with

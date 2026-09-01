@@ -157,7 +157,7 @@ export function drawClassSelect(ctx, game, t) {
 
   const cards = [
     {
-      id: 'melee', name: 'BLADE', item: 'sword', color: Theme.hp,
+      id: 'melee', name: 'MELEE', item: 'sword', color: Theme.hp,
       lines: ['IRON SWORD', '3 BLOCK REACH  -  10 DMG', '0.45S SWING'],
     },
     {
