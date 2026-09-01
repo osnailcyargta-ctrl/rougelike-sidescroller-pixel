@@ -3,7 +3,7 @@
 // test, status effect and perk works on them unchanged.
 import { clamp, lerp, rand, randInt, choice, dist, distToSegment, sign, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
-import { Camera, burst, floatText, spawnParticle, limb, pxRect, glowDot, boltPath, strokeBolt } from './gfx.js';
+import { Camera, burst, floatText, spawnParticle, impactRing, limb, pxRect, glowDot, boltPath, strokeBolt } from './gfx.js';
 import { Sfx } from './audio.js';
 import { VIEW_W, VIEW_H, GRAVITY, GROUND_Y, BOSS_TYPES, ROOM_SCALING, BOSS_ROOM_INTERVAL } from './config.js';
 import { Enemy, Projectile } from './entities.js';
@@ -85,6 +85,9 @@ export class GolemBoss {
     this.dashT = 0;
     this.slamming = false;
     this.headTargetX = VIEW_W / 2;
+    this.headAnchorX = VIEW_W / 2;
+    this.headDrift = rand(0, TAU);
+    this.detach = null;
     this.syncDash = false;
 
     this.body = new BossPart('golemBody', VIEW_W / 2, GROUND_Y, game, this);
@@ -121,9 +124,20 @@ export class GolemBoss {
       color: Theme.lightning, color2: '#ffffff', speedMin: 40, speedMax: 260,
       lifeMin: 0.3, lifeMax: 1.0, sizeMax: 3, gravity: 160,
     });
-    this.head = new BossPart('golemHead', o.x, o.y, this.game, this);
-    this.head.y = o.y;
+    this.head = new BossPart('golemHead', o.x, o.y + this.def.headH / 2, this.game, this);
+    this.head.tilt = 0;
     this.game.enemies.push(this.head);
+    // the head does not teleport to its perch: it wrenches loose, sags, then
+    // climbs while the socket sprays arcs behind it
+    this.detach = {
+      t: 0,
+      dur: 1.5,
+      fromX: o.x,
+      fromY: o.y + this.def.headH / 2,
+      toX: clamp(o.x + rand(-50, 50), 40, VIEW_W - 40),
+      toY: this.def.headHover,
+    };
+    this.headAnchorX = this.detach.toX;
     this.step = 0;
     this.bodyState = 'idle';
     this.bodyT = this.def.attackDelay;
@@ -236,6 +250,11 @@ export class GolemBoss {
   }
 
   drawBeams(ctx) {
+    if (this.detach && this.detach.tether) {
+      const t = this.detach.tether;
+      strokeBolt(ctx, t.pts, '#ffffff', 1.5, t.a);
+      strokeBolt(ctx, t.pts, Theme.lightning, 4, t.a * 0.5);
+    }
     for (const b of this.beams) {
       if (!Number.isFinite(b.ex) || !Number.isFinite(b.ey)) continue;
       const o = { x: b.ox ?? 0, y: b.oy ?? 0 };
@@ -367,7 +386,8 @@ export class GolemBoss {
       this.body.vx = lerp(this.body.vx, 0, 1 - Math.pow(0.002, dt));
     }
     this.updateBodyPhysics(dt);
-    if (this.head) this.updateHeadMotion(dt);
+    if (this.detach) this.updateDetach(dt);
+    else if (this.head) this.updateHeadMotion(dt);
   }
 
   // Phase 1: small burst -> tracking beam -> ground slam -> repeat.
@@ -425,7 +445,7 @@ export class GolemBoss {
     const slow = this.body.st.slowFactor;
     this.stateT += dt * slow;
     if (this.state === 'split') {
-      if (this.stateT > 1.0) { this.state = 'wait'; this.stateT = 0; this.step = 0; }
+      if (!this.detach) { this.state = 'wait'; this.stateT = 0; this.step = 0; }
       return;
     }
 
@@ -469,7 +489,7 @@ export class GolemBoss {
       this.state = 'small';
       this.shots = 0;
       this.shotT = this.def.smallLaser.windUp * 0.7;
-      this.headTargetX = rand(40, VIEW_W - 40);
+      this.headTargetX = rand(60, VIEW_W - 60);
     } else if (i === 1) {
       this.state = 'turn';
       this.headTargetX = this.game.player.x + (Math.random() < 0.5 ? -90 : 90);
@@ -484,15 +504,109 @@ export class GolemBoss {
     }
   }
 
+  // Wrench, sag, then rise. Nothing here snaps: every value is eased and the
+  // head keeps a little overshoot at the top before it settles into its hover.
+  updateDetach(dt) {
+    const d = this.detach;
+    const h = this.head;
+    d.t += dt;
+    const k = clamp(d.t / d.dur, 0, 1);
+
+    let x = d.fromX;
+    let y = d.fromY;
+    let tilt = 0;
+
+    if (k < 0.28) {
+      // straining: the head shudders in place and sinks a couple of pixels
+      const p = k / 0.28;
+      const shake = (1 - p) * 1.6;
+      x = d.fromX + Math.sin(d.t * 46) * shake;
+      y = d.fromY + p * 3;
+      tilt = Math.sin(d.t * 34) * 0.05 * (0.4 + p);
+      if (Math.random() < dt * 40) {
+        const a = rand(0, TAU);
+        spawnParticle({
+          x: d.fromX + Math.cos(a) * 14, y: d.fromY + Math.sin(a) * 10,
+          vx: -Math.cos(a) * 50, vy: -Math.sin(a) * 50, life: 0.3,
+          size: 1, color: Theme.lightning, gravity: 0, kind: 'shrink',
+        });
+      }
+    } else {
+      // tears free and climbs, easing out with a soft overshoot
+      const p = (k - 0.28) / 0.72;
+      const ease = 1 - Math.pow(1 - p, 3);
+      const overshoot = Math.sin(p * Math.PI) * 6;
+      x = lerp(d.fromX, d.toX, ease);
+      y = lerp(d.fromY + 3, d.toY, ease) - overshoot;
+      tilt = Math.sin(p * 7.5) * 0.30 * (1 - p);
+      if (p < 0.06 && !d.popped) {
+        d.popped = true;
+        Sfx.zap();
+        Camera.add(9);
+        Camera.punch(2.2);
+        this.game.hitstop(0.09);
+        burst(d.fromX, d.fromY, 34, {
+          color: Theme.lightning, color2: '#ffffff', kind: 'streak',
+          speedMin: 90, speedMax: 320, lifeMin: 0.15, lifeMax: 0.4, gravity: 0, drag: 0.86,
+        });
+        impactRing(d.fromX, d.fromY, { color: Theme.lightning, r0: 6, r1: 66, life: 0.45, width: 3 });
+        impactRing(d.fromX, d.fromY, { color: '#ffffff', r0: 3, r1: 34, life: 0.3, width: 2 });
+      }
+      if (Math.random() < dt * 55) {
+        spawnParticle({
+          x: x + rand(-10, 10), y: y + rand(-6, 8),
+          vx: rand(-20, 20), vy: rand(30, 90), life: rand(0.25, 0.55),
+          size: 1, color: Theme.lightning, gravity: 40, kind: 'shrink',
+        });
+      }
+    }
+
+    h.x = x;
+    h.y = y + h.h / 2;
+    h.tilt = tilt;
+    h.facing = sign(this.game.player.x - h.x) || h.facing;
+
+    // an arc still bridging head and socket while it pulls away
+    const o = { x: this.body.x, y: this.body.y - this.body.h + 5 };
+    const stretch = Math.hypot(h.x - o.x, (h.y - h.h / 2) - o.y);
+    d.tether = (stretch > 4 && k < 0.92)
+      ? { pts: boltPath(o.x, o.y, h.x, h.y - h.h / 2, 5 + stretch * 0.08, 8, this.game.time * 26), a: 0.55 * (1 - k) }
+      : null;
+
+    if (k >= 1) {
+      this.detach = null;
+      h.tilt = 0;
+      this.headDrift = rand(0, TAU);
+    }
+  }
+
   updateHeadMotion(dt) {
     const h = this.head;
     const slow = h.st.slowFactor;
-    // x-axis only; the hover height never changes
-    const target = clamp(this.headTargetX, 26, VIEW_W - 26);
-    h.vx = lerp(h.vx, clamp((target - h.x) * 2.2, -this.def.headSpeed, this.def.headSpeed) * slow, 1 - Math.pow(0.002, dt));
+    const p = this.game.player;
+    this.headDrift += dt * 0.9;
+
+    // The script only nudges the anchor; the head itself is always sliding,
+    // sweeping past its anchor and bobbing, so it never looks parked.
+    this.headAnchorX = lerp(this.headAnchorX, this.headTargetX, 1 - Math.pow(0.25, dt));
+    const sweep = Math.sin(this.headDrift) * 46 + Math.sin(this.headDrift * 0.47 + 1.3) * 22;
+    // a slow pull toward the player so it always feels like it is stalking you
+    const stalk = (p.x - this.headAnchorX) * 0.18;
+    const target = clamp(this.headAnchorX + sweep + stalk, 26, VIEW_W - 26);
+
+    h.vx = lerp(h.vx, clamp((target - h.x) * 2.4, -this.def.headSpeed, this.def.headSpeed) * slow, 1 - Math.pow(0.002, dt));
     h.x = clamp(h.x + h.vx * dt, h.w / 2, VIEW_W - h.w / 2);
-    h.y = this.def.headHover + Math.sin(this.game.time * 2) * 3;
-    h.facing = sign(this.game.player.x - h.x) || h.facing;
+
+    // vertical bob on two out-of-phase waves, plus a dip when it aims
+    const aiming = this.state === 'beam' || this.state === 'beamShort' || this.state === 'small';
+    const bob = Math.sin(this.game.time * 1.9) * 4 + Math.sin(this.game.time * 0.83 + 2.1) * 2.5;
+    const targetY = this.def.headHover + bob + (aiming ? 5 : 0);
+    h.y = lerp(h.y, targetY, 1 - Math.pow(0.02, dt));
+
+    // bank into the direction of travel
+    h.tilt = lerp(h.tilt ?? 0, clamp(-h.vx / this.def.headSpeed, -1, 1) * 0.16, 1 - Math.pow(0.02, dt));
+    h.facing = sign(p.x - h.x) || h.facing;
+
     if (Math.random() < dt * 20) {
       spawnParticle({
         x: h.x + rand(-10, 10), y: h.y + rand(-4, 6), vx: rand(-8, 8), vy: rand(6, 22),
@@ -575,6 +689,14 @@ export class GolemBoss {
     const charging = this.state === 'beam' || this.state === 'beamShort';
     const eyeCol = charging ? Theme.hp : Theme.lightning;
 
+    const tilt = part.tilt ?? 0;
+    ctx.save();
+    if (Math.abs(tilt) > 0.001) {
+      ctx.translate(x, y);
+      ctx.rotate(tilt);
+      ctx.translate(-x, -y);
+    }
+
     // levitation ring
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
@@ -595,6 +717,7 @@ export class GolemBoss {
     pxRect(ctx, x + 14, y - 19, 5, 10, C('#3a3358'));
     // jaw
     pxRect(ctx, x - 12, y + 8, 24, 5, C('#3a3358'));
+    ctx.restore();
     glowDot(ctx, x, y, charging ? 28 : 17, eyeCol, 0.3 + 0.25 * eye);
   }
 }

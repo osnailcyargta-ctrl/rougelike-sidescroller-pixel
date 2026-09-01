@@ -95,8 +95,11 @@ seconds between attacks**, so its openings are readable.
 * *Phase 1* — head fused to the body. Loops: four small lasers 0.2s apart → one
   heavy beam that tracks your position with a 0.3s delay for 2s → a high jump
   into a ground slam.
-* *Phase 2* (at 280 HP) — the head tears free and floats, moving on the X axis
-  only. Its script continues (four small lasers → turn → 2s beam → 1s beam)
+* *Phase 2* (at 280 HP) — the head tears free over a second and a half: it
+  strains and sinks in the socket, snaps loose in a burst of arcs, then climbs
+  with an eased overshoot while a bolt still tethers it to the body. From then
+  on it never parks — it sweeps, bobs and banks continuously, stalking you
+  between orders, and only moves on the X axis. Its script continues (four small lasers → turn → 2s beam → 1s beam)
   while the body improvises underneath with high slams, quick slams and dashes,
   and charges in alongside the head's short beam.
 

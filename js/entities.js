@@ -1131,6 +1131,10 @@ export class Player {
       const reach = 24;
       this.bladeTrail.push([this.x + Math.cos(a) * reach, (this.y - 13) + Math.sin(a) * reach]);
       if (this.bladeTrail.length > 9) this.bladeTrail.shift();
+    } else if (this.dashT > 0 && this.inventory.selectedWeapon()?.weapon === 'melee') {
+      // the lunge draws a ribbon too, straight along the dash
+      this.bladeTrail.push([this.x + this.facing * 28, this.y - 13]);
+      if (this.bladeTrail.length > 9) this.bladeTrail.shift();
     } else if (this.bladeTrail.length) {
       this.bladeTrail.shift();
     }
@@ -1360,7 +1364,9 @@ export class Player {
       this.drawBody(ctx, a.x, a.y, a.facing, true);
       ctx.globalAlpha = 1;
     }
-    if (this.invuln > 0 && !this.dead && Math.floor(this.invuln * 22) % 2 === 0) return;
+    // Blink only for damage i-frames. A dash also grants invulnerability, and
+    // blinking through it hid the dash pose behind its own afterimages.
+    if (this.dashT <= 0 && this.invuln > 0 && !this.dead && Math.floor(this.invuln * 22) % 2 === 0) return;
 
     // cape hangs behind the body
     this.drawChain(ctx, this.cape, Theme.clothDark, Theme.clothDark, 6, 2);
@@ -1418,8 +1424,23 @@ export class Player {
     const flash = this.hurtFlash > 0 && !ghost;
     const C = (c) => (flash ? '#ffffff' : c);
 
+    // A dash gets its own pose: body pitched into the direction of travel,
+    // legs swept back together, head tucked behind the leading shoulder.
+    const dashing = this.dashT > 0;
+    const swordDash = dashing && this.inventory.selectedWeapon()?.weapon === 'melee';
+    if (dashing) {
+      ctx.save();
+      ctx.translate(x, y - 8);
+      ctx.rotate(f * (swordDash ? 0.30 : 0.22));
+      ctx.translate(-x, -(y - 8));
+    }
+
     // legs
-    if (this.slamming) {
+    if (dashing) {
+      // swept back, one slightly trailing the other
+      limb(ctx, x - f * 1, y - 8, Math.PI / 2 + f * 0.95, 9, 3, C(bodyDark));
+      limb(ctx, x - f * 2, y - 8, Math.PI / 2 + f * 0.62, 8, 3, C(bodyDark));
+    } else if (this.slamming) {
       limb(ctx, x - 2, y - 8, Math.PI / 2 + 0.9, 7, 3, C(bodyDark));
       limb(ctx, x + 2, y - 8, Math.PI / 2 - 0.9, 7, 3, C(bodyDark));
     } else if (!this.onGround) {
@@ -1432,7 +1453,7 @@ export class Player {
     }
 
     // torso
-    const lean = clamp(this.vx / PLAYER.speed, -1, 1) * 1.4;
+    const lean = dashing ? f * 2.2 : clamp(this.vx / PLAYER.speed, -1, 1) * 1.4;
     pxRect(ctx, x - 4 + lean * 0.5, y - 15 + squash, 8, 8, C(body));
     pxRect(ctx, x - 4 + lean * 0.5, y - 15 + squash, 8, 2, C(ghost ? body : '#5c8ef0'));
     pxRect(ctx, x - 4 + lean * 0.5, y - 15 + squash, 1, 8, C(ghost ? body : '#7fa8ff'));   // rim light
@@ -1440,21 +1461,74 @@ export class Player {
       limb(ctx, x - f * 3, y - 14, (f > 0 ? Math.PI - 0.4 : 0.4) + Math.sin(t * 7) * 0.18 * Theme.wobble, 10, 5, C(bodyDark));
     }
 
-    // head
-    pxRect(ctx, x - 3 + lean, y - 22 + squash, 7, 7, C(skin));
-    pxRect(ctx, x - 3 + lean, y - 22 + squash, 7, 1, C(ghost ? skin : '#fff0d8'));          // rim light
-    pxRect(ctx, x - 4 + lean, y - 23 + squash, 9, 3, C(hair));
-    pxRect(ctx, x - 4 + lean + (f > 0 ? 6 : 0), y - 21 + squash, 2, 2, flash ? '#fff' : '#233');
+    // head - tucked down and forward through a dash
+    const hx = lean + (dashing ? f * 1 : 0);
+    const hy = dashing ? 1 : 0;
+    pxRect(ctx, x - 3 + hx, y - 22 + squash + hy, 7, 7, C(skin));
+    pxRect(ctx, x - 3 + hx, y - 22 + squash + hy, 7, 1, C(ghost ? skin : '#fff0d8'));       // rim light
+    pxRect(ctx, x - 4 + hx, y - 23 + squash + hy, 9, 3, C(hair));
+    pxRect(ctx, x - 4 + hx + (f > 0 ? 6 : 0), y - 21 + squash + hy, 2, 2, flash ? '#fff' : '#233');
     // collar
-    pxRect(ctx, x - 4 + lean, y - 16 + squash, 8, 2, C(ghost ? body : Theme.playerAccent));
+    pxRect(ctx, x - 4 + hx, y - 16 + squash + hy, 8, 2, C(ghost ? body : Theme.playerAccent));
 
-    if (!ghost) this.drawWeapon(ctx, x, y + squash, f);
+    if (!ghost) this.drawWeapon(ctx, x, y + squash, f, dashing, swordDash);
+    if (dashing) ctx.restore();
   }
 
-  drawWeapon(ctx, x, y, f) {
+  drawWeapon(ctx, x, y, f, dashing = false, swordDash = false) {
     const w = this.inventory.selectedWeapon();
     const sw = this.swing;
     const shoulderY = y - 13;
+
+    // Sword dash: a committed lunge. Front arm punched straight out with the
+    // blade level, back arm thrown behind for counterweight.
+    if (swordDash) {
+      const a = f > 0 ? -0.06 : Math.PI + 0.06;
+      const back = f > 0 ? Math.PI - 0.55 : 0.55;
+      limb(ctx, x - f * 2, shoulderY + 1, back, 7, 3, Theme.skin);
+      limb(ctx, x, shoulderY, a, 9, 3, Theme.skin);
+      const gx = x + Math.cos(a) * 9;
+      const gy = shoulderY + Math.sin(a) * 9;
+      const fiery = this.inventory.has('fireyblade');
+      limb(ctx, gx, gy, a, 3, 4, '#7a4a2a');
+      limb(ctx, gx + Math.cos(a) * 3, gy + Math.sin(a) * 3, a, 16, 3, fiery ? Theme.fire : Theme.steel, 1.6);
+      const tipX = gx + Math.cos(a) * 19, tipY = gy + Math.sin(a) * 19;
+      glowDot(ctx, tipX, tipY, 12, fiery ? Theme.fire : Theme.platformGlow, 0.5);
+      // a wedge of speed lines off the blade
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = rgba(fiery ? Theme.fire : Theme.steel, 0.5);
+      ctx.lineWidth = 1;
+      for (let i = -1; i <= 1; i++) {
+        ctx.beginPath();
+        ctx.moveTo(tipX - f * 2, tipY + i * 3);
+        ctx.lineTo(tipX - f * (14 + Math.abs(i) * 5), tipY + i * 5);
+        ctx.stroke();
+      }
+      ctx.restore();
+      return;
+    }
+
+    // Unarmed / bow dash: both arms streamlined back along the body.
+    if (dashing) {
+      const back = f > 0 ? Math.PI - 0.35 : 0.35;
+      limb(ctx, x, shoulderY, back, 8, 3, Theme.skin);
+      limb(ctx, x - f * 2, shoulderY + 2, back + f * 0.25, 7, 2, Theme.skin);
+      if (w && w.weapon === 'bow') {
+        const bx = x + Math.cos(back) * 8, by = shoulderY + Math.sin(back) * 8;
+        ctx.save();
+        ctx.translate(Math.round(bx), Math.round(by));
+        ctx.rotate(back);
+        ctx.strokeStyle = '#a86a3a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, 7, -1.9, 1.9);
+        ctx.stroke();
+        ctx.restore();
+      }
+      return;
+    }
+
     if (!w) {
       const p = sw && sw.kind === 'melee' ? clamp(sw.t / SWORD.swingTime, 0, 1) : 0;
       const a = sw ? sw.angle - 0.9 + p * 1.8 : this.aim * 0.3;
