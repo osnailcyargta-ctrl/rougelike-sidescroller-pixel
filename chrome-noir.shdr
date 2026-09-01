@@ -1,0 +1,99 @@
+/*@theme
+{
+  "name": "Chrome Noir",
+
+  "bgFar":  "#050506", "bgMid":  "#0d0d10", "bgNear": "#17171c",
+  "fog":    "#2a2a31", "star":   "#e8e8ee",
+
+  "ground": "#1a1a1f", "groundTop": "#c8c8d2", "groundEdge": "#ffffff",
+  "platform": "#202027", "platformTop": "#b0b0bc", "platformGlow": "#ffffff",
+
+  "player": "#ffffff", "playerDark": "#6e6e78", "playerAccent": "#ffffff",
+  "cloth": "#3a3a44", "clothDark": "#1c1c22", "skin": "#d8d8de",
+  "steel": "#ffffff", "steelDark": "#8a8a95",
+
+  "enemyGrunt": "#9a9aa6", "enemyBrute": "#5c5c68", "enemyStinger": "#c4c4ce",
+  "enemyDark": "#0a0a0c", "eye": "#ffffff",
+
+  "fire": "#e6e6ee", "fireHot": "#ffffff", "spark": "#ffffff",
+  "blood": "#d0d0da", "lightning": "#ffffff", "slime": "#8e8e99",
+
+  "ui": "#f2f2f6", "uiDim": "#77777f", "uiAccent": "#ffffff", "uiPanel": "#0b0b0e",
+  "hp": "#c8c8d2", "hpBack": "#1a1a1f",
+
+  "bloomStrength": 1.6, "bloomThreshold": 0.40,
+  "vignette": 1.05, "chroma": 0.0, "scanline": 0.0, "saturation": 0.0,
+  "animSpeed": 1.0, "wobble": 0.9, "trail": 1.2
+}
+@*/
+// Chrome Noir
+// Black-and-white stock: crushed blacks, blown highlights that halate into the
+// frame, a projector gate that breathes, dust on the print and a slow drift of
+// grain. No colour survives - the palette above is already monochrome, and the
+// shader guarantees the rest.
+precision mediump float;
+
+varying vec2 vUv;
+uniform sampler2D uScene;
+uniform sampler2D uBloom;
+uniform vec2  uResolution;
+uniform float uTime;
+uniform float uBloomStrength;
+uniform float uVignette;
+uniform float uHit;
+uniform float uSlowmo;
+
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+void main() {
+  vec2 uv = vUv;
+  vec2 c = uv - 0.5;
+  float r2 = dot(c, c);
+
+  // the gate never sits perfectly still
+  float weave = sin(uTime * 0.9) * 0.0006 + sin(uTime * 5.3) * 0.00018;
+  uv.y += weave;
+  uv.x += cos(uTime * 0.7) * 0.0004;
+
+  vec3 scene = texture2D(uScene, uv).rgb;
+  vec3 bloom = texture2D(uBloom, uv).rgb;
+
+  float l = dot(scene, vec3(0.299, 0.587, 0.114));
+  float b = dot(bloom, vec3(0.299, 0.587, 0.114));
+
+  // halation: bright areas bleed outward the way blown highlights do on film
+  l += b * uBloomStrength * 1.15;
+
+  // an S-curve: crush the shadows, roll the highlights, widen the midtones
+  l = clamp(l, 0.0, 4.0);
+  l = l / (l + 0.55);
+  l = smoothstep(0.06, 0.94, l);
+  l = pow(l, 0.88);
+
+  // a hit blows the frame out for an instant
+  l += uHit * 0.85;
+  // slow motion drops it a stop and softens
+  l = mix(l, l * 0.72 + 0.06, uSlowmo * 0.7);
+
+  // grain, moving every frame like real stock
+  vec2 gp = floor(uv * uResolution * 0.9) + floor(uTime * 24.0) * 37.0;
+  float grain = hash(gp) - 0.5;
+  l += grain * (0.055 + 0.05 * (1.0 - l));
+
+  // dust and the occasional scratch on the print
+  float dust = hash(floor(uv * uResolution * 0.6) + floor(uTime * 18.0) * 91.0);
+  l += step(0.9985, dust) * 0.8;
+  float scratchX = hash(vec2(floor(uTime * 6.0), 3.0));
+  if (abs(uv.x - scratchX) < 0.0012 && hash(vec2(floor(uTime * 6.0), 9.0)) > 0.86) {
+    l += 0.35 * (1.0 - abs(uv.y - 0.5));
+  }
+
+  // a hard vignette, and the very slight warm-cool split of a silver print
+  l *= 1.0 - uVignette * r2 * 1.15;
+  vec3 col = vec3(l);
+  col *= mix(vec3(0.97, 0.98, 1.04), vec3(1.04, 1.0, 0.95), smoothstep(0.2, 0.8, l));
+
+  gl_FragColor = vec4(col, 1.0);
+}

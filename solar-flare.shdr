@@ -1,0 +1,105 @@
+/*@theme
+{
+  "name": "Solar Flare",
+
+  "bgFar":  "#1a0700", "bgMid":  "#331000", "bgNear": "#5c1e00",
+  "fog":    "#8a3a05", "star":   "#ffe8a8",
+
+  "ground": "#3d1400", "groundTop": "#ff9a2e", "groundEdge": "#fff0a0",
+  "platform": "#4a1a02", "platformTop": "#ffb545", "platformGlow": "#ffd76a",
+
+  "player": "#fffdf5", "playerDark": "#c08a4a", "playerAccent": "#fff0a0",
+  "cloth": "#c25a10", "clothDark": "#6e2a02", "skin": "#ffd9a8",
+  "steel": "#fff6dc", "steelDark": "#c09a60",
+
+  "enemyGrunt": "#ff5a2e", "enemyBrute": "#a8320a", "enemyStinger": "#ffcf3c",
+  "enemyDark": "#2a0a00", "eye": "#ffffff",
+
+  "fire": "#ffbe3c", "fireHot": "#fffbe0", "spark": "#ffe8a8",
+  "blood": "#ff6a2e", "lightning": "#fff6c0", "slime": "#d6e04a",
+
+  "ui": "#fff4d8", "uiDim": "#b8834a", "uiAccent": "#ffd76a", "uiPanel": "#280c00",
+  "hp": "#ff8a2e", "hpBack": "#3a1000",
+
+  "bloomStrength": 1.85, "bloomThreshold": 0.36,
+  "vignette": 0.62, "chroma": 0.7, "scanline": 0.0, "saturation": 1.28,
+  "animSpeed": 1.08, "wobble": 1.2, "trail": 1.6
+}
+@*/
+// Solar Flare
+// Shot straight into the sun with the aperture wide open. Everything bright
+// blooms into anamorphic streaks, the lens throws ghosts back along the axis,
+// the air above the floor boils, and the exposure gently hunts for balance.
+precision mediump float;
+
+varying vec2 vUv;
+uniform sampler2D uScene;
+uniform sampler2D uBloom;
+uniform vec2  uResolution;
+uniform float uTime;
+uniform float uBloomStrength;
+uniform float uVignette;
+uniform float uChroma;
+uniform float uSaturation;
+uniform float uHit;
+uniform float uSlowmo;
+
+vec3 sampleBloom(vec2 uv) {
+  return texture2D(uBloom, clamp(uv, vec2(0.001), vec2(0.999))).rgb;
+}
+
+void main() {
+  vec2 uv = vUv;
+  vec2 c = uv - 0.5;
+  float r2 = dot(c, c);
+
+  // heat haze, strongest low in the frame where the ground radiates
+  float heat = smoothstep(0.35, 1.0, uv.y);
+  uv.x += sin(uv.y * 52.0 - uTime * 4.1) * 0.0018 * heat;
+  uv.x += sin(uv.y * 19.0 + uTime * 1.6) * 0.0012 * heat;
+  uv.y += sin(uv.x * 27.0 + uTime * 2.3) * 0.0007 * heat;
+
+  // wide chromatic split - the lens is not coping
+  vec2 off = c * r2 * 0.024 * uChroma;
+  vec3 col;
+  col.r = texture2D(uScene, uv + off * 1.4).r;
+  col.g = texture2D(uScene, uv).g;
+  col.b = texture2D(uScene, uv - off * 1.1).b;
+
+  vec3 bloom = sampleBloom(uv);
+  col += bloom * uBloomStrength * vec3(1.3, 1.0, 0.62);
+
+  // anamorphic streak: the bloom smeared hard along the horizontal
+  vec3 streak = vec3(0.0);
+  for (int i = 1; i <= 10; i++) {
+    float s = float(i) * 0.011;
+    float w = 1.0 - float(i) / 11.0;
+    streak += sampleBloom(uv + vec2(s, 0.0)) * w;
+    streak += sampleBloom(uv - vec2(s, 0.0)) * w;
+  }
+  col += streak * 0.055 * vec3(1.0, 0.72, 0.42);
+
+  // lens ghosts flipped back through the centre of the frame
+  vec2 ghostDir = (vec2(0.5) - uv);
+  for (int i = 1; i <= 3; i++) {
+    float scale = float(i) * 0.42;
+    vec3 g = sampleBloom(uv + ghostDir * scale);
+    col += g * (0.10 / float(i)) * vec3(1.0, 0.55 + 0.15 * float(i), 0.25);
+  }
+
+  float l = dot(col, vec3(0.299, 0.587, 0.114));
+  col = mix(vec3(l), col, uSaturation);
+
+  // exposure hunting: a slow, small breathing of overall level
+  col *= 1.0 + 0.06 * sin(uTime * 0.8);
+
+  col += vec3(0.9, 0.25, 0.05) * uHit;
+  col = mix(col, col * vec3(1.15, 0.9, 0.72) + vec3(0.05, 0.02, 0.0), uSlowmo * 0.6);
+
+  // roll the highlights so the blowout stays warm instead of clipping to white
+  col = col / (col + vec3(0.85)) * 1.65;
+  col = pow(max(col, 0.0), vec3(0.94, 0.98, 1.05));
+
+  col *= 1.0 - uVignette * r2 * 1.0;
+  gl_FragColor = vec4(col, 1.0);
+}

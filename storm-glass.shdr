@@ -1,0 +1,128 @@
+/*@theme
+{
+  "name": "Storm Glass",
+
+  "bgFar":  "#060a12", "bgMid":  "#0b131f", "bgNear": "#132133",
+  "fog":    "#1e3149", "star":   "#9fc4e8",
+
+  "ground": "#15202e", "groundTop": "#5b7fa3", "groundEdge": "#9fd8ff",
+  "platform": "#1a2938", "platformTop": "#6a90b5", "platformGlow": "#8fc8ff",
+
+  "player": "#eaf4ff", "playerDark": "#7f9ab5", "playerAccent": "#ffd76a",
+  "cloth": "#2f5680", "clothDark": "#18304a", "skin": "#e6c7a8",
+  "steel": "#dceaf7", "steelDark": "#7f94ab",
+
+  "enemyGrunt": "#6e8fb5", "enemyBrute": "#4b6285", "enemyStinger": "#7fd0d8",
+  "enemyDark": "#0a121c", "eye": "#ffe9a8",
+
+  "fire": "#ffb45e", "fireHot": "#ffe6b0", "spark": "#cfe6ff",
+  "blood": "#7f9ec2", "lightning": "#eaf6ff", "slime": "#7fc9a8",
+
+  "ui": "#dfeeff", "uiDim": "#6b8299", "uiAccent": "#9fd8ff", "uiPanel": "#0a131e",
+  "hp": "#7fb0e0", "hpBack": "#101c29",
+
+  "bloomStrength": 1.05, "bloomThreshold": 0.58,
+  "vignette": 0.72, "chroma": 0.2, "scanline": 0.05, "saturation": 0.62,
+  "animSpeed": 0.98, "wobble": 1.1, "trail": 1.25
+}
+@*/
+// Storm Glass
+// Watched through a rain-lashed window. Droplets slide down the pane and drag
+// the image with them, streaks smear the light, and every so often a lightning
+// strike blows the whole frame white for two frames.
+precision mediump float;
+
+varying vec2 vUv;
+uniform sampler2D uScene;
+uniform sampler2D uBloom;
+uniform vec2  uResolution;
+uniform float uTime;
+uniform float uBloomStrength;
+uniform float uVignette;
+uniform float uChroma;
+uniform float uSaturation;
+uniform float uHit;
+uniform float uSlowmo;
+
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+float hash1(float p) { return fract(sin(p * 78.233) * 43758.5453); }
+
+// One column of drops, each sliding at its own pace. Returns the offset the
+// droplet lens applies, and writes its strength into `hit`.
+vec2 drops(vec2 uv, float scale, float speed, out float hit) {
+  vec2 g = uv * vec2(scale * 0.65, scale);
+  vec2 id = floor(g);
+  vec2 f = fract(g);
+  float col = hash(vec2(id.x, 0.0));
+  // each column falls at its own rate, each drop is offset within it
+  float fall = fract(id.y * 0.37 + col * 7.3 - uTime * speed * (0.6 + col * 0.8));
+  vec2 centre = vec2(0.5 + (col - 0.5) * 0.5, fall);
+  float d = length((f - centre) * vec2(1.6, 1.0));
+  float r = 0.20 + hash(id) * 0.16;
+  hit = smoothstep(r, r * 0.25, d);
+  // a short tail smeared above the drop
+  float tail = smoothstep(0.16, 0.0, abs(f.x - centre.x)) *
+               smoothstep(0.45, 0.0, f.y - centre.y) * step(centre.y, f.y);
+  hit = max(hit, tail * 0.32);
+  return (f - centre) * hit * 0.9;
+}
+
+void main() {
+  vec2 uv = vUv;
+  vec2 c = uv - 0.5;
+  float r2 = dot(c, c);
+
+  // two layers of droplets at different sizes
+  float hitA, hitB;
+  vec2 offA = drops(uv, 11.0, 0.22, hitA);
+  vec2 offB = drops(uv + 0.37, 20.0, 0.34, hitB);
+  vec2 warp = offA * 0.045 + offB * 0.028;
+  float wet = clamp(hitA + hitB * 0.7, 0.0, 1.0);
+
+  // sheeting water running down the glass
+  float sheet = sin(uv.x * 34.0 + uTime * 0.7) * sin(uv.y * 9.0 - uTime * 1.9);
+  warp.x += sheet * 0.0011;
+
+  vec2 suv = uv + warp;
+  vec2 ca = c * r2 * 0.014 * uChroma + warp * 0.35;
+  vec3 col;
+  col.r = texture2D(uScene, suv + ca).r;
+  col.g = texture2D(uScene, suv).g;
+  col.b = texture2D(uScene, suv - ca).b;
+
+  vec3 bloom = texture2D(uBloom, suv).rgb;
+  col += bloom * uBloomStrength * vec3(0.85, 0.98, 1.22);
+
+  // droplets act as little lenses: they concentrate whatever is behind them
+  col += bloom * wet * 1.1;
+  col += vec3(0.05, 0.09, 0.14) * wet;
+
+  float l = dot(col, vec3(0.299, 0.587, 0.114));
+  col = mix(vec3(l), col, uSaturation);
+  col *= vec3(0.86, 0.95, 1.12);              // cold, overcast light
+
+  // lightning: rare, brief, and it lights the pane from the far side
+  float slot = floor(uTime * 0.55);
+  float when = hash1(slot);
+  float phase = fract(uTime * 0.55);
+  float strike = 0.0;
+  if (when > 0.62) {
+    float t0 = fract(when * 13.0) * 0.5;
+    strike = smoothstep(0.035, 0.0, abs(phase - t0));
+    // the double flicker a real strike has
+    strike += 0.55 * smoothstep(0.02, 0.0, abs(phase - t0 - 0.06));
+  }
+  col += vec3(0.55, 0.62, 0.78) * strike;
+  col += vec3(0.9, 0.95, 1.0) * wet * strike * 1.4;
+
+  col += vec3(0.5, 0.2, 0.22) * uHit;
+  col = mix(col, col * vec3(0.8, 0.9, 1.15), uSlowmo * 0.5);
+
+  col *= 1.0 - uVignette * r2 * 1.2;
+  // the frame fogs up slightly toward the edges
+  col = mix(col, vec3(dot(col, vec3(0.33))) * 1.05, smoothstep(0.16, 0.5, r2) * 0.35);
+
+  gl_FragColor = vec4(col, 1.0);
+}
