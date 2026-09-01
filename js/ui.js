@@ -106,8 +106,14 @@ export function drawHUD(ctx, game) {
   ctx.strokeRect(10.5, 17.5, bw + 1, 6);
   drawTextShadow(ctx, `${Math.ceil(p.hp)}/${p.maxHp}`, 11 + bw, 9, Theme.ui, 1, 'right');
 
-  // depth marker only - no wave counter, no tutorial readouts
-  drawTextShadow(ctx, `ROOM ${game.roomIndex}`, VIEW_W - 7, 8, Theme.uiDim, 1, 'right');
+  // run status: where you are, which wave, how many are left
+  const label = game.roomCleared ? 'CLEARED' : `WAVE ${game.waveIndex}/2`;
+  drawTextShadow(ctx, `ROOM ${game.roomIndex}`, VIEW_W - 7, 8, Theme.ui, 1, 'right');
+  drawTextShadow(ctx, label, VIEW_W - 7, 18, game.roomCleared ? Theme.uiAccent : Theme.uiDim, 1, 'right');
+  if (!game.roomCleared) {
+    const alive = game.enemies.filter((e) => !e.dead).length + game.pendingSpawns.length;
+    drawTextShadow(ctx, `LEFT ${alive}`, VIEW_W - 7, 28, Theme.uiDim, 1, 'right');
+  }
 
   drawHotbar(ctx, game);
   drawPerkStrip(ctx, game);
@@ -229,16 +235,18 @@ export function drawInventory(ctx, game) {
   if (UI.tooltip) drawTooltip(ctx, UI.tooltip);
 }
 
-// Name and rarity only. What an item actually does is for the player to find
-// out by using it.
 export function drawTooltip(ctx, tip) {
   const def = ITEMS[tip.id];
   if (!def) return;
-  const w = Math.max(textWidth(def.name, 1), textWidth(RARITY[def.rarity].name, 1)) + 12;
-  const h = 24;
+  const lines = def.desc;
+  const w = Math.max(textWidth(def.name, 1), ...lines.map((l) => textWidth(l, 1))) + 12;
+  const h = 24 + lines.length * 9;
   const x = clamp(tip.x - w / 2, 3, VIEW_W - w - 3);
   const y = clamp(tip.below ? tip.y : tip.y - h, 3, VIEW_H - h - 3);
   panel(ctx, x, y, w, h, { alpha: 0.95, accent: RARITY[def.rarity].color });
   drawText(ctx, def.name, x + 6, y + 5, RARITY[def.rarity].color, 1);
   drawText(ctx, RARITY[def.rarity].name, x + 6, y + 14, Theme.uiDim, 1);
+  for (let i = 0; i < lines.length; i++) {
+    drawText(ctx, lines[i], x + 6, y + 25 + i * 9, Theme.ui, 1);
+  }
 }

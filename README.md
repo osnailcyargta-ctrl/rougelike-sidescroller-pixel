@@ -52,10 +52,11 @@ add new enemy types as you go.
 Clearing a wave restores **25% of max HP**, and stepping through the gate into
 the next room restores you to **full HP**.
 
-The game explains none of this to you. There are no banners, no objective
-text, no "press X to..." prompts, and item tooltips show only a name and a
-rarity — the effects are for you to discover. The Controls screen in the main
-menu is the one and only place anything is spelled out.
+Nothing is announced. There are no banners, no wave-clear notifications and no
+"press X to..." prompts — you find out what happened by watching the screen.
+Reference information stays available where you go looking for it: the HUD
+carries the wave and enemies-left counters, item tooltips describe their
+effects, and the Controls screen sits in the main menu.
 
 ### Classes
 
