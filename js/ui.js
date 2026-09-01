@@ -88,9 +88,11 @@ export function drawHUD(ctx, game) {
   const t = UI.t;
 
   // health
-  const bw = 96;
+  const bw = 118;
   panel(ctx, 6, 6, bw + 10, 22, { alpha: 0.55 });
-  drawText(ctx, p.classId === 'melee' ? 'BLADE' : 'RANGER', 11, 9, Theme.uiDim, 1);
+  // name what is in your hand, not the class you picked at the start
+  const held = p.inventory.selectedWeapon();
+  drawText(ctx, held ? held.name.toUpperCase() : 'UNARMED', 11, 9, Theme.uiDim, 1);
   const hpFrac = clamp(p.hp / p.maxHp, 0, 1);
   pxRect(ctx, 11, 18, bw, 5, Theme.hpBack);
   const grad = ctx.createLinearGradient(11, 0, 11 + bw, 0);
@@ -284,16 +286,14 @@ export function drawTooltip(ctx, tip) {
 
 // --- debug menu (ctrl+m) -------------------------------------------------
 
-const DEBUG_ITEMS = [
-  'sword', 'bow', 'lifecrystal', 'fireyblade',
-  'lightningarrow', 'wetslime', 'bloodstone', 'aegis',
-];
+// Everything that exists, so a new item shows up here without another edit.
+const DEBUG_ITEMS = Object.keys(ITEMS);
 
 export function drawDebugMenu(ctx, game) {
   ctx.fillStyle = rgba('#000000', 0.55);
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
-  const w = 268, h = 152;
+  const w = 268, h = 178;
   const x = Math.round((VIEW_W - w) / 2);
   const y = Math.round((VIEW_H - h) / 2);
   panel(ctx, x, y, w, h, { accent: '#8ce88c' });
@@ -312,6 +312,7 @@ export function drawDebugMenu(ctx, game) {
   if (!live) drawText(ctx, '(START A RUN FIRST)', x + 88, y + 54, Theme.uiDim, 1);
 
   const cell = 26, gap = 4, cols = 8;
+  const rows = Math.ceil(DEBUG_ITEMS.length / cols);
   const gx = x + 12, gy = y + 66;
   for (let i = 0; i < DEBUG_ITEMS.length; i++) {
     const id = DEBUG_ITEMS[i];
@@ -338,16 +339,17 @@ export function drawDebugMenu(ctx, game) {
     }
   }
 
-  drawText(ctx, 'CLICK AN ICON TO ADD ONE', x + 12, y + 102, Theme.uiDim, 1);
-  if (live && button(ctx, 'dbg-heal', x + 12, y + 116, 78, 16, 'FULL HEAL')) {
+  const rowsBottom = gy + rows * (cell + gap);
+  drawText(ctx, 'CLICK AN ICON TO ADD ONE', x + 12, rowsBottom + 2, Theme.uiDim, 1);
+  if (live && button(ctx, 'dbg-heal', x + 12, rowsBottom + 14, 78, 16, 'FULL HEAL')) {
     game.player.hp = game.player.maxHp;
     game.player.shield = game.player.shieldMax;
   }
-  if (live && button(ctx, 'dbg-kill', x + 96, y + 116, 78, 16, 'KILL WAVE')) {
+  if (live && button(ctx, 'dbg-kill', x + 96, rowsBottom + 14, 78, 16, 'KILL WAVE')) {
     game.pendingSpawns.length = 0;
     for (const e of [...game.enemies]) if (!e.dead) e.kill();
   }
-  if (button(ctx, 'dbg-close', x + w - 84, y + 116, 72, 16, 'CLOSE')) game.debugOpen = false;
+  if (button(ctx, 'dbg-close', x + w - 84, rowsBottom + 14, 72, 16, 'CLOSE')) game.debugOpen = false;
 
   drawTextShadow(ctx, 'CTRL+M', x + w - 8, y + 7, Theme.uiDim, 1, 'right');
   if (UI.tooltip) drawTooltip(ctx, UI.tooltip);

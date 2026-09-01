@@ -319,6 +319,35 @@ export function limb(ctx, x, y, angle, len, thick, color, taper = 0) {
   ctx.restore();
 }
 
+// A boomerang: two arms meeting at an elbow, drawn around its own centre so it
+// spins on the point it would really spin on. Caller handles translate/rotate.
+export function drawBoomerang(ctx, len, thick, body, edge, core) {
+  const spread = 0.62;              // half the angle between the arms
+  const ox = -len * 0.30;           // shift so the elbow is not the pivot
+  for (const dir of [-1, 1]) {
+    const a = dir * spread;
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const steps = Math.max(2, Math.round(len));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const px = ox + ca * len * t;
+      const py = sa * len * t;
+      const w = Math.max(1, Math.round(thick * (1 - t * 0.45)));
+      ctx.fillStyle = body;
+      ctx.fillRect(Math.round(px - w / 2), Math.round(py - w / 2), w, w);
+      // lit outer edge of the arm
+      if (edge && i > steps * 0.25) {
+        ctx.fillStyle = edge;
+        ctx.fillRect(Math.round(px + ca - w / 2), Math.round(py + sa * 1.2 - w / 2), 1, 1);
+      }
+    }
+  }
+  if (core) {
+    ctx.fillStyle = core;
+    ctx.fillRect(Math.round(ox - 1), -1, 3, 2);
+  }
+}
+
 export function glowDot(ctx, x, y, r, color, alpha = 1) {
   if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(r) || r <= 0) return;
   ctx.save();

@@ -1,7 +1,7 @@
 // Item / perk definitions plus the inventory model.
 // Passive perks work while the item merely sits anywhere in the inventory.
 import { Theme } from './theme.js';
-import { pxRect } from './gfx.js';
+import { pxRect, drawBoomerang } from './gfx.js';
 
 export const INV_COLS = 4;
 export const INV_ROWS = 4;
@@ -244,17 +244,12 @@ export function drawItemIcon(ctx, id, x, y, s = 12, t = 0) {
       break;
     }
     case 'nukerang': {
-      // four blades around a hot core, spinning
-      const a0 = t * 3.4;
-      P(4, 4, 4, 4, '#ff9d3c');
-      P(5, 5, 2, 2, '#fff0a0');
-      for (let i = 0; i < 4; i++) {
-        const a = a0 + i * (Math.PI / 2);
-        const bx = 5 + Math.cos(a) * 3.6;
-        const by = 5 + Math.sin(a) * 3.6;
-        P(bx, by, 2.4, 2.4, Theme.steel);
-        P(bx + Math.cos(a) * 1.6, by + Math.sin(a) * 1.6, 1.6, 1.6, Theme.steelDark);
-      }
+      ctx.save();
+      ctx.translate(x + s / 2, y + s / 2);
+      ctx.rotate(t * 3.4);
+      ctx.scale(u, u);
+      drawBoomerang(ctx, 6.5, 3, Theme.steel, Theme.steelDark, Theme.fire);
+      ctx.restore();
       break;
     }
     case 'bloodstone': {

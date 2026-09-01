@@ -5,7 +5,7 @@ import {
 import { Theme } from './theme.js';
 import {
   Camera, burst, floatText, spawnParticle, impactRing, dropShadow, ribbon,
-  makeChain, stepChain, limb, pxRect, glowDot, boltPath, strokeBolt,
+  makeChain, stepChain, limb, pxRect, glowDot, boltPath, strokeBolt, drawBoomerang,
 } from './gfx.js';
 import { Sfx } from './audio.js';
 import {
@@ -941,18 +941,10 @@ export class Projectile {
         const a = (i / this.trail.length) * 0.4 * Theme.trail;
         pxRect(ctx, this.trail[i][0] - 1, this.trail[i][1] - 1, 2, 2, rgba(Theme.fire, a));
       }
-      glowDot(ctx, this.x, this.y, 12, Theme.fire, 0.45);
+      glowDot(ctx, this.x, this.y, 11, Theme.fire, 0.32);
       ctx.translate(Math.round(this.x), Math.round(this.y));
       ctx.rotate(this.angle);
-      // four blades around a hot core
-      for (let i = 0; i < 4; i++) {
-        ctx.rotate(Math.PI / 2);
-        pxRect(ctx, 2, -1, 5, 2, Theme.steel);
-        pxRect(ctx, 6, -1, 2, 2, '#ffffff');
-      }
-      pxRect(ctx, -3, -3, 6, 6, '#3a2a1a');
-      pxRect(ctx, -2, -2, 4, 4, Theme.fire);
-      pxRect(ctx, -1, -1, 2, 2, Theme.fireHot);
+      drawBoomerang(ctx, 9, 4, Theme.steel, Theme.steelDark, Theme.fireHot);
     } else if (this.stuck) {
       // planted in the floor, fading out
       const k = clamp(1 - (this.stuckT - 1.0) / 0.6, 0, 1);
@@ -1722,17 +1714,11 @@ export class Player {
       const a = this.aim * 0.3 + (f > 0 ? -0.3 : Math.PI + 0.3) - f * throwing * 0.9;
       limb(ctx, x, shoulderY, a, 7, 3, Theme.skin);
       const gx = x + Math.cos(a) * 8, gy = shoulderY + Math.sin(a) * 8;
-      const spin = this.anim * 6;
-      glowDot(ctx, gx, gy, 8, Theme.fire, 0.3);
+      glowDot(ctx, gx, gy, 7, Theme.fire, 0.28);
       ctx.save();
       ctx.translate(Math.round(gx), Math.round(gy));
-      ctx.rotate(spin);
-      for (let i = 0; i < 4; i++) {
-        ctx.rotate(Math.PI / 2);
-        pxRect(ctx, 2, -1, 4, 2, Theme.steel);
-      }
-      pxRect(ctx, -2, -2, 4, 4, Theme.fire);
-      pxRect(ctx, -1, -1, 2, 2, Theme.fireHot);
+      ctx.rotate(a + Math.PI * 0.5);      // held, not spinning, until it is thrown
+      drawBoomerang(ctx, 7, 3, Theme.steel, Theme.steelDark, Theme.fire);
       ctx.restore();
       return;
     }
