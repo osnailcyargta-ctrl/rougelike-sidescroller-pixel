@@ -387,6 +387,7 @@ export class Game {
     for (const pr of this.projectiles) {
       pr.update(dt);
       if (pr.dead) continue;
+      if (pr.spent) continue;      // out of range: falling, and harmless
       if (pr.team === 'player') {
         for (const e of this.enemies) {
           if (e.dead || e.spawnT > 0) continue;

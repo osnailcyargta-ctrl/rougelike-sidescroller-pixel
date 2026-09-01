@@ -702,6 +702,7 @@ export class Projectile {
       x: 0, y: 0, vx: 0, vy: 0, damage: 5, team: 'player', kind: 'arrow',
       life: 2, t: 0, dead: false, traveled: 0, maxDist: Infinity, gravity: 0,
       mark: false, slow: false, homing: 0, target: null, trail: [],
+      spent: false, stuck: false, stuckT: 0, spin: 0,
     }, o);
     this.angle = Math.atan2(this.vy, this.vx);
   }
@@ -717,12 +718,39 @@ export class Projectile {
       this.vx = Math.cos(na) * sp;
       this.vy = Math.sin(na) * sp;
     }
+    // A spent arrow stuck in the floor just counts down and fades.
+    if (this.stuck) {
+      this.stuckT += dt;
+      if (this.stuckT > 1.6) this.dead = true;
+      return;
+    }
+
     this.vy += this.gravity * dt;
     const dx = this.vx * dt, dy = this.vy * dt;
     this.x += dx; this.y += dy;
     this.traveled += Math.hypot(dx, dy);
-    this.angle = Math.atan2(this.vy, this.vx);
-    if (this.traveled >= this.maxDist) { this.expire(); return; }
+    this.angle = this.spent ? this.angle + this.spin * dt : Math.atan2(this.vy, this.vx);
+    if (this.spent) {
+      // ease the tumble back into line with the fall so it lands point first
+      const fall = Math.atan2(this.vy, this.vx);
+      this.angle += shortAngle(this.angle, fall) * clamp(dt * 4.5, 0, 1);
+      this.spin *= Math.pow(0.2, dt);
+      const surface = surfaceBelow(this.x, this.y);
+      if (this.y >= surface) {
+        this.y = surface;
+        this.stuck = true;
+        this.vx = this.vy = 0;
+        this.trail.length = 0;
+        burst(this.x, this.y, 5, {
+          color: Theme.groundEdge, kind: 'smoke', speedMin: 8, speedMax: 34,
+          lifeMin: 0.2, lifeMax: 0.45, sizeMin: 1, sizeMax: 2, gravity: -8, glow: false,
+        });
+        return;
+      }
+    } else if (this.traveled >= this.maxDist) {
+      this.goSpent();
+      return;
+    }
     if (this.x < -8 || this.x > VIEW_W + 8 || this.y < -20 || this.y > GROUND_Y + 4) {
       this.expire();
       return;
@@ -745,6 +773,25 @@ export class Projectile {
     if (this.kind === 'slime' && Math.random() < dt * 40) {
       spawnParticle({ x: this.x, y: this.y, vx: rand(-10, 10), vy: rand(-10, 10), life: 0.3, size: 1, color: Theme.slime, gravity: 40, kind: 'shrink' });
     }
+  }
+
+  // Out of range: the arrow loses its drive, hangs for a beat, then drops.
+  goSpent() {
+    if (this.spent) return;
+    this.spent = true;
+    this.mark = false;
+    this.gravity = 620;
+    this.vx *= 0.34;
+    this.vy = this.vy * 0.2 - 26;      // a small upward hitch before it falls
+    this.spin = rand(-3.5, 3.5);
+    this.t = 0;
+    this.life = 4;
+    this.trail.length = 0;
+    // a puff of spent energy where the shot runs out
+    burst(this.x, this.y, 6, {
+      color: Theme.steel, color2: '#ffffff', speedMin: 10, speedMax: 55,
+      lifeMin: 0.15, lifeMax: 0.35, sizeMax: 1, gravity: 120, kind: 'shrink',
+    });
   }
 
   expire() {
@@ -770,6 +817,7 @@ export class Projectile {
   }
 
   onHit(target, game) {
+    if (this.spent) return;
     this.dead = true;
     if (this.team === 'player') {
       if (this.kind === 'slime') {
@@ -813,6 +861,25 @@ export class Projectile {
       ctx.rotate(this.angle);
       pxRect(ctx, -4, -1, 8, 2, Theme.enemyStinger);
       pxRect(ctx, 2, -2, 3, 4, '#ffffff');
+    } else if (this.stuck) {
+      // planted in the floor, fading out
+      const k = clamp(1 - (this.stuckT - 1.0) / 0.6, 0, 1);
+      ctx.globalAlpha = k;
+      dropShadow(ctx, this.x, this.y, 4, 0);
+      ctx.translate(Math.round(this.x), Math.round(this.y));
+      ctx.rotate(this.angle);
+      pxRect(ctx, -9, 0, 9, 1, '#6d4a28');
+      pxRect(ctx, -10, -2, 3, 1, rgba('#dfe9ff', 0.8));
+      pxRect(ctx, -10, 1, 3, 1, rgba('#dfe9ff', 0.8));
+      ctx.globalAlpha = 1;
+    } else if (this.spent) {
+      // tumbling, dimmer than a live shot
+      ctx.translate(Math.round(this.x), Math.round(this.y));
+      ctx.rotate(this.angle);
+      pxRect(ctx, -6, 0, 9, 1, '#6d4a28');
+      pxRect(ctx, 3, -1, 3, 2, rgba(Theme.steel, 0.75));
+      pxRect(ctx, -7, -2, 3, 1, rgba('#dfe9ff', 0.7));
+      pxRect(ctx, -7, 1, 3, 1, rgba('#dfe9ff', 0.7));
     } else {
       // trail
       for (let i = 0; i < this.trail.length; i++) {

@@ -123,6 +123,11 @@ until their patterns exist, later boss rooms send a stronger golem.
 | Blade | Iron Sword | 3-block reach, 10 damage, 0.45s swing |
 | Ranger | Hunter Bow | 10-block range, 5 damage, 10 ammo, 2s reload, 0.4s between shots |
 
+At the end of its 10 blocks an arrow does not blink out: it loses its drive with
+a small puff, hitches upward, then tumbles down under gravity and plants itself
+nose-first in whatever surface it lands on before fading. A spent arrow deals no
+damage, so the bow's reach stays exactly 10 blocks.
+
 Player HP is 100. Regular enemies have 80 HP and deal 10–20 damage depending on
 type (Ghoul 12, Stinger 10 ranged, Brute 20).
 
