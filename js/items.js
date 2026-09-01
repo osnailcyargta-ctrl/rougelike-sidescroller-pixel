@@ -41,9 +41,17 @@ export const ITEMS = {
     id: 'wetslime', name: 'Wet Slime', rarity: 'uncommon', stack: MAX_STACK,
     desc: ['Every 2s spits slime at an enemy,', 'slowing it 30% for 1.5s.'],
   },
+  bloodstone: {
+    id: 'bloodstone', name: 'Bloodstone', rarity: 'common', stack: MAX_STACK,
+    desc: ['Every 5th hit you land heals 3 HP.', '+2 HP per extra stack.'],
+  },
+  aegis: {
+    id: 'aegis', name: 'Aegis Shard', rarity: 'uncommon', stack: MAX_STACK,
+    desc: ['+20 absorb shield that soaks damage', 'before your HP. Refills 5s after', 'you stop taking hits.'],
+  },
 };
 
-export const DROP_POOL = ['lifecrystal', 'fireyblade', 'lightningarrow', 'wetslime'];
+export const DROP_POOL = ['lifecrystal', 'fireyblade', 'lightningarrow', 'wetslime', 'bloodstone', 'aegis'];
 export const WEAPON_POOL = ['sword', 'bow'];
 export const WEAPON_DROP_CHANCE = 0.20;
 
@@ -56,7 +64,36 @@ export function rollDrop(inventory) {
     return pool[Math.floor(Math.random() * pool.length)];
   }
   // Commons are twice as likely as uncommons.
-  const weights = { lifecrystal: 3, fireyblade: 3, lightningarrow: 2, wetslime: 2 };
+  const weights = {
+    lifecrystal: 3, fireyblade: 3, bloodstone: 3,
+    lightningarrow: 2, wetslime: 2, aegis: 2,
+  };
+  let total = 0;
+  for (const id of DROP_POOL) total += weights[id];
+  let r = Math.random() * total;
+  for (const id of DROP_POOL) {
+    r -= weights[id];
+    if (r <= 0) return id;
+  }
+  return DROP_POOL[0];
+}
+
+// Boss rooms hand out a choice of two perks, never a weapon, and never two of
+// the same thing.
+export function rollPerkPair() {
+  const first = rollPerkOnly();
+  let second = rollPerkOnly();
+  let guard = 0;
+  while (second === first && guard++ < 20) second = rollPerkOnly();
+  if (second === first) second = DROP_POOL.find((id) => id !== first);
+  return [first, second];
+}
+
+function rollPerkOnly() {
+  const weights = {
+    lifecrystal: 3, fireyblade: 3, bloodstone: 3,
+    lightningarrow: 2, wetslime: 2, aegis: 2,
+  };
   let total = 0;
   for (const id of DROP_POOL) total += weights[id];
   let r = Math.random() * total;
@@ -199,6 +236,26 @@ export function drawItemIcon(ctx, id, x, y, s = 12, t = 0) {
       P(4, 3 + w, 3, 2, '#dfffe6');
       P(4, 7 + w, 2, 2, '#0e3d1a');
       P(7, 7 + w, 2, 2, '#0e3d1a');
+      break;
+    }
+    case 'bloodstone': {
+      const pulse = Math.sin(t * 4) * 0.6;
+      P(4, 2 + pulse, 4, 2, '#7a1030');
+      P(3, 3 + pulse, 6, 5, Theme.hp);
+      P(4, 4 + pulse, 2, 2, '#ffc2d0');
+      P(2, 5 + pulse, 8, 4, '#c1274a');
+      P(4, 9 + pulse, 4, 2, '#7a1030');
+      P(5, 6 + pulse, 2, 2, '#ffffff');
+      break;
+    }
+    case 'aegis': {
+      const g = Math.sin(t * 3) * 0.5;
+      P(2, 1 + g, 8, 2, '#8fd8ff');
+      P(2, 3 + g, 8, 4, '#4fa8e8');
+      P(3, 7 + g, 6, 2, '#4fa8e8');
+      P(4, 9 + g, 4, 2, '#2b6ea8');
+      P(5, 10 + g, 2, 1, '#8fd8ff');
+      P(4, 2 + g, 2, 6, '#dff3ff');
       break;
     }
     default:

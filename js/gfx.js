@@ -152,6 +152,7 @@ export function limb(ctx, x, y, angle, len, thick, color, taper = 0) {
 }
 
 export function glowDot(ctx, x, y, r, color, alpha = 1) {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(r) || r <= 0) return;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   const g = ctx.createRadialGradient(x, y, 0, x, y, r);

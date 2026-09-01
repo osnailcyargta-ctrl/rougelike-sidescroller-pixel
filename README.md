@@ -51,6 +51,9 @@ one you aren't already carrying, so it can open up the other playstyle) and a ga
 it, right-click the gate to descend into the next room. Rooms get denser and
 add new enemy types as you go.
 
+Every enemy gains **+18% max HP and +12% damage per room**, so the same Ghoul
+that had 80 HP in room 1 has 210 HP by room 10.
+
 Clearing a wave restores **25% of max HP**, and stepping through the gate into
 the next room restores you to **full HP**.
 
@@ -59,6 +62,36 @@ Nothing is announced. There are no banners, no wave-clear notifications and no
 Reference information stays available where you go looking for it: the HUD
 carries the wave and enemies-left counters, item tooltips describe their
 effects, and the Controls screen sits in the main menu.
+
+### Boss rooms
+
+Every **5th room** (5, 10, 15, …) runs a **third wave** instead of ending after
+two, and holds its drop back for it. Wave 3 spawns a boss in the centre of the
+arena. When it dies, **two perks** appear on the centre platform and you may
+take **one** — the moment you claim one the other greys out for good.
+
+**Aether Golem** (600 HP, +40% per boss room). Two phases sharing one pool:
+
+* *Phase 1* — head fused to the body. Loops: four small lasers 0.2s apart → one
+  heavy beam that tracks your position with a 0.3s delay for 2s → a high jump
+  into a ground slam.
+* *Phase 2* (at 280 HP) — the head tears free and floats, moving on the X axis
+  only. Its script continues (four small lasers → turn → 2s beam → 1s beam)
+  while the body improvises underneath with high slams, quick slams and dashes,
+  and charges in alongside the head's short beam.
+
+Two more boss archetypes (bullet-hell and a mechanic-driven one) are planned;
+until their patterns exist, later boss rooms send a stronger golem.
+
+### Enemies
+
+| Enemy | Behaviour | Damage |
+| --- | --- | --- |
+| Ghoul | Chases and swipes | 12 |
+| Stinger | Flies, keeps distance, shoots | 10 |
+| Brute | Slow, heavy, occasionally charges | 20 |
+| Lurker | Circles at range, then commits to a long telegraphed lunge | 15 |
+| Spitter | Holds a stand-off and lobs acid on a high arc | 16 |
 
 ### Classes
 
@@ -80,6 +113,8 @@ Perks are items — they work while they simply sit anywhere in the inventory.
 | Fiery Blade | Common | Melee hits have a 33% chance to burn for 3s (-1 HP per 0.1s, non-stacking) |
 | Lightning Arrow | Uncommon | Arrows mark enemies for 5s; with 2+ marks, arcs chain between them, damaging everything the arc crosses and applying *electrified* (-10 HP every 1.2–1.5s) |
 | Wet Slime | Uncommon | Every 2s spits a homing glob that slows the target 30% for 1.5s |
+| Bloodstone | Common | Every 5th hit you land heals 3 HP (+2 per extra stack) |
+| Aegis Shard | Uncommon | +20 absorb shield that soaks damage before your HP; refills 5s after you stop taking hits |
 
 Inventory is a 4x4 grid (16 slots); the top row doubles as the hotbar. Non-weapon
 items stack to 10, weapons don't stack. Drag items between slots with the mouse.

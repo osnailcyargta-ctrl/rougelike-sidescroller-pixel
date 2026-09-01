@@ -105,9 +105,15 @@ export function drawHUD(ctx, game) {
   ctx.strokeStyle = rgba(Theme.uiDim, 0.8);
   ctx.strokeRect(10.5, 17.5, bw + 1, 6);
   drawTextShadow(ctx, `${Math.ceil(p.hp)}/${p.maxHp}`, 11 + bw, 9, Theme.ui, 1, 'right');
+  if (p.shieldMax > 0) {
+    const sw = Math.round(bw * clamp(p.shield / p.shieldMax, 0, 1));
+    pxRect(ctx, 11, 24, bw, 2, rgba('#0b2438', 0.9));
+    pxRect(ctx, 11, 24, sw, 2, '#8fd8ff');
+    if (sw > 0) glowDot(ctx, 11 + sw, 25, 6, '#8fd8ff', 0.35);
+  }
 
   // run status: where you are, which wave, how many are left
-  const label = game.roomCleared ? 'CLEARED' : `WAVE ${game.waveIndex}/2`;
+  const label = game.roomCleared ? 'CLEARED' : `WAVE ${game.waveIndex}/${game.wavesInRoom()}`;
   drawTextShadow(ctx, `ROOM ${game.roomIndex}`, VIEW_W - 7, 8, Theme.ui, 1, 'right');
   drawTextShadow(ctx, label, VIEW_W - 7, 18, game.roomCleared ? Theme.uiAccent : Theme.uiDim, 1, 'right');
   if (!game.roomCleared) {
@@ -117,6 +123,30 @@ export function drawHUD(ctx, game) {
 
   drawHotbar(ctx, game);
   drawPerkStrip(ctx, game);
+  drawBossBar(ctx, game);
+}
+
+function drawBossBar(ctx, game) {
+  const boss = game.boss;
+  if (!boss || boss.dead) return;
+  const w = 220;
+  const x = Math.round((VIEW_W - w) / 2);
+  const y = 16;
+  const k = clamp(boss.hp / boss.maxHp, 0, 1);
+  const phaseK = clamp(boss.phase2At / boss.maxHp, 0, 1);
+  drawTextShadow(ctx, boss.name, VIEW_W / 2, y - 10, Theme.uiAccent, 1, 'center');
+  pxRect(ctx, x - 1, y - 1, w + 2, 8, rgba('#000000', 0.7));
+  pxRect(ctx, x, y, w, 6, Theme.hpBack);
+  const g = ctx.createLinearGradient(x, 0, x + w, 0);
+  g.addColorStop(0, boss.phase === 2 ? '#ff8a3c' : Theme.enemyBrute);
+  g.addColorStop(1, boss.phase === 2 ? Theme.hp : '#b18cff');
+  ctx.fillStyle = g;
+  ctx.fillRect(x, y, Math.round(w * k), 6);
+  // phase threshold tick
+  pxRect(ctx, x + Math.round(w * phaseK), y - 2, 1, 10, boss.phase === 2 ? rgba(Theme.uiDim, 0.6) : Theme.uiAccent);
+  ctx.strokeStyle = rgba(Theme.uiDim, 0.9);
+  ctx.strokeRect(x - 0.5, y - 0.5, w + 1, 7);
+  drawTextShadow(ctx, `PHASE ${boss.phase}`, x + w + 6, y, Theme.uiDim, 1);
 }
 
 function slotBox(ctx, x, y, s, selected, item, t) {

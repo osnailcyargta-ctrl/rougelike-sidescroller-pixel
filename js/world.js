@@ -125,17 +125,20 @@ export function drawSpawnPads(ctx, t, active) {
 // --- pickups -------------------------------------------------------------
 
 export class Pickup {
-  constructor(itemId, x, y) {
+  constructor(itemId, x, y, group = null) {
     this.itemId = itemId;
     this.x = x;
     this.y = y;
     this.t = rand(0, 5);
     this.dead = false;
     this.born = 0;
+    this.group = group;      // choice pickups share a group id
+    this.disabled = false;   // the offer you did not take
   }
   update(dt) {
     this.t += dt;
     this.born += dt;
+    if (this.disabled) return;
     if (Math.random() < dt * 6) {
       spawnParticle({
         x: this.x + rand(-6, 6), y: this.y + rand(-8, 2), vx: rand(-5, 5), vy: rand(-22, -8),
@@ -146,9 +149,19 @@ export class Pickup {
   draw(ctx) {
     const def = ITEMS[this.itemId];
     const col = RARITY[def.rarity].color;
-    const bob = Math.sin(this.t * 2.4) * 2.5;
+    const bob = this.disabled ? 0 : Math.sin(this.t * 2.4) * 2.5;
     const y = this.y - 14 + bob;
     const pop = clamp(this.born * 4, 0, 1);
+    if (this.disabled) {
+      // the offer you passed on: greyed out and dimmed, still visible
+      ctx.save();
+      ctx.globalAlpha = 0.8;
+      if ('filter' in ctx) ctx.filter = 'grayscale(1)';
+      ctx.translate(this.x, y + 6);
+      drawItemIcon(ctx, this.itemId, -6, -6, 12, 0);
+      ctx.restore();
+      return;
+    }
     glowDot(ctx, this.x, y + 6, 18 * pop, col, 0.4);
     // beam of light
     ctx.save();
@@ -221,6 +234,8 @@ export function buildWave(roomIndex, waveIndex) {
   const pool = ['grunt'];
   if (roomIndex >= 2 || waveIndex === 2) pool.push('stinger');
   if (roomIndex >= 2) pool.push('brute');
+  if (roomIndex >= 3) pool.push('lurker');
+  if (roomIndex >= 4) pool.push('spitter');
   const base = 3 + Math.floor((roomIndex - 1) / 2);
   const early = EARLY_WAVE_COUNTS[roomIndex];
   const count = early ? early[waveIndex - 1] : clamp(base + (waveIndex === 2 ? 2 : 0), 3, 9);

@@ -7,6 +7,7 @@ import { Camera, burst, floatText, spawnParticle, limb, pxRect, glowDot, boltPat
 import { Sfx } from './audio.js';
 import {
   VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, ENEMY_TYPES, PERK,
+  ROOM_SCALING,
 } from './config.js';
 import { ITEMS, Inventory } from './items.js';
 
@@ -66,6 +67,16 @@ export class Status {
 
 // --- enemies -------------------------------------------------------------
 
+export const ENEMY_TINT = {
+  get grunt() { return Theme.enemyGrunt; },
+  get brute() { return Theme.enemyBrute; },
+  get stinger() { return Theme.enemyStinger; },
+  get lurker() { return '#ff7a3c'; },
+  get spitter() { return '#a8e04a'; },
+  get golemBody() { return Theme.enemyBrute; },
+  get golemHead() { return Theme.lightning; },
+};
+
 let ENEMY_UID = 1;
 
 export class Enemy {
@@ -80,8 +91,13 @@ export class Enemy {
     this.vx = 0; this.vy = 0;
     this.onGround = false;
     this.platform = null;
-    this.hp = def.hp;
-    this.maxHp = def.hp;
+    // Regular enemies get tougher every room.
+    const room = Math.max(1, game?.roomIndex ?? 1);
+    this.hpScale = 1 + ROOM_SCALING.hpPerRoom * (room - 1);
+    this.dmgScale = 1 + ROOM_SCALING.damagePerRoom * (room - 1);
+    this.maxHp = Math.round(def.hp * this.hpScale);
+    this.hp = this.maxHp;
+    this.dmg = Math.round(def.damage * this.dmgScale);
     this.facing = x < VIEW_W / 2 ? 1 : -1;
     this.st = new Status();
     this.attackTimer = rand(0.3, 0.9);
@@ -100,9 +116,14 @@ export class Enemy {
   get cy() { return this.y - this.h / 2; }
   get radius() { return Math.max(this.w, this.h) / 2; }
 
+  // Subclasses (boss parts) override this to share one HP pool.
+  applyRawDamage(amount) {
+    this.hp -= amount;
+    if (this.hp <= 0) this.kill();
+  }
+
   damage(amount, opts = {}) {
     if (this.dead) return;
-    this.hp -= amount;
     this.hurtFlash = 0.16;
     const crit = !!opts.crit;
     floatText(this.cx + rand(-3, 3), this.cy - 8, Math.round(amount), opts.color ?? (crit ? Theme.uiAccent : '#ffffff'), { crit });
@@ -119,7 +140,7 @@ export class Enemy {
     }
     Sfx.hit();
     Camera.add(opts.shake ?? 2);
-    if (this.hp <= 0) this.kill();
+    this.applyRawDamage(amount);
   }
 
   kill() {
@@ -128,7 +149,7 @@ export class Enemy {
     Sfx.die();
     Camera.add(4);
     this.game.hitstop(0.055);
-    const c = this.type === 'grunt' ? Theme.enemyGrunt : this.type === 'brute' ? Theme.enemyBrute : Theme.enemyStinger;
+    const c = ENEMY_TINT[this.type] ?? Theme.enemyGrunt;
     burst(this.cx, this.cy, 26, {
       color: c, color2: '#ffffff', speedMin: 40, speedMax: 210,
       lifeMin: 0.3, lifeMax: 0.8, sizeMax: 3, gravity: 300,
@@ -161,7 +182,7 @@ export class Enemy {
       st.burnTick += dt;
       while (st.burnTick >= PERK.burnTick) {
         st.burnTick -= PERK.burnTick;
-        this.hp -= PERK.burnTickDamage;
+        this.applyRawDamage(PERK.burnTickDamage);
         if (Math.random() < 0.5) {
           spawnParticle({
             x: this.cx + rand(-this.w / 2, this.w / 2), y: this.cy + rand(-6, 6),
@@ -169,7 +190,7 @@ export class Enemy {
             color: Theme.fireHot, color2: Theme.fire, gravity: -40, kind: 'shrink',
           });
         }
-        if (this.hp <= 0) { this.kill(); return; }
+        if (this.dead) return;
       }
     }
     if (st.slow > 0) {
@@ -223,6 +244,8 @@ export class Enemy {
   }
 
   updateWalker(dt, p, slow) {
+    if (this.type === 'lurker') return this.updateLurker(dt, p, slow);
+    if (this.type === 'spitter') return this.updateSpitter(dt, p, slow);
     const target = p && !p.dead ? p : null;
     const speed = (this.state === 'charge' ? (this.def.chargeSpeed ?? this.def.speed) : this.def.speed) * slow;
 
@@ -285,13 +308,134 @@ export class Enemy {
     this.y = clamp(this.y, 30, GROUND_Y - 6);
   }
 
+  // Lurker: hover at stand-off range, crouch, then commit to a long lunge.
+  updateLurker(dt, p, slow) {
+    const d = this.def;
+    const target = p && !p.dead ? p : null;
+    this.vy += GRAVITY * dt;
+
+    if (this.state === 'lunge') {
+      this.stateT += 0;
+      this.lungeT -= dt;
+      if (Math.random() < dt * 60) {
+        spawnParticle({
+          x: this.cx + rand(-4, 4), y: this.cy + rand(-6, 6), vx: rand(-20, 20), vy: rand(-20, 20),
+          life: rand(0.12, 0.3), size: 1, color: ENEMY_TINT.lurker, gravity: 0, kind: 'shrink',
+        });
+      }
+      if (target && Math.abs(target.x - this.x) < (this.w + target.w) / 2 + 2 &&
+          Math.abs((target.y - target.h / 2) - this.cy) < 20) {
+        target.hurt(this.dmg, this.x);
+        this.lungeT = 0;
+      }
+      if (this.lungeT <= 0) {
+        this.state = 'idle';
+        this.vx *= 0.25;
+        this.attackTimer = d.attackCooldown / Math.max(0.2, slow);
+      }
+      moveAndCollide(this, dt);
+      return;
+    }
+
+    if (this.telegraph > 0) {
+      this.telegraph -= dt;
+      this.vx = lerp(this.vx, 0, 1 - Math.pow(0.0005, dt));
+      if (this.telegraph <= 0 && target) {
+        this.state = 'lunge';
+        this.lungeT = d.lungeTime;
+        const a = Math.atan2((target.y - target.h / 2) - this.cy, target.x - this.x);
+        this.vx = Math.cos(a) * d.lungeSpeed * slow;
+        this.vy = Math.min(this.vy, Math.sin(a) * d.lungeSpeed * 0.5);
+        this.facing = sign(this.vx) || this.facing;
+        Sfx.dash();
+        burst(this.cx, this.cy, 10, {
+          color: ENEMY_TINT.lurker, speedMin: 30, speedMax: 120, lifeMin: 0.15, lifeMax: 0.4,
+          angle: a + Math.PI, spread: 0.7, gravity: 0,
+        });
+      }
+      moveAndCollide(this, dt);
+      return;
+    }
+
+    if (target && this.knockT <= 0) {
+      const dx = target.x - this.x;
+      this.facing = sign(dx) || this.facing;
+      const gap = Math.abs(dx);
+      // circle in and out of the stand-off band
+      const want = gap > d.standOff + 14 ? this.facing : gap < d.standOff - 14 ? -this.facing : 0;
+      this.vx = lerp(this.vx, want * d.speed * slow, 1 - Math.pow(0.002, dt));
+      if (this.onGround && target.y < this.y - 20 && Math.random() < dt * 1.4) this.vy = -300;
+      this.attackTimer -= 0;
+      if (this.attackTimer <= 0 && gap < d.attackRange) {
+        this.telegraph = d.windUp;
+        this.attackTimer = d.attackCooldown;
+        this.state = 'wind';
+      }
+    } else {
+      this.vx = lerp(this.vx, 0, 1 - Math.pow(0.004, dt));
+    }
+    moveAndCollide(this, dt);
+  }
+
+  // Spitter: holds a long stand-off and lobs acid on a high arc.
+  updateSpitter(dt, p, slow) {
+    const d = this.def;
+    const target = p && !p.dead ? p : null;
+    this.vy += GRAVITY * dt;
+
+    if (this.telegraph > 0) {
+      this.telegraph -= dt;
+      this.vx = lerp(this.vx, 0, 1 - Math.pow(0.0005, dt));
+      if (Math.random() < dt * 25) {
+        spawnParticle({
+          x: this.cx + rand(-5, 5), y: this.cy - 6, vx: rand(-8, 8), vy: rand(-24, -8),
+          life: rand(0.2, 0.5), size: 1, color: ENEMY_TINT.spitter, gravity: -20, kind: 'shrink',
+        });
+      }
+      if (this.telegraph <= 0 && target) this.lobAcid(target);
+      moveAndCollide(this, dt);
+      return;
+    }
+
+    if (target && this.knockT <= 0) {
+      const dx = target.x - this.x;
+      this.facing = sign(dx) || this.facing;
+      const gap = Math.abs(dx);
+      const want = gap > d.standOff + 20 ? this.facing : gap < d.standOff - 20 ? -this.facing : 0;
+      this.vx = lerp(this.vx, want * d.speed * slow, 1 - Math.pow(0.003, dt));
+      if (this.attackTimer <= 0 && gap < d.attackRange) {
+        this.telegraph = d.windUp;
+        this.attackTimer = d.attackCooldown / Math.max(0.2, slow);
+        this.state = 'wind';
+      }
+    } else {
+      this.vx = lerp(this.vx, 0, 1 - Math.pow(0.004, dt));
+    }
+    moveAndCollide(this, dt);
+  }
+
+  lobAcid(target) {
+    const ox = this.cx, oy = this.cy - 6;
+    const tx = target.x, ty = target.y - target.h / 2;
+    const flight = clamp(dist(ox, oy, tx, ty) / this.def.projectileSpeed, 0.55, 1.5);
+    const vx = (tx - ox) / flight;
+    const vy = (ty - oy - 0.5 * 620 * flight * flight) / flight;
+    this.game.projectiles.push(new Projectile({
+      x: ox, y: oy, vx, vy, gravity: 620, damage: this.dmg,
+      team: 'enemy', kind: 'acid', life: flight + 1.4, game: this.game,
+    }));
+    Sfx.slime();
+    this.state = 'shoot';
+    this.stateT = 0;
+  }
+
   strike(target) {
     this.state = 'strike';
     this.stateT = 0;
     Sfx.swing();
     const reach = this.def.attackRange + 6;
     if (Math.abs(target.x - this.x) < reach && Math.abs((target.y - target.h / 2) - this.cy) < 24) {
-      target.hurt(this.def.damage, this.x);
+      target.hurt(this.dmg, this.x);
     }
     burst(this.x + this.facing * 10, this.cy, 6, {
       color: Theme.enemyDark, color2: '#ffffff', speedMin: 20, speedMax: 80,
@@ -305,7 +449,7 @@ export class Enemy {
       x: this.cx, y: this.cy,
       vx: Math.cos(a) * this.def.projectileSpeed,
       vy: Math.sin(a) * this.def.projectileSpeed,
-      damage: this.def.damage,
+      damage: this.dmg,
       team: 'enemy', kind: 'bolt', life: 3, game: this.game,
     }));
     Sfx.bow();
@@ -317,7 +461,7 @@ export class Enemy {
     const t = this.anim;
     if (this.spawnT > 0) {
       const k = 1 - this.spawnT / 0.45;
-      const c = this.type === 'grunt' ? Theme.enemyGrunt : this.type === 'brute' ? Theme.enemyBrute : Theme.enemyStinger;
+      const c = ENEMY_TINT[this.type] ?? Theme.enemyGrunt;
       glowDot(ctx, this.x, this.y - this.h / 2, 24 * (1 - k) + 6, c, 0.8);
       ctx.globalAlpha = k;
       pxRect(ctx, this.x - this.w / 2, this.y - this.h * k, this.w, this.h * k, rgba(c, 0.7));
@@ -329,6 +473,8 @@ export class Enemy {
     const flash = this.hurtFlash > 0;
     if (this.type === 'grunt') this.drawGrunt(ctx, t, flash);
     else if (this.type === 'brute') this.drawBrute(ctx, t, flash);
+    else if (this.type === 'lurker') this.drawLurker(ctx, t, flash);
+    else if (this.type === 'spitter') this.drawSpitter(ctx, t, flash);
     else this.drawStinger(ctx, t, flash);
     ctx.restore();
 
@@ -420,6 +566,56 @@ export class Enemy {
     if (this.state === 'charge') glowDot(ctx, x, y - 12, 20, Theme.enemyBrute, 0.3);
   }
 
+  drawLurker(ctx, t, flash) {
+    const c = flash ? '#ffffff' : ENEMY_TINT.lurker;
+    const d = flash ? '#ffffff' : '#2a1020';
+    const crouch = this.telegraph > 0 ? clamp(1 - this.telegraph / this.def.windUp, 0, 1) * 4 : 0;
+    const lunging = this.state === 'lunge';
+    const cyc = t * (Math.abs(this.vx) > 6 ? 12 : 3);
+    const x = Math.round(this.x);
+    const y = Math.round(this.y + Math.sin(cyc * 2) * 0.6);
+    const f = this.facing;
+    // long back legs
+    limb(ctx, x - 3, y - 6 + crouch, Math.PI / 2 + 0.7 + Math.sin(cyc) * 0.5, 7, 2, d);
+    limb(ctx, x + 3, y - 6 + crouch, Math.PI / 2 - 0.7 - Math.sin(cyc) * 0.5, 7, 2, d);
+    // low slung body, leaning into the lunge
+    const lean = lunging ? f * 2 : 0;
+    pxRect(ctx, x - 6 + lean, y - 12 + crouch, 12, 6, c);
+    pxRect(ctx, x - 6 + lean, y - 12 + crouch, 12, 2, flash ? '#fff' : '#ffb07a');
+    // head thrust forward
+    pxRect(ctx, x + f * 4 + lean, y - 14 + crouch, 6, 5, c);
+    pxRect(ctx, x + f * 5 + lean, y - 13 + crouch, 3, 1, flash ? '#fff' : '#fff3b0');
+    // tail
+    limb(ctx, x - f * 6 + lean, y - 10 + crouch, f > 0 ? Math.PI - 0.5 : 0.5, 9, 2, d);
+    if (this.telegraph > 0) {
+      const k = 1 - this.telegraph / this.def.windUp;
+      glowDot(ctx, x, y - 10, 10 + k * 12, ENEMY_TINT.lurker, 0.15 + k * 0.35);
+    }
+    if (lunging) glowDot(ctx, x, y - 9, 16, ENEMY_TINT.lurker, 0.4);
+  }
+
+  drawSpitter(ctx, t, flash) {
+    const c = flash ? '#ffffff' : ENEMY_TINT.spitter;
+    const d = flash ? '#ffffff' : '#1d3a12';
+    const charge = this.telegraph > 0 ? clamp(1 - this.telegraph / this.def.windUp, 0, 1) : 0;
+    const breathe = Math.sin(t * 2.5) * 1 + charge * 2;
+    const x = Math.round(this.x), y = Math.round(this.y);
+    const f = this.facing;
+    limb(ctx, x - 4, y - 5, Math.PI / 2 + 0.5, 6, 3, d);
+    limb(ctx, x + 4, y - 5, Math.PI / 2 - 0.5, 6, 3, d);
+    // bulbous sac
+    pxRect(ctx, x - 8, y - 13 - breathe, 16, 9 + breathe, c);
+    pxRect(ctx, x - 6, y - 15 - breathe, 12, 3, flash ? '#fff' : '#d6ff8a');
+    pxRect(ctx, x - 4, y - 8, 3, 3, d);
+    pxRect(ctx, x + 2, y - 8, 3, 3, d);
+    // spout
+    limb(ctx, x + f * 6, y - 12 - breathe, f > 0 ? -0.5 : Math.PI + 0.5, 7, 4, d);
+    if (charge > 0) {
+      const px2 = x + f * (6 + Math.cos(f > 0 ? -0.5 : Math.PI + 0.5) * 7);
+      glowDot(ctx, px2, y - 15 - breathe, 6 + charge * 8, ENEMY_TINT.spitter, 0.2 + charge * 0.5);
+    }
+  }
+
   drawStinger(ctx, t, flash) {
     const c = flash ? '#ffffff' : Theme.enemyStinger;
     const d = flash ? '#ffffff' : Theme.enemyDark;
@@ -476,6 +672,18 @@ export class Projectile {
     this.trail.push([this.x, this.y]);
     if (this.trail.length > 8) this.trail.shift();
 
+    if (this.kind === 'acid' && Math.random() < dt * 45) {
+      spawnParticle({
+        x: this.x, y: this.y, vx: rand(-8, 8), vy: rand(-6, 14), life: rand(0.2, 0.4),
+        size: 1, color: '#a8e04a', gravity: 180, kind: 'shrink',
+      });
+    }
+    if (this.kind === 'laser' && Math.random() < dt * 70) {
+      spawnParticle({
+        x: this.x, y: this.y, vx: rand(-14, 14), vy: rand(-14, 14), life: rand(0.1, 0.25),
+        size: 1, color: Theme.lightning, gravity: 0, kind: 'shrink',
+      });
+    }
     if (this.kind === 'slime' && Math.random() < dt * 40) {
       spawnParticle({ x: this.x, y: this.y, vx: rand(-10, 10), vy: rand(-10, 10), life: 0.3, size: 1, color: Theme.slime, gravity: 40, kind: 'shrink' });
     }
@@ -484,6 +692,21 @@ export class Projectile {
   expire() {
     if (this.dead) return;
     this.dead = true;
+    if (this.kind === 'acid') {
+      burst(this.x, this.y, 16, {
+        color: '#a8e04a', color2: '#e6ffb0', speedMin: 30, speedMax: 130,
+        lifeMin: 0.2, lifeMax: 0.6, gravity: 380, angle: -Math.PI / 2, spread: 1.3,
+      });
+      Sfx.slime();
+      return;
+    }
+    if (this.kind === 'laser') {
+      burst(this.x, this.y, 8, {
+        color: Theme.lightning, color2: '#ffffff', speedMin: 20, speedMax: 110,
+        lifeMin: 0.1, lifeMax: 0.3, gravity: 0, kind: 'line',
+      });
+      return;
+    }
     const col = this.kind === 'slime' ? Theme.slime : this.team === 'enemy' ? Theme.enemyStinger : Theme.steel;
     burst(this.x, this.y, 5, { color: col, speedMin: 10, speedMax: 60, lifeMin: 0.1, lifeMax: 0.3, sizeMax: 1 });
   }
@@ -497,6 +720,7 @@ export class Projectile {
         burst(this.x, this.y, 10, { color: Theme.slime, speedMin: 20, speedMax: 90, lifeMin: 0.2, lifeMax: 0.5, gravity: 260 });
       } else {
         target.damage(this.damage, { angle: this.angle, spread: 0.9, knockback: 30, dir: sign(this.vx) });
+        if (this.game?.player) this.game.player.registerHit();
         if (this.mark) target.applyMark();
       }
     } else {
@@ -512,6 +736,19 @@ export class Projectile {
       glowDot(ctx, this.x, this.y, 8, Theme.slime, 0.35);
       pxRect(ctx, this.x - 3, this.y - 2 + wob, 6, 5, Theme.slime);
       pxRect(ctx, this.x - 1, this.y - 3 + wob, 3, 2, '#dfffe6');
+    } else if (this.kind === 'acid') {
+      const wob = Math.sin(this.t * 18) * 1;
+      glowDot(ctx, this.x, this.y, 10, '#a8e04a', 0.35);
+      pxRect(ctx, this.x - 4, this.y - 3 + wob, 8, 6, '#a8e04a');
+      pxRect(ctx, this.x - 2, this.y - 4 + wob, 4, 2, '#e6ffb0');
+      pxRect(ctx, this.x - 5, this.y + wob, 2, 2, '#7ab52e');
+    } else if (this.kind === 'laser') {
+      ctx.translate(Math.round(this.x), Math.round(this.y));
+      ctx.rotate(this.angle);
+      ctx.globalCompositeOperation = 'lighter';
+      pxRect(ctx, -7, -2, 14, 4, rgba(Theme.lightning, 0.35));
+      pxRect(ctx, -6, -1, 12, 2, Theme.lightning);
+      pxRect(ctx, -2, -1, 6, 2, '#ffffff');
     } else if (this.team === 'enemy') {
       glowDot(ctx, this.x, this.y, 9, Theme.enemyStinger, 0.4);
       ctx.translate(Math.round(this.x), Math.round(this.y));
@@ -566,6 +803,10 @@ export class Player {
     this.reloadT = 0;
     this.slimeT = PERK.slimeInterval;
     this.chainCd = 0;
+    this.shield = 0;
+    this.shieldMax = 0;
+    this.shieldRegenT = 0;
+    this.hitStreak = 0;
     this.afterimages = [];
     this.aim = 0;
     this.controls = true;
@@ -581,6 +822,11 @@ export class Player {
   get cy() { return this.y - this.h / 2; }
 
   recomputeStats() {
+    const aegis = this.inventory.countOf('aegis');
+    const newShieldMax = aegis * PERK.aegisShield;
+    if (newShieldMax > this.shieldMax) this.shield += newShieldMax - this.shieldMax;
+    this.shieldMax = newShieldMax;
+    this.shield = clamp(this.shield, 0, this.shieldMax);
     const stacks = Math.min(this.inventory.countOf('lifecrystal'), PERK.lifeCrystalMaxStacks);
     const newMax = this.baseMaxHp + stacks * PERK.lifeCrystalHp;
     if (newMax !== this.maxHp) {
@@ -591,8 +837,42 @@ export class Player {
     this.hp = Math.min(this.hp, this.maxHp);
   }
 
+  // Every hit you land; Bloodstone pays out on each fifth one.
+  registerHit() {
+    const stacks = this.inventory.countOf('bloodstone');
+    if (stacks <= 0) { this.hitStreak = 0; return; }
+    this.hitStreak++;
+    if (this.hitStreak < PERK.bloodstoneHits) return;
+    this.hitStreak = 0;
+    const heal = PERK.bloodstoneHeal + (stacks - 1) * PERK.bloodstoneStackHeal;
+    if (this.hp >= this.maxHp) return;
+    this.hp = clamp(this.hp + heal, 0, this.maxHp);
+    floatText(this.cx, this.cy - 18, `+${heal}`, '#8ce88c', { life: 0.7 });
+    burst(this.cx, this.cy, 8, {
+      color: Theme.hp, color2: '#8ce88c', speedMin: 15, speedMax: 70,
+      lifeMin: 0.2, lifeMax: 0.5, gravity: -60,
+    });
+  }
+
   hurt(amount, fromX) {
     if (this.dead || this.invuln > 0 || this.dashT > 0) return;
+    this.shieldRegenT = PERK.aegisRegenDelay;
+    if (this.shield > 0) {
+      const soaked = Math.min(this.shield, amount);
+      this.shield -= soaked;
+      amount -= soaked;
+      floatText(this.cx, this.cy - 20, `-${Math.round(soaked)}`, '#8fd8ff', { life: 0.7 });
+      burst(this.cx, this.cy, 12, {
+        color: '#8fd8ff', color2: '#ffffff', speedMin: 30, speedMax: 130,
+        lifeMin: 0.2, lifeMax: 0.5,
+      });
+      Sfx.hit();
+      Camera.add(4);
+      if (amount <= 0) {
+        this.invuln = PLAYER.invulnTime * 0.6;
+        return;
+      }
+    }
     this.hp -= amount;
     this.invuln = PLAYER.invulnTime;
     this.hurtFlash = 0.25;
@@ -807,6 +1087,15 @@ export class Player {
 
   updatePerks(dt) {
     const inv = this.inventory;
+    // aegis shield refills once you have been left alone long enough
+    if (this.shieldMax > 0) {
+      if (this.shieldRegenT > 0) this.shieldRegenT -= dt;
+      else if (this.shield < this.shieldMax) {
+        this.shield = clamp(this.shield + PERK.aegisRegenRate * dt, 0, this.shieldMax);
+      }
+    } else {
+      this.shield = 0;
+    }
     // wet slime: auto-fire a slowing glob at the nearest enemy
     if (inv.has('wetslime')) {
       this.slimeT -= dt;
@@ -887,6 +1176,7 @@ export class Player {
       const ang = Math.atan2(e.cy - this.cy, e.cx - this.x);
       if (Math.abs(shortAngle(a, ang)) > arc) continue;
       hits++;
+      this.registerHit();
       const burned = fiery && Math.random() < PERK.burnChance;
       e.damage(damage, {
         knockback: 130, fromX: this.x, angle: ang, spread: 0.8,
@@ -914,6 +1204,17 @@ export class Player {
     if (this.invuln > 0 && !this.dead && Math.floor(this.invuln * 22) % 2 === 0) return;
     this.drawBody(ctx, this.x, this.y, this.facing, false);
     this.drawSwingFx(ctx);
+    if (this.shield > 0) {
+      const k = this.shield / Math.max(1, this.shieldMax);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = rgba('#8fd8ff', 0.25 + 0.3 * k);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(this.x, this.cy, 10, 13, 0, 0, TAU);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   drawBody(ctx, px, py, facing, ghost) {

@@ -5,10 +5,14 @@ import { Camera, updateFx, drawParticles, drawTexts, clearFx, burst, floatText, 
 import { Input, initInput, inputTick, inputEndFrame } from './input.js';
 import { Sfx, resumeAudio, setVolume, AudioCfg } from './audio.js';
 import { PostFX, parseShaderPack, DEFAULT_COMPOSITE } from './postfx.js';
-import { VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, DROP_POINT, PERK, WAVES, PLAYER as PCFG } from './config.js';
+import {
+  VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, DROP_POINT, PERK, WAVES, PLAYER as PCFG,
+  BOSS_ROOM_INTERVAL,
+} from './config.js';
 import { Player, Enemy, Projectile } from './entities.js';
+import { makeBoss } from './boss.js';
 import { drawBackground, drawArena, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal } from './world.js';
-import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, drawItemIcon } from './items.js';
+import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
 import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, panel, button } from './ui.js';
 import { drawText, drawTextShadow } from './font.js';
 import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, drawControls } from './screens.js';
@@ -46,6 +50,7 @@ export class Game {
     this.bolts = [];
     this.pendingSpawns = [];
     this.portal = null;
+    this.boss = null;
     this.roomIndex = 1;
     this.waveIndex = 1;
     this.roomCleared = false;
@@ -173,16 +178,24 @@ export class Game {
     this.roomIndex = 1;
     this.deathT = 0;
     this.invOpen = false;
+    this.boss = null;
     this.screen = 'playing';
     this.startRoom(1);
   }
 
   quitToMenu() { this.screen = 'menu'; this.player = null; clearFx(); }
 
+  isBossRoom(index = this.roomIndex) { return index % BOSS_ROOM_INTERVAL === 0; }
+
+  wavesInRoom(index = this.roomIndex) {
+    return this.isBossRoom(index) ? WAVES.bossRoomWaves : WAVES.perRoom;
+  }
+
   startRoom(index) {
     this.roomIndex = index;
     this.roomCleared = false;
     this.portal = null;
+    this.boss = null;
     this.pickups.length = 0;
     this.enemies.length = 0;
     this.projectiles.length = 0;
@@ -195,9 +208,15 @@ export class Game {
 
   startWave(n) {
     this.waveIndex = n;
-    this.pendingSpawns = buildWave(this.roomIndex, n);
     this.waveTimer = 0;
     this.waveCooldown = null;
+    if (this.isBossRoom() && n === WAVES.bossRoomWaves) {
+      this.pendingSpawns = [];
+      this.boss = makeBoss(this, this.roomIndex);
+      Camera.add(10);
+    } else {
+      this.pendingSpawns = buildWave(this.roomIndex, n);
+    }
     Sfx.wave();
   }
 
@@ -264,16 +283,24 @@ export class Game {
     }
     this.postfx.slowmo = lerp(this.postfx.slowmo, this.freezeT > 0 ? 1 : 0, 1 - Math.pow(0.001, dt));
 
-    this.handleGlobalKeys();
-    if (this.screen === 'playing' || this.screen === 'gameover') this.update(gdt);
-    else updateWorld(dt);
+    // One bad frame must never end the run: log it and keep the loop alive.
+    try {
+      this.handleGlobalKeys();
+      if (this.screen === 'playing' || this.screen === 'gameover') this.update(gdt);
+      else updateWorld(dt);
 
-    updateFx(this.screen === 'playing' || this.screen === 'gameover' ? gdt : dt);
-    Camera.update(this.screenShake ? dt : 0);
-    if (!this.screenShake) { Camera.ox = 0; Camera.oy = 0; }
+      updateFx(this.screen === 'playing' || this.screen === 'gameover' ? gdt : dt);
+      Camera.update(this.screenShake ? dt : 0);
+      if (!this.screenShake) { Camera.ox = 0; Camera.oy = 0; }
 
-    this.render(dt);
-    this.postfx.render(dt);
+      this.render(dt);
+      this.postfx.render(dt);
+    } catch (err) {
+      if (!this._loggedError) { console.error('frame error', err); this._loggedError = true; }
+      this.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      this.ctx.globalAlpha = 1;
+      this.ctx.globalCompositeOperation = 'source-over';
+    }
     inputEndFrame();
     requestAnimationFrame(this.loop);
   }
@@ -321,12 +348,13 @@ export class Game {
     // --- waves
     if (!this.roomCleared) this.updateWaves(dt);
 
+    if (this.boss) this.boss.update(dt);
     for (const e of this.enemies) e.update(dt);
     // contact damage from bodies
     for (const e of this.enemies) {
       if (e.dead || e.spawnT > 0 || e.def.flying) continue;
       if (Math.abs(e.cx - p.x) < (e.w + p.w) / 2 - 1 && Math.abs(e.cy - p.cy) < (e.h + p.h) / 2 - 1) {
-        if (p.dashT <= 0) p.hurt(Math.round(e.def.damage * 0.35), e.x);
+        if (p.dashT <= 0) p.hurt(Math.round(e.dmg * 0.35), e.x);
       }
     }
     for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -382,7 +410,7 @@ export class Game {
       this.waveCooldown -= dt;
       if (this.waveCooldown <= 0) {
         this.waveCooldown = null;
-        if (this.waveIndex < WAVES.perRoom) this.startWave(this.waveIndex + 1);
+        if (this.waveIndex < this.wavesInRoom()) this.startWave(this.waveIndex + 1);
         else this.clearRoom();
       }
     }
@@ -390,12 +418,26 @@ export class Game {
 
   clearRoom() {
     this.roomCleared = true;
-    const id = rollDrop(this.player.inventory);
-    this.pickups.push(new Pickup(id, DROP_POINT.x, DROP_POINT.y));
-    burst(DROP_POINT.x, DROP_POINT.y - 12, 26, {
-      color: RARITY[ITEMS[id].rarity].color, color2: '#ffffff',
-      speedMin: 30, speedMax: 140, lifeMin: 0.3, lifeMax: 0.8, gravity: 120,
-    });
+    if (this.isBossRoom()) {
+      // two offers on the centre platform, one pick
+      const [a, b] = rollPerkPair();
+      const group = `boss-${this.roomIndex}`;
+      this.pickups.push(new Pickup(a, DROP_POINT.x - 26, DROP_POINT.y, group));
+      this.pickups.push(new Pickup(b, DROP_POINT.x + 26, DROP_POINT.y, group));
+      for (const pk of this.pickups) {
+        burst(pk.x, pk.y - 12, 24, {
+          color: RARITY[ITEMS[pk.itemId].rarity].color, color2: '#ffffff',
+          speedMin: 30, speedMax: 140, lifeMin: 0.3, lifeMax: 0.8, gravity: 120,
+        });
+      }
+    } else {
+      const id = rollDrop(this.player.inventory);
+      this.pickups.push(new Pickup(id, DROP_POINT.x, DROP_POINT.y));
+      burst(DROP_POINT.x, DROP_POINT.y - 12, 26, {
+        color: RARITY[ITEMS[id].rarity].color, color2: '#ffffff',
+        speedMin: 30, speedMax: 140, lifeMin: 0.3, lifeMax: 0.8, gravity: 120,
+      });
+    }
     this.portal = new Portal(VIEW_W - 34, GROUND_Y);
     Camera.add(4);
     Sfx.pickup();
@@ -407,6 +449,7 @@ export class Game {
     // pickups first
     for (let i = 0; i < this.pickups.length; i++) {
       const pk = this.pickups[i];
+      if (pk.disabled) continue;
       if (dist(mx, my, pk.x, pk.y - 12) > 22) continue;
       if (dist(p.x, p.cy, pk.x, pk.y - 12) > 64) return;
       if (!p.inventory.canAccept(pk.itemId)) { Sfx.ui(); return; }
@@ -416,6 +459,12 @@ export class Game {
       burst(pk.x, pk.y - 12, 26, { color: RARITY[def.rarity].color, color2: '#ffffff', speedMin: 20, speedMax: 130, lifeMin: 0.2, lifeMax: 0.7 });
       Sfx.pickup();
       this.pickups.splice(i, 1);
+      // taking one of a choice pair burns the other
+      if (pk.group) {
+        for (const other of this.pickups) {
+          if (other.group === pk.group) other.disabled = true;
+        }
+      }
       return;
     }
     // portal
@@ -469,6 +518,8 @@ export class Game {
     for (const e of this.enemies) e.draw(ctx);
     for (const pr of this.projectiles) pr.draw(ctx);
     if (this.player) this.player.draw(ctx);
+
+    if (this.boss) this.boss.drawBeams(ctx);
 
     for (const b of this.bolts) {
       const k = 1 - b.t / b.life;
