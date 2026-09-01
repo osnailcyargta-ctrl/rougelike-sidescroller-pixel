@@ -46,8 +46,8 @@ The repository root *is* the site. In **Settings → Pages**, choose
 | `Esc` | Pause |
 
 There is one shortcut the game never mentions: **`Ctrl+M`** opens a debug menu
-with god mode, infinite health, a spawner for every item in the game, full heal
-and kill-wave. It is
+with god mode, infinite health, a spawner for every item in the game, a spawner
+for every enemy and both bosses, full heal and kill-wave. It is
 deliberately absent from the in-game Controls screen.
 
 ## Run structure

@@ -167,6 +167,27 @@ export class Game {
 
   toast(msg) { this.hint = msg; this.hintT = 2.2; }
 
+  // --- debug spawns ------------------------------------------------------
+
+  debugSpawnEnemy(type) {
+    if (!this.player) return;
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const x = clamp(this.player.x + side * rand(60, 110), 24, VIEW_W - 24);
+    this.enemies.push(new Enemy(type, x, GROUND_Y, this));
+  }
+
+  debugSpawnBoss(id) {
+    if (!this.player) return;
+    // retire whatever is already out there, quietly - no death cutscene
+    if (this.boss && !this.boss.dead) {
+      this.boss.dead = true;
+      for (const p of (this.boss.parts ?? [])) p.dead = true;
+    }
+    this.boss = makeBoss(this, this.roomIndex, id);
+    this.boss.intro = 0.6;
+    Camera.add(8);
+  }
+
   hitstop(t) { this.freezeT = Math.max(this.freezeT, t); }
 
   // --- run flow ----------------------------------------------------------

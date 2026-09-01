@@ -4,7 +4,8 @@ import { clamp, lerp, rand, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
 import { drawText, drawTextShadow, textWidth } from './font.js';
 import { pxRect, glowDot } from './gfx.js';
-import { VIEW_W, VIEW_H, BOW, PLAYER } from './config.js';
+import { VIEW_W, VIEW_H, BOW, PLAYER, ENEMY_TYPES, BOSS_TYPES } from './config.js';
+import { ENEMY_TINT } from './entities.js';
 import { ITEMS, RARITY, INV_COLS, INV_ROWS, INV_SIZE, HOTBAR_SIZE, drawItemIcon } from './items.js';
 import { Input } from './input.js';
 import { Sfx } from './audio.js';
@@ -288,14 +289,16 @@ export function drawTooltip(ctx, tip) {
 
 // --- debug menu (ctrl+m) -------------------------------------------------
 
-// Everything that exists, so a new item shows up here without another edit.
+// Everything that exists, so a new entry shows up here without another edit.
 const DEBUG_ITEMS = Object.keys(ITEMS);
+const DEBUG_MOBS = Object.keys(ENEMY_TYPES).filter((k) => !ENEMY_TYPES[k].boss);
+const DEBUG_BOSSES = Object.keys(BOSS_TYPES);
 
 export function drawDebugMenu(ctx, game) {
   ctx.fillStyle = rgba('#000000', 0.55);
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
-  const w = 268, h = 178;
+  const w = 268, h = 226;
   const x = Math.round((VIEW_W - w) / 2);
   const y = Math.round((VIEW_H - h) / 2);
   panel(ctx, x, y, w, h, { accent: '#8ce88c' });
@@ -343,15 +346,37 @@ export function drawDebugMenu(ctx, game) {
 
   const rowsBottom = gy + rows * (cell + gap);
   drawText(ctx, 'CLICK AN ICON TO ADD ONE', x + 12, rowsBottom + 2, Theme.uiDim, 1);
-  if (live && button(ctx, 'dbg-heal', x + 12, rowsBottom + 14, 78, 16, 'FULL HEAL')) {
+
+  // --- mobs and bosses, four to a row
+  drawText(ctx, 'SPAWN MOB', x + 12, rowsBottom + 16, live ? Theme.uiAccent : Theme.uiDim, 1);
+  const entries = [
+    ...DEBUG_MOBS.map((id) => ({ id, boss: false, label: ENEMY_TYPES[id].name.toUpperCase() })),
+    ...DEBUG_BOSSES.map((id) => ({ id, boss: true, label: (BOSS_TYPES[id].short ?? BOSS_TYPES[id].name).toUpperCase() })),
+  ];
+  const bw2 = 58, bh2 = 15, bgap = 3, bcols = 4;
+  const by0 = rowsBottom + 28;
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    const bx = x + 12 + (i % bcols) * (bw2 + bgap);
+    const by = by0 + Math.floor(i / bcols) * (bh2 + bgap);
+    const tint = e.boss ? Theme.uiAccent : (ENEMY_TINT[e.id] ?? Theme.ui);
+    if (button(ctx, 'dbg-mob-' + e.id, bx, by, bw2, bh2, e.label, { disabled: !live, accent: tint })) {
+      if (e.boss) game.debugSpawnBoss(e.id);
+      else game.debugSpawnEnemy(e.id);
+    }
+    if (live) pxRect(ctx, bx + 1, by + 1, 2, bh2 - 2, tint);
+  }
+  const mobsBottom = by0 + Math.ceil(entries.length / bcols) * (bh2 + bgap);
+
+  if (live && button(ctx, 'dbg-heal', x + 12, mobsBottom + 4, 78, 16, 'FULL HEAL')) {
     game.player.hp = game.player.maxHp;
     game.player.shield = game.player.shieldMax;
   }
-  if (live && button(ctx, 'dbg-kill', x + 96, rowsBottom + 14, 78, 16, 'KILL WAVE')) {
+  if (live && button(ctx, 'dbg-kill', x + 96, mobsBottom + 4, 78, 16, 'KILL WAVE')) {
     game.pendingSpawns.length = 0;
     for (const e of [...game.enemies]) if (!e.dead) e.kill();
   }
-  if (button(ctx, 'dbg-close', x + w - 84, rowsBottom + 14, 72, 16, 'CLOSE')) game.debugOpen = false;
+  if (button(ctx, 'dbg-close', x + w - 84, mobsBottom + 4, 72, 16, 'CLOSE')) game.debugOpen = false;
 
   drawTextShadow(ctx, 'CTRL+M', x + w - 8, y + 7, Theme.uiDim, 1, 'right');
   if (UI.tooltip) drawTooltip(ctx, UI.tooltip);

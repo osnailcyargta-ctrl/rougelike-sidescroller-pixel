@@ -102,6 +102,8 @@ export class GolemBoss {
 
   get damage() { return this; }
 
+  get parts() { return [this.body, this.head].filter(Boolean); }
+
   headOrigin() {
     if (this.phase === 2 && this.head) return { x: this.head.x, y: this.head.y - this.head.h / 2 };
     return { x: this.body.x, y: this.body.y - this.body.h - 6 };
@@ -727,8 +729,10 @@ export class GolemBoss {
   }
 }
 
-export function makeBoss(game, roomIndex) {
-  // Boss rooms alternate: the golem, then Big Dude, then the golem again.
+// `which` forces a specific boss; without it, boss rooms alternate.
+export function makeBoss(game, roomIndex, which = null) {
+  if (which === 'golem') return new GolemBoss(game, roomIndex);
+  if (which === 'bigdude') return new WormBoss(game, roomIndex);
   const tier = Math.max(1, Math.round(roomIndex / BOSS_ROOM_INTERVAL));
   return tier % 2 === 1 ? new GolemBoss(game, roomIndex) : new WormBoss(game, roomIndex);
 }

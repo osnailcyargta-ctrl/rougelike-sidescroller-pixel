@@ -134,7 +134,7 @@ export const ENEMY_TYPES = {
 // The golem. Phase 2 begins the moment its shared HP pool drops to phase2Hp.
 export const BOSS_TYPES = {
   golem: {
-    id: 'golem', name: 'Aether Golem', kind: 'lasers',
+    id: 'golem', name: 'Aether Golem', short: 'Golem', kind: 'lasers',
     hp: 600, phase2Hp: 280,
     bodyW: 48, bodyH: 60, headW: 32, headH: 27,
     contactDamage: 18,
@@ -147,7 +147,7 @@ export const BOSS_TYPES = {
   },
   // A twenty-block worm that lives under the floor and only surfaces to strike.
   bigdude: {
-    id: 'bigdude', name: 'Big Dude', kind: 'worm',
+    id: 'bigdude', name: 'Big Dude', short: 'Big Dude', kind: 'worm',
     hp: 600,
     segments: 20, segSpacing: 16,   // 20 blocks of body
     headR: 15, bodyR: 11, tailR: 4,
