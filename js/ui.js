@@ -144,11 +144,13 @@ function drawBossBar(ctx, game) {
   g.addColorStop(1, boss.phase === 2 ? Theme.hp : '#b18cff');
   ctx.fillStyle = g;
   ctx.fillRect(x, y, Math.round(w * k), 6);
-  // phase threshold tick
-  pxRect(ctx, x + Math.round(w * phaseK), y - 2, 1, 10, boss.phase === 2 ? rgba(Theme.uiDim, 0.6) : Theme.uiAccent);
+  // phase threshold tick, only for bosses that actually have a second phase
+  if (boss.phase2At > 0) {
+    pxRect(ctx, x + Math.round(w * phaseK), y - 2, 1, 10, boss.phase === 2 ? rgba(Theme.uiDim, 0.6) : Theme.uiAccent);
+  }
   ctx.strokeStyle = rgba(Theme.uiDim, 0.9);
   ctx.strokeRect(x - 0.5, y - 0.5, w + 1, 7);
-  drawTextShadow(ctx, `PHASE ${boss.phase}`, x + w + 6, y, Theme.uiDim, 1);
+  if (boss.phase2At > 0) drawTextShadow(ctx, `PHASE ${boss.phase}`, x + w + 6, y, Theme.uiDim, 1);
 }
 
 function slotBox(ctx, x, y, s, selected, item, t) {

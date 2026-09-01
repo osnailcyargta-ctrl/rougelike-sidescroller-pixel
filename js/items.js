@@ -28,7 +28,7 @@ export const ITEMS = {
   nukerang: {
     id: 'nukerang', name: 'Nukerang', rarity: 'rare', stack: 1, weapon: 'boomerang',
     desc: ['Thrown melee weapon. 5 block flight,', 'returns to your hand.',
-           'Blasts for 7 on contact; every 3rd', 'blast detonates for 14.'],
+           'Blasts for 14 on contact; every 3rd', 'blast detonates for 28.'],
   },
   lifecrystal: {
     id: 'lifecrystal', name: 'Life Crystal', rarity: 'common', stack: MAX_STACK,

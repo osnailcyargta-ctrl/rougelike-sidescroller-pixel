@@ -811,11 +811,15 @@ export class Projectile {
         if (o) {
           o.boomerangOut = null;
           o.attackCd = Math.max(o.attackCd, NUKERANG.cooldown);
+          o.catchT = NUKERANG.catchTime;
         }
-        Sfx.ui();
-        burst(this.x, this.y, 6, {
-          color: Theme.steel, color2: '#ffffff', speedMin: 20, speedMax: 70,
-          lifeMin: 0.1, lifeMax: 0.28, gravity: 0, kind: 'shrink',
+        Sfx.hit();
+        Camera.add(2);
+        Camera.punch(0.5);
+        impactRing(this.x, this.y, { color: Theme.steel, r0: 2, r1: 16, life: 0.2, width: 1.5 });
+        burst(this.x, this.y, 9, {
+          color: Theme.steel, color2: '#ffffff', speedMin: 30, speedMax: 110,
+          lifeMin: 0.1, lifeMax: 0.28, gravity: 0, kind: 'streak', drag: 0.85,
         });
         return;
       }
@@ -1018,6 +1022,9 @@ export class Player {
     this.hitStreak = 0;
     this.boomerangOut = null;
     this.nukeBlasts = 0;
+    this.throwWind = 0;
+    this.throwAim = 0;
+    this.catchT = 0;
     this.afterimages = [];
     this.scarf = makeChain(4, this.x, this.y - 16);
     this.cape = makeChain(5, this.x, this.y - 14);
@@ -1141,6 +1148,11 @@ export class Player {
     this.dropT = Math.max(0, this.dropT - dt);
     this.landSquash = Math.max(0, this.landSquash - dt * 5.5);
     this.chainCd = Math.max(0, this.chainCd - dt);
+    this.catchT = Math.max(0, this.catchT - dt);
+    if (this.throwWind > 0) {
+      this.throwWind -= dt;
+      if (this.throwWind <= 0) { this.throwWind = 0; this.releaseNukerang(); }
+    }
     if (this.swing) {
       this.swing.t += dt;
       if (this.swing.t > SWORD.swingTime * 1.6) this.swing = null;
@@ -1251,6 +1263,31 @@ export class Player {
     if (!before && this.onGround) this.onLand();
   }
 
+  releaseNukerang() {
+    const a = this.throwAim;
+    const pr = new Projectile({
+      x: this.x + Math.cos(a) * 10, y: this.cy + Math.sin(a) * 10,
+      vx: Math.cos(a) * NUKERANG.speed, vy: Math.sin(a) * NUKERANG.speed,
+      damage: NUKERANG.hitDamage, kind: 'nukerang', team: 'player',
+      life: 99, owner: this, game: this.game,
+    });
+    this.boomerangOut = pr;
+    this.game.projectiles.push(pr);
+    this.swing = { t: 0, angle: a, kind: 'throw' };
+    Sfx.bow();
+    Camera.add(2.5);
+    Camera.punch(-0.7);
+    // a crescent of release sparks along the throwing arc
+    impactRing(this.x + Math.cos(a) * 12, this.cy + Math.sin(a) * 12, {
+      color: Theme.fire, r0: 3, r1: 22, life: 0.26, width: 2, arc: 1.0, angle: a,
+    });
+    burst(this.x + Math.cos(a) * 12, this.cy + Math.sin(a) * 12, 10, {
+      color: '#ffffff', color2: Theme.fire, kind: 'streak',
+      speedMin: 120, speedMax: 300, lifeMin: 0.1, lifeMax: 0.26,
+      angle: a, spread: 0.45, gravity: 0, drag: 0.86,
+    });
+  }
+
   // Snap the trailing chains to the body, after a teleport or a room change.
   resetChains() {
     for (const c of [this.scarf, this.cape]) {
@@ -1353,6 +1390,7 @@ export class Player {
       });
       for (const e of this.game.enemies) {
         if (e.dead || e.spawnT > 0) continue;
+        if (e.untargetable) continue;
         if (dist(e.cx, e.cy, this.x, this.y) < PLAYER.slamRadius + e.radius) {
           e.damage(PLAYER.slamDamage, {
             knockback: 170, fromX: this.x, color: Theme.uiAccent, shake: 0, crit: true,
@@ -1440,23 +1478,13 @@ export class Player {
     }
     if (weapon.weapon === 'boomerang') {
       if (this.boomerangOut && !this.boomerangOut.dead) return;   // still in flight
-      this.attackCd = NUKERANG.cooldown;
-      const a = this.aim;
-      const pr = new Projectile({
-        x: this.x + Math.cos(a) * 8, y: this.cy + Math.sin(a) * 8,
-        vx: Math.cos(a) * NUKERANG.speed, vy: Math.sin(a) * NUKERANG.speed,
-        damage: NUKERANG.hitDamage, kind: 'nukerang', team: 'player',
-        life: 99, owner: this, game: this.game,
-      });
-      this.boomerangOut = pr;
-      this.game.projectiles.push(pr);
-      this.swing = { t: 0, angle: a, kind: 'throw' };
+      if (this.throwWind > 0) return;                             // already winding up
+      // cock the arm back first; the throw itself fires when the wind-up ends
+      this.throwWind = NUKERANG.windUp;
+      this.throwAim = this.aim;
+      this.attackCd = NUKERANG.windUp + NUKERANG.cooldown;
+      this.swing = { t: 0, angle: this.aim, kind: 'wind' };
       Sfx.swing();
-      Camera.add(1.5);
-      burst(this.x + Math.cos(a) * 10, this.cy + Math.sin(a) * 10, 6, {
-        color: Theme.fire, color2: '#ffffff', speedMin: 25, speedMax: 90,
-        lifeMin: 0.1, lifeMax: 0.26, angle: a, spread: 0.5, gravity: 0,
-      });
       return;
     }
     if (weapon.weapon === 'melee') {
@@ -1493,7 +1521,7 @@ export class Player {
     const fiery = this.inventory.has('fireyblade');
     let hits = 0;
     for (const e of this.game.enemies) {
-      if (e.dead || e.spawnT > 0) continue;
+      if (e.dead || e.spawnT > 0 || e.untargetable) continue;
       const d = dist(this.x, this.cy, e.cx, e.cy);
       if (d > range + e.radius) continue;
       const ang = Math.atan2(e.cy - this.cy, e.cx - this.x);
@@ -1710,16 +1738,48 @@ export class Player {
         limb(ctx, x, shoulderY, back, 7, 3, Theme.skin);
         return;
       }
-      const throwing = sw && sw.kind === 'throw' ? clamp(1 - sw.t / 0.2, 0, 1) : 0;
-      const a = this.aim * 0.3 + (f > 0 ? -0.3 : Math.PI + 0.3) - f * throwing * 0.9;
-      limb(ctx, x, shoulderY, a, 7, 3, Theme.skin);
-      const gx = x + Math.cos(a) * 8, gy = shoulderY + Math.sin(a) * 8;
-      glowDot(ctx, gx, gy, 7, Theme.fire, 0.28);
+      // wind-up drags the arm back past the shoulder, the release snaps it
+      // through the aim, and a catch reaches out and recoils.
+      const wind = this.throwWind > 0 ? clamp(this.throwWind / NUKERANG.windUp, 0, 1) : 0;
+      const throwing = sw && sw.kind === 'throw' ? clamp(1 - sw.t / 0.22, 0, 1) : 0;
+      const catching = this.catchT > 0 ? clamp(this.catchT / NUKERANG.catchTime, 0, 1) : 0;
+      let a;
+      let reach = 8;
+      if (wind > 0) {
+        a = this.throwAim + f * (2.1 * wind);          // hauled back behind the head
+        reach = 7 - wind * 2;
+      } else if (throwing > 0) {
+        a = sw.angle - f * (0.9 * throwing);           // snapping through the release
+        reach = 9 + throwing * 4;
+      } else if (catching > 0) {
+        a = this.aim;
+        reach = 8 + catching * 5;                      // arm still extended from the grab
+      } else {
+        a = this.aim * 0.3 + (f > 0 ? -0.3 : Math.PI + 0.3);
+      }
+      limb(ctx, x, shoulderY, a, reach, 3, Theme.skin);
+      const gx = x + Math.cos(a) * reach, gy = shoulderY + Math.sin(a) * reach;
+      // it spools up while winding, and is still spinning down after a catch
+      const spin = wind > 0 ? this.anim * (6 + 40 * (1 - wind))
+        : catching > 0 ? this.anim * (6 + 34 * catching)
+        : a + Math.PI * 0.5;
+      glowDot(ctx, gx, gy, 7 + wind * 6 + catching * 5, Theme.fire, 0.28 + wind * 0.3 + catching * 0.3);
       ctx.save();
       ctx.translate(Math.round(gx), Math.round(gy));
-      ctx.rotate(a + Math.PI * 0.5);      // held, not spinning, until it is thrown
+      ctx.rotate(spin);
       drawBoomerang(ctx, 7, 3, Theme.steel, Theme.steelDark, Theme.fire);
       ctx.restore();
+      if (wind > 0) {
+        // charge motes sucked into the blade
+        if (Math.random() < 0.6) {
+          const ang = rand(0, TAU);
+          spawnParticle({
+            x: gx + Math.cos(ang) * 14, y: gy + Math.sin(ang) * 14,
+            vx: -Math.cos(ang) * 70, vy: -Math.sin(ang) * 70, life: 0.2,
+            size: 1, color: Theme.fire, gravity: 0, kind: 'shrink',
+          });
+        }
+      }
       return;
     }
     if (!w) {

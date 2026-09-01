@@ -14,6 +14,7 @@ import {
 } from './config.js';
 import { Player, Enemy, Projectile } from './entities.js';
 import { makeBoss } from './boss.js';
+import { Cutscene } from './cutscene.js';
 import { drawBackground, drawArena, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal } from './world.js';
 import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
 import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, panel, button } from './ui.js';
@@ -54,6 +55,7 @@ export class Game {
     this.pendingSpawns = [];
     this.portal = null;
     this.boss = null;
+    this.cutscene = new Cutscene(this);
     this.roomIndex = 1;
     this.waveIndex = 1;
     this.roomCleared = false;
@@ -202,6 +204,8 @@ export class Game {
     this.roomCleared = false;
     this.portal = null;
     this.boss = null;
+    this.cutscene.active = false;
+    Camera.clearCinematic();
     this.pickups.length = 0;
     this.enemies.length = 0;
     this.projectiles.length = 0;
@@ -222,7 +226,8 @@ export class Game {
       this.pendingSpawns = [];
       this.player.healPct(1);      // full HP going into the boss
       this.boss = makeBoss(this, this.roomIndex);
-      Camera.add(10);
+      this.boss.intro = 99;        // held until the cutscene hands control back
+      this.cutscene.play('intro', this.boss);
     } else {
       this.pendingSpawns = buildWave(this.roomIndex, n);
     }
@@ -231,6 +236,12 @@ export class Game {
 
   onEnemyKilled() {
     this.kills++;
+  }
+
+  // Called by a boss the moment its pool empties.
+  onBossDefeated(boss) {
+    if (this.screen !== 'playing') return;
+    this.cutscene.play('outro', boss);
   }
 
   onPlayerDeath() {
@@ -257,7 +268,7 @@ export class Game {
     const col = big ? Theme.fireHot : Theme.fire;
 
     for (const e of this.enemies) {
-      if (e.dead || e.spawnT > 0) continue;
+      if (e.dead || e.spawnT > 0 || e.untargetable) continue;
       if (dist(e.cx, e.cy, x, y) > radius + e.radius) continue;
       e.damage(damage, {
         color: col, crit: big, knockback: big ? 150 : 60, fromX: x, shake: 0,
@@ -381,6 +392,18 @@ export class Game {
 
   update(dt) {
     updateWorld(dt);
+
+    if (this.cutscene.active) {
+      if (this.screen !== 'playing' || !this.player || this.player.dead) this.cutscene.finish();
+      else {
+        if (Input.pressed.size > 0 || Input.mouseDown.left || Input.mouseDown.right) this.cutscene.skip();
+        this.cutscene.update(dt);
+        for (const e of this.enemies) e.anim += dt;
+        if (this.boss && this.boss.cinematicUpdate) this.boss.cinematicUpdate(dt);
+        return;
+      }
+    }
+
     this.carryRiders();
     if (this.screen === 'gameover') this.deathT += dt;
 
@@ -414,7 +437,7 @@ export class Game {
     for (const e of this.enemies) e.update(dt);
     // contact damage from bodies
     for (const e of this.enemies) {
-      if (e.dead || e.spawnT > 0 || e.def.flying) continue;
+      if (e.dead || e.spawnT > 0 || e.def.flying || e.noContact || e.untargetable) continue;
       if (Math.abs(e.cx - p.x) < (e.w + p.w) / 2 - 1 && Math.abs(e.cy - p.cy) < (e.h + p.h) / 2 - 1) {
         if (p.dashT <= 0) p.hurt(Math.round(e.dmg * 0.35), e.x);
       }
@@ -430,7 +453,7 @@ export class Game {
       if (pr.spent) continue;      // out of range: falling, and harmless
       if (pr.team === 'player') {
         for (const e of this.enemies) {
-          if (e.dead || e.spawnT > 0) continue;
+          if (e.dead || e.spawnT > 0 || e.untargetable) continue;
           if (pr.canHit && !pr.canHit(e)) continue;
           if (Math.abs(pr.x - e.cx) < e.w / 2 + 2 && Math.abs(pr.y - e.cy) < e.h / 2 + 2) {
             pr.onHit(e, this);
@@ -469,6 +492,7 @@ export class Game {
   }
 
   updateWaves(dt) {
+    if (this.cutscene.active) return;
     this.waveTimer += dt;
     while (this.pendingSpawns.length && this.pendingSpawns[0].delay <= this.waveTimer) {
       const s = this.pendingSpawns.shift();
@@ -592,10 +616,11 @@ export class Game {
     for (const pk of this.pickups) pk.draw(ctx);
     if (this.portal) this.portal.draw(ctx);
     for (const e of this.enemies) e.draw(ctx);
+    if (this.boss && this.boss.draw) this.boss.draw(ctx);
     for (const pr of this.projectiles) pr.draw(ctx);
     if (this.player) this.player.draw(ctx);
 
-    if (this.boss) this.boss.drawBeams(ctx);
+    if (this.boss && this.boss.drawBeams) this.boss.drawBeams(ctx);
 
     for (const b of this.bolts) {
       const k = 1 - b.t / b.life;
@@ -612,7 +637,8 @@ export class Game {
     }
     ctx.restore();
 
-    drawHUD(ctx, this);
+    if (!this.cutscene.active) drawHUD(ctx, this);
+    this.cutscene.draw(ctx);
     if (this.invOpen) drawInventory(ctx, this);
     else if (UI.tooltip) drawTooltip(ctx, UI.tooltip);
 

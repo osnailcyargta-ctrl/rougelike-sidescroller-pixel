@@ -104,8 +104,26 @@ seconds between attacks**, so its openings are readable.
   while the body improvises underneath with high slams, quick slams and dashes,
   and charges in alongside the head's short beam.
 
-Two more boss archetypes (bullet-hell and a mechanic-driven one) are planned;
-until their patterns exist, later boss rooms send a stronger golem.
+**Big Dude** (600 HP, +40% per repeat appearance). A twenty-block worm that
+lives under the floor. The head drives a path and every body segment trails it
+by a fixed arc length, so the whole thing swims, erupts and dives as one curve —
+and only the parts above the floor line can be hit or can hurt you (the head
+hurts far more than the back). Its loop: buried 3s, leap, wait 2s, leap, wait
+2s, leap + spit, buried 3s, spit + leap, wait 2s, repeat. The spit is a fan of
+20 globs thrown up on their own arcs.
+
+Boss rooms alternate between the two, and each boss scales from its own first
+appearance, so a debut boss always fights at its listed stats.
+
+### Boss cutscenes
+
+Every boss gets an intro and an outro. The world keeps rendering underneath —
+gameplay pauses, letterbox bars slide in, the camera pushes onto the boss, and
+the name card wipes in on a light streak with its letters dropping one at a
+time over a filling HP bar. Big Dude tears up out of the floor for its reveal
+instead of sitting invisible underground. The outro walks a chain of
+detonations along the body in slow motion, strikes the boss's name through and
+stamps DEFEATED. Any key skips after half a second.
 
 ### Enemies
 
@@ -141,7 +159,7 @@ that slot goes back to a normal perk.
 It is a thrown melee weapon. Left click hurls it five blocks out, it decelerates
 into a turn, then homes back to your hand — while it is in the air your hands
 are empty and you cannot throw again. Every enemy it passes through takes a
-**small blast for 7**, and **every third blast** is a full detonation for **14**
+**small blast for 14**, and **every third blast** is a full detonation for **28**
 over a much wider radius. The counter carries across throws, so you can line the
 third one up.
 

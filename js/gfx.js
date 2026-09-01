@@ -5,7 +5,7 @@ import { Theme } from './theme.js';
 
 export const Camera = {
   x: 0, y: 0, shake: 0, shakeT: 0, ox: 0, oy: 0,
-  zoom: 1, zoomVel: 0, cx: 240, cy: 135,
+  zoom: 1, zoomVel: 0, cx: 240, cy: 135, cine: null,
   add(amount) { this.shake = Math.min(14, this.shake + amount); },
   // A short inward kick on impact, sprung back to 1.
   punch(amount) { this.zoomVel += amount; },
@@ -15,6 +15,14 @@ export const Camera = {
     const s = this.shake;
     this.ox = Math.round(Math.sin(this.shakeT * 1.7) * s + rand(-s, s) * 0.4);
     this.oy = Math.round(Math.cos(this.shakeT * 2.3) * s * 0.7 + rand(-s, s) * 0.3);
+    if (this.cine) {
+      // a cutscene drives the framing directly instead of springing back
+      this.cx = this.cine.cx;
+      this.cy = this.cine.cy;
+      this.zoom = lerp(this.zoom, this.cine.zoom, 1 - Math.pow(0.008, dt));
+      this.zoomVel = 0;
+      return;
+    }
     // critically-ish damped spring back to 1
     const k = 190, damping = 19;
     this.zoomVel += (1 - this.zoom) * k * dt;
@@ -37,7 +45,9 @@ export const Camera = {
       y: (y - this.oy - this.cy) / z + this.cy,
     };
   },
-  reset() { this.shake = 0; this.ox = this.oy = 0; this.zoom = 1; this.zoomVel = 0; },
+  setCinematic(zoom, cx, cy) { this.cine = { zoom, cx, cy }; },
+  clearCinematic() { this.cine = null; this.cx = 240; this.cy = 135; },
+  reset() { this.shake = 0; this.ox = this.oy = 0; this.zoom = 1; this.zoomVel = 0; this.cine = null; },
 };
 
 export const particles = [];

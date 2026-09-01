@@ -7,6 +7,7 @@ import { Camera, burst, floatText, spawnParticle, impactRing, limb, pxRect, glow
 import { Sfx } from './audio.js';
 import { VIEW_W, VIEW_H, GRAVITY, GROUND_Y, BOSS_TYPES, ROOM_SCALING, BOSS_ROOM_INTERVAL } from './config.js';
 import { Enemy, Projectile } from './entities.js';
+import { WormBoss } from './worm.js';
 
 // How far a ray from (ox, oy) travels before it leaves the arena.
 function rayLength(ox, oy, dx, dy) {
@@ -63,9 +64,12 @@ export class GolemBoss {
     this.name = def.name;
     this.roomIndex = roomIndex;
 
+    // Bosses alternate, so scale by how many times THIS boss has shown up -
+    // a debut boss always fights at its listed stats.
     const tier = Math.max(1, Math.round(roomIndex / BOSS_ROOM_INTERVAL));
-    this.hpScale = 1 + ROOM_SCALING.bossHpPerTier * (tier - 1);
-    this.dmgScale = 1 + ROOM_SCALING.bossDamagePerTier * (tier - 1);
+    const ownTier = Math.ceil(tier / 2);
+    this.hpScale = 1 + ROOM_SCALING.bossHpPerTier * (ownTier - 1);
+    this.dmgScale = 1 + ROOM_SCALING.bossDamagePerTier * (ownTier - 1);
     this.maxHp = Math.round(def.hp * this.hpScale);
     this.hp = this.maxHp;
     this.phase2At = Math.round(def.phase2Hp * this.hpScale);
@@ -160,6 +164,7 @@ export class GolemBoss {
         lifeMin: 0.4, lifeMax: 1.2, sizeMax: 4, gravity: 320,
       });
     }
+    this.game.onBossDefeated(this);
     this.game.onEnemyKilled(this.body);
   }
 
@@ -723,7 +728,7 @@ export class GolemBoss {
 }
 
 export function makeBoss(game, roomIndex) {
-  // Only the golem exists so far; bullet-hell and the third archetype slot in
-  // here once their patterns are designed.
-  return new GolemBoss(game, roomIndex);
+  // Boss rooms alternate: the golem, then Big Dude, then the golem again.
+  const tier = Math.max(1, Math.round(roomIndex / BOSS_ROOM_INTERVAL));
+  return tier % 2 === 1 ? new GolemBoss(game, roomIndex) : new WormBoss(game, roomIndex);
 }

@@ -52,10 +52,12 @@ export const NUKERANG = {
   returnSpeed: 340,
   catchRadius: 11,
   cooldown: 0.18,
+  windUp: 0.14,              // arm cocks back before the release
+  catchTime: 0.22,           // reach-and-snap when it comes home
   spin: 22,                  // radians per second
-  hitDamage: 7,              // small blast
+  hitDamage: 14,             // small blast
   hitRadius: 24,
-  bigDamage: 14,             // every third blast
+  bigDamage: 28,             // every third blast
   bigRadius: 48,
   bigEvery: 3,
   reHitDelay: 0.35,          // per-enemy, so one enemy cannot chain-detonate it
@@ -119,6 +121,14 @@ export const ENEMY_TYPES = {
     id: 'golemHead', name: 'Golem Head', hp: 600, speed: 88, damage: 16, w: 32, h: 27,
     attackCooldown: 1, attackRange: 240, flying: true, boss: true,
   },
+  wormHead: {
+    id: 'wormHead', name: 'Big Dude', hp: 600, speed: 0, damage: 34, w: 30, h: 30,
+    attackCooldown: 1, attackRange: 20, boss: true,
+  },
+  wormBody: {
+    id: 'wormBody', name: 'Big Dude', hp: 600, speed: 0, damage: 18, w: 22, h: 22,
+    attackCooldown: 1, attackRange: 20, boss: true,
+  },
 };
 
 // The golem. Phase 2 begins the moment its shared HP pool drops to phase2Hp.
@@ -134,6 +144,19 @@ export const BOSS_TYPES = {
     dash: { speed: 290, time: 0.55, damage: 24, windUp: 0.45 },
     headSpeed: 88, headHover: 74,
     attackDelay: 3.0,   // pause between one attack ending and the next starting
+  },
+  // A twenty-block worm that lives under the floor and only surfaces to strike.
+  bigdude: {
+    id: 'bigdude', name: 'Big Dude', kind: 'worm',
+    hp: 600,
+    segments: 20, segSpacing: 16,   // 20 blocks of body
+    headR: 15, bodyR: 11, tailR: 4,
+    headDamage: 34, bodyDamage: 18,
+    burrowDepth: 46,                // how far under the floor it cruises
+    burrowSpeed: 150,
+    leapUp: 585, leapAcross: 165, leapGravity: 900,
+    buriedTime: 3.0, waitTime: 2.0,
+    spitCount: 20, spitDamage: 12, spitSpeed: 205, spitSpread: 1.25,
   },
 };
 
