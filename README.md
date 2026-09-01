@@ -28,8 +28,7 @@ The repository root *is* the site. In **Settings → Pages**, choose
 | Input | Action |
 | --- | --- |
 | `A` / `D` | Move left / right |
-| double-tap `A` / `D` | Dash in that direction (i-frames) — only fires while the key is held |
-| `Shift` | Dash as well, in the direction you are currently holding |
+| double-tap `A` / `D` | Dash in that direction (i-frames) |
 | `W` | Jump |
 | `S` | Drop through a platform |
 | double-tap `S` in the air | Ground slam (25 damage AoE + shockwave) |
@@ -42,10 +41,13 @@ The repository root *is* the site. In **Settings → Pages**, choose
 
 ## Run structure
 
-Each **room** runs **two waves**. Enemies materialise on the left-centre and
+Each **room** runs **two waves**. The opening is a soft on-ramp — room 1 sends
+one enemy then two, room 2 sends two then three — and from room 3 the normal
+scaling takes over. Enemies materialise on the left-centre and
 right-centre platforms; in wave 2 the raised 4-block platform at the bottom
-centre activates as a third spawn pad. When wave 2 ends, an item drops on that
-centre platform and a gate opens on the right — right-click the drop to take
+centre activates as a third spawn pad. When wave 2 ends, a drop appears on that
+centre platform — a perk 80% of the time, a **weapon** the other 20% (favouring
+one you aren't already carrying, so it can open up the other playstyle) and a gate opens on the right — right-click the drop to take
 it, right-click the gate to descend into the next room. Rooms get denser and
 add new enemy types as you go.
 

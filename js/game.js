@@ -189,7 +189,6 @@ export class Game {
     this.player.x = 120;
     this.player.y = GROUND_Y;
     this.player.vx = this.player.vy = 0;
-    this.player.dashBuffer = 0;
     if (index > 1) this.player.healPct(1);
     this.startWave(1);
   }
@@ -391,7 +390,7 @@ export class Game {
 
   clearRoom() {
     this.roomCleared = true;
-    const id = rollDrop();
+    const id = rollDrop(this.player.inventory);
     this.pickups.push(new Pickup(id, DROP_POINT.x, DROP_POINT.y));
     burst(DROP_POINT.x, DROP_POINT.y - 12, 26, {
       color: RARITY[ITEMS[id].rarity].color, color2: '#ffffff',

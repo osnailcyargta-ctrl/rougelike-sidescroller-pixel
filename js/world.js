@@ -213,12 +213,17 @@ export class Portal {
 
 // --- wave composition ----------------------------------------------------
 
+// The first two rooms are a deliberately soft on-ramp: 1 then 2 enemies in
+// room 1, 2 then 3 in room 2. From room 3 the normal scaling takes over.
+const EARLY_WAVE_COUNTS = { 1: [1, 2], 2: [2, 3] };
+
 export function buildWave(roomIndex, waveIndex) {
   const pool = ['grunt'];
   if (roomIndex >= 2 || waveIndex === 2) pool.push('stinger');
   if (roomIndex >= 2) pool.push('brute');
   const base = 3 + Math.floor((roomIndex - 1) / 2);
-  const count = clamp(base + (waveIndex === 2 ? 2 : 0), 3, 9);
+  const early = EARLY_WAVE_COUNTS[roomIndex];
+  const count = early ? early[waveIndex - 1] : clamp(base + (waveIndex === 2 ? 2 : 0), 3, 9);
   const spawns = waveIndex === 1
     ? [SPAWN_LEFT, SPAWN_RIGHT]
     : [SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER];

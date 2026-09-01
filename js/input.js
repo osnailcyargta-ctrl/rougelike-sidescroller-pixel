@@ -1,8 +1,9 @@
 // Keyboard / mouse state. Double-tap detection lives here so gameplay code
 // only has to ask "did a dash / slam get requested this frame?".
-// A double tap is exactly two keydowns of the same key inside this window.
-// Nothing looser: the second press is what the player is still holding, and
-// gameplay code refuses to act on a key that is no longer down.
+// A double tap is two SEPARATE presses of the same key inside this window,
+// with a real release in between. Auto-repeat from a held key, and any keydown
+// that arrives while the key is already down, are both discarded - holding a
+// key can never produce a double tap.
 const DOUBLE_TAP_WINDOW = 0.28;
 
 export const Input = {
@@ -11,6 +12,7 @@ export const Input = {
   released: new Set(),
   doubleTap: new Set(),    // edge-triggered double tap of a key
   lastTap: new Map(),      // key -> time of last keydown that could start a tap
+  lastUp: new Map(),       // key -> time of last keyup
   mouse: { x: 0, y: 0, sx: 0, sy: 0, left: false, right: false },
   mouseDown: { left: false, right: false },   // edge
   mouseUp: { left: false, right: false },
@@ -28,12 +30,16 @@ export function initInput(view) {
   addEventListener('keydown', (e) => {
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     if (['Tab', ' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault();
-    if (e.repeat) return;
+    // e.repeat is the browser's auto-repeat flag; the keys.has check is the
+    // backstop for platforms where it is not set reliably.
+    if (e.repeat || Input.keys.has(k)) return;
     Input.keys.add(k);
     Input.pressed.add(k);
     const now = Input.time;
     const lastDown = Input.lastTap.get(k) ?? -99;
-    if (now - lastDown < DOUBLE_TAP_WINDOW) {
+    const lastUp = Input.lastUp.get(k) ?? -99;
+    const released = lastUp > lastDown;   // the key really came back up
+    if (released && now - lastDown < DOUBLE_TAP_WINDOW) {
       Input.doubleTap.add(k);
       Input.lastTap.set(k, -99);   // a third tap needs a fresh pair
     } else {
@@ -45,11 +51,13 @@ export function initInput(view) {
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     Input.keys.delete(k);
     Input.released.add(k);
+    Input.lastUp.set(k, Input.time);
   });
 
   addEventListener('blur', () => {
     Input.keys.clear();
     Input.lastTap.clear();
+    Input.lastUp.clear();
   });
 
   el.addEventListener('contextmenu', (e) => e.preventDefault());

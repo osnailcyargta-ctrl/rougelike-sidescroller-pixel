@@ -44,8 +44,17 @@ export const ITEMS = {
 };
 
 export const DROP_POOL = ['lifecrystal', 'fireyblade', 'lightningarrow', 'wetslime'];
+export const WEAPON_POOL = ['sword', 'bow'];
+export const WEAPON_DROP_CHANCE = 0.20;
 
-export function rollDrop() {
+// One in five room clears drops a weapon instead of a perk, favouring one the
+// player is not already carrying so it actually opens up a second playstyle.
+export function rollDrop(inventory) {
+  if (Math.random() < WEAPON_DROP_CHANCE) {
+    const missing = WEAPON_POOL.filter((id) => !inventory || !inventory.has(id));
+    const pool = missing.length ? missing : WEAPON_POOL;
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
   // Commons are twice as likely as uncommons.
   const weights = { lifecrystal: 3, fireyblade: 3, lightningarrow: 2, wetslime: 2 };
   let total = 0;

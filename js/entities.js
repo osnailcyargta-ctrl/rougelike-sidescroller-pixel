@@ -558,8 +558,6 @@ export class Player {
     this.invuln = 0;
     this.dashT = 0;
     this.dashCd = 0;
-    this.dashBuffer = 0;
-    this.dashBufferDir = 0;
     this.dropT = 0;
     this.slamming = false;
     this.attackCd = 0;
@@ -699,23 +697,12 @@ export class Player {
       }
     }
 
-    // --- dash. It only ever fires while the direction key is still held: the
-    // second tap must still be down, and a request waiting out the cooldown is
-    // thrown away the instant the key comes up. Letting go never dashes you.
-    const dashKey = (dir) => (dir < 0 ? 'a' : 'd');
-    const holding = (dir) => !!c && c.keys.has(dashKey(dir));
-    if (this.dashBuffer > 0) {
-      this.dashBuffer -= dt;
-      if (!holding(this.dashBufferDir)) this.dashBuffer = 0;
-    }
-    if (c) {
-      if (c.doubleTap.has('a') && c.keys.has('a')) this.requestDash(-1);
-      else if (c.doubleTap.has('d') && c.keys.has('d')) this.requestDash(1);
-      else if (c.pressed.has('Shift') && move !== 0) this.requestDash(move);
-    }
-    if (this.dashBuffer > 0 && this.dashCd <= 0 && this.dashT <= 0 && holding(this.dashBufferDir)) {
-      this.dashBuffer = 0;
-      this.startDash(this.dashBufferDir);
+    // --- dash. Fires only on the frame a genuine second tap lands. No
+    // buffering, no alternate key, nothing that can go off later: if the tap
+    // arrives while the dash is on cooldown it is simply dropped.
+    if (c && this.dashCd <= 0 && this.dashT <= 0) {
+      if (c.doubleTap.has('a')) this.startDash(-1);
+      else if (c.doubleTap.has('d')) this.startDash(1);
     }
 
     // --- jump
@@ -758,12 +745,6 @@ export class Player {
     const before = this.onGround;
     moveAndCollide(this, dt, { ignorePlatforms: this.dropT > 0 });
     if (!before && this.onGround) this.onLand();
-  }
-
-  requestDash(dir) {
-    if (!dir) return;
-    this.dashBufferDir = dir;
-    this.dashBuffer = 0.15;
   }
 
   startDash(dir) {
