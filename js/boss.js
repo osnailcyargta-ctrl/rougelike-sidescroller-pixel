@@ -155,7 +155,31 @@ export class GolemBoss {
     this.hp = 0;
     this.beams.length = 0;
     this.body.dead = true;
-    if (this.head) this.head.dead = true;
+
+    // If it never reached phase 2 the head is still fused on, so tear one free
+    // now: the death always ends with a head on the floor.
+    if (!this.head) {
+      const o = this.headOrigin();
+      this.head = new BossPart('golemHead', o.x, o.y + this.def.headH / 2, this.game, this);
+      this.head.tilt = 0;
+      this.game.enemies.push(this.head);
+    }
+    this.head.dead = true;
+
+    // the head drops, tumbles, lands, then rots away like a spent arrow
+    this.headFall = {
+      x: this.head.x,
+      y: this.head.y,
+      vx: rand(-70, 70),
+      vy: -120,
+      rot: this.head.tilt ?? 0,
+      rotVel: rand(-4.5, 4.5),
+      landed: false,
+      restT: 0,
+      bounces: 0,
+    };
+    this.headAlpha = 1;
+
     Camera.add(16);
     this.game.hitstop(0.22);
     Sfx.die();
@@ -168,6 +192,69 @@ export class GolemBoss {
     }
     this.game.onBossDefeated(this);
     this.game.onEnemyKilled(this.body);
+  }
+
+  // Runs while a cutscene holds the world still. On the death cutscene this is
+  // what actually drops the head and decays it.
+  cinematicUpdate(dt) {
+    for (const p of this.parts) p.anim += dt;
+    if (!this.headFall || !this.head) return;
+    const f = this.headFall;
+
+    if (!f.landed) {
+      f.vy += 780 * dt;
+      f.x = clamp(f.x + f.vx * dt, 16, VIEW_W - 16);
+      f.y += f.vy * dt;
+      f.rot += f.rotVel * dt;
+      const floor = GROUND_Y;
+      if (f.y >= floor) {
+        f.y = floor;
+        f.bounces++;
+        if (f.bounces >= 2 || Math.abs(f.vy) < 130) {
+          f.landed = true;
+          // settle onto its side
+          f.restRot = f.rot > 0 ? 1.35 : -1.35;
+          f.vx = 0;
+        } else {
+          f.vy = -Math.abs(f.vy) * 0.42;
+          f.vx *= 0.55;
+          f.rotVel *= 0.6;
+        }
+        Sfx.slam();
+        Camera.add(f.bounces === 1 ? 7 : 3);
+        impactRing(f.x, floor, {
+          color: Theme.lightning, r0: 4, r1: f.bounces === 1 ? 44 : 24,
+          life: 0.3, width: 2, squash: 0.3,
+        });
+        burst(f.x, floor, f.bounces === 1 ? 20 : 10, {
+          color: '#4a3f78', color2: Theme.lightning, speedMin: 40, speedMax: 190,
+          lifeMin: 0.25, lifeMax: 0.6, gravity: 420, angle: -Math.PI / 2, spread: 1.3,
+        });
+        burst(f.x, floor, 8, {
+          color: '#2a2444', kind: 'smoke', speedMin: 15, speedMax: 70,
+          lifeMin: 0.4, lifeMax: 0.9, sizeMin: 2, sizeMax: 4, gravity: -25, glow: false,
+        });
+      }
+    } else {
+      f.restT += dt;
+      f.rot += (f.restRot - f.rot) * (1 - Math.pow(0.02, dt));
+      // it holds for a beat, then crumbles: the light in it goes out first
+      const decay = clamp((f.restT - 0.75) / 1.1, 0, 1);
+      this.headAlpha = 1 - decay;
+      if (decay > 0 && Math.random() < dt * 55) {
+        spawnParticle({
+          x: f.x + rand(-15, 15), y: f.y + rand(-14, 2),
+          vx: rand(-18, 18), vy: rand(-34, -6),
+          life: rand(0.4, 0.9), size: randInt(1, 2),
+          color: decay > 0.5 ? '#2a2444' : Theme.lightning,
+          gravity: 90, drag: 0.94, kind: 'shrink',
+        });
+      }
+    }
+
+    this.head.x = f.x;
+    this.head.y = f.y;
+    this.head.tilt = f.rot;
   }
 
   // --- helpers ----------------------------------------------------------
@@ -663,7 +750,9 @@ export class GolemBoss {
     pxRect(ctx, x - 6, cy - 6, 12, 12, C(Theme.lightning));
     pxRect(ctx, x - 3, cy - 3, 6, 6, '#ffffff');
 
-    if (this.phase === 1) {
+    // once the head has torn free - by phase change or by death - the body
+    // shows the open socket instead of a second head
+    if (this.phase === 1 && !this.headFall) {
       // head fused to the shoulders
       const hy = y - h - 6;
       pxRect(ctx, x - 16, hy, 32, 21, C('#54487f'));
@@ -698,13 +787,18 @@ export class GolemBoss {
 
     const tilt = part.tilt ?? 0;
     ctx.save();
+    if (this.headAlpha !== undefined) {
+      if (this.headAlpha <= 0.01) { ctx.restore(); return; }
+      ctx.globalAlpha *= this.headAlpha;
+    }
     if (Math.abs(tilt) > 0.001) {
       ctx.translate(x, y);
       ctx.rotate(tilt);
       ctx.translate(-x, -y);
     }
 
-    // levitation ring
+    // levitation ring, only while it is still under its own power
+    if (!this.headFall) {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     ctx.strokeStyle = rgba(Theme.lightning, 0.25 + 0.2 * Math.sin(t * 5));
@@ -713,6 +807,7 @@ export class GolemBoss {
     ctx.ellipse(x, y + 19, 21, 5, 0, 0, TAU);
     ctx.stroke();
     ctx.restore();
+    }
 
     pxRect(ctx, x - 16, y - 13, 32, 21, C('#54487f'));
     pxRect(ctx, x - 16, y - 13, 32, 5, C('#7a68bd'));
@@ -725,7 +820,7 @@ export class GolemBoss {
     // jaw
     pxRect(ctx, x - 12, y + 8, 24, 5, C('#3a3358'));
     ctx.restore();
-    glowDot(ctx, x, y, charging ? 28 : 17, eyeCol, 0.3 + 0.25 * eye);
+    glowDot(ctx, x, y, charging ? 28 : 17, eyeCol, (0.3 + 0.25 * eye) * (this.headAlpha ?? 1));
   }
 }
 

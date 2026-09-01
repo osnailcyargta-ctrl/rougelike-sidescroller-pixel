@@ -125,6 +125,9 @@ export class Enemy {
     this.telegraph = 0;
     this.squash = 0;
     this.wasGround = false;
+    // bosses shrug off the whole lightning package: no marks, no electrified,
+    // and the arc passes through them
+    this.immuneLightning = !!def.boss;
   }
 
   get cx() { return this.x; }
@@ -200,9 +203,13 @@ export class Enemy {
     this.st.burn = PERK.burnDuration;   // refresh, never stacks
   }
 
-  applyMark() { this.st.mark = PERK.markDuration; }
+  applyMark() {
+    if (this.immuneLightning) return;
+    this.st.mark = PERK.markDuration;
+  }
 
   applyElectrified() {
+    if (this.immuneLightning) return;
     this.st.electrified = PERK.electrifiedDuration;
     this.st.elecInterval = rand(PERK.electrifiedIntervalMin, PERK.electrifiedIntervalMax);
   }

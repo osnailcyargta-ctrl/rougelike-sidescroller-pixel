@@ -123,7 +123,10 @@ the name card wipes in on a light streak with its letters dropping one at a
 time over a filling HP bar. Big Dude tears up out of the floor for its reveal
 instead of sitting invisible underground. The outro walks a chain of
 detonations along the body in slow motion, strikes the boss's name through and
-stamps DEFEATED. Any key skips after half a second.
+stamps DEFEATED. The golem's outro tears its head free (even if it died in
+phase 1), drops it, bounces it off the floor, settles it on its side and then
+lets it crumble away the same way a spent arrow does. Any key skips after half
+a second.
 
 ### Enemies
 
@@ -171,7 +174,7 @@ Perks are items — they work while they simply sit anywhere in the inventory.
 | --- | --- | --- |
 | Life Crystal | Common | +10 max HP each, effective up to 5 stacks (+50) |
 | Fiery Blade | Common | Melee hits have a 33% chance to burn for 3s (-1 HP per 0.1s, non-stacking) |
-| Lightning Arrow | Uncommon | Arrows mark enemies for 5s; with 2+ marks, arcs chain between them, damaging everything the arc crosses and applying *electrified* (-10 HP every 1.2–1.5s) |
+| Lightning Arrow | Uncommon | Arrows mark enemies for 5s; with 2+ marks, arcs chain between them, damaging everything the arc crosses and applying *electrified* (-10 HP every 1.2–1.5s). **Bosses are immune** — they take no mark, never electrify, and the arc passes straight through them |
 | Wet Slime | Uncommon | Every 2s spits a homing glob that slows the target 30% for 1.5s |
 | Bloodstone | Common | Every 5th hit you land heals 3 HP (+2 per extra stack) |
 | Aegis Shard | Uncommon | +20 absorb shield that soaks damage before your HP; refills 5s after you stop taking hits |

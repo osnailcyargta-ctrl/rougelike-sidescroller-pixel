@@ -328,12 +328,13 @@ export class Game {
     impactRing(b.cx, b.cy, { color: Theme.lightning, r1: 24, life: 0.3, width: 2 });
     Camera.punch(0.8);
     for (const e of [a, b]) {
+      if (e.immuneLightning) continue;
       e.damage(PERK.chainDamage, { color: Theme.lightning, shake: 0 });
       if (!e.dead) e.applyElectrified();
     }
     // anything caught by the arc itself
     for (const e of this.enemies) {
-      if (e.dead || e === a || e === b || e.spawnT > 0) continue;
+      if (e.dead || e === a || e === b || e.spawnT > 0 || e.immuneLightning) continue;
       if (distToSegment(e.cx, e.cy, a.cx, a.cy, b.cx, b.cy) < e.radius + 6) {
         e.damage(PERK.chainDamage, { color: Theme.lightning, shake: 0 });
         if (!e.dead) e.applyElectrified();
