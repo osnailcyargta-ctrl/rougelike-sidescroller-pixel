@@ -1,0 +1,121 @@
+/*@theme
+{
+  "name": "Ink Woodcut",
+
+  "bgFar":  "#f4ecdb", "bgMid":  "#dfd2b5", "bgNear": "#bcab86",
+  "fog":    "#93805f", "star":   "#5a4d3a",
+
+  "ground": "#2a2419", "groundTop": "#efe6d2", "groundEdge": "#1a160f",
+  "platform": "#3a3325", "platformTop": "#efe6d2", "platformGlow": "#1a160f",
+
+  "player": "#12100b", "playerDark": "#4a4231", "playerAccent": "#b03a2e",
+  "cloth": "#1a160f", "clothDark": "#12100b", "skin": "#e4d8bf",
+  "steel": "#efe6d2", "steelDark": "#6b5c45",
+
+  "enemyGrunt": "#2a2419", "enemyBrute": "#12100b", "enemyStinger": "#4a4231",
+  "enemyDark": "#0a0906", "eye": "#b03a2e",
+
+  "fire": "#b03a2e", "fireHot": "#efe6d2", "spark": "#2a2419",
+  "blood": "#b03a2e", "lightning": "#12100b", "slime": "#6b5c45",
+
+  "ui": "#12100b", "uiDim": "#6b5c45", "uiAccent": "#b03a2e", "uiPanel": "#f4ecdb",
+  "hp": "#b03a2e", "hpBack": "#b9a684",
+
+  "bloomStrength": 0.35, "bloomThreshold": 0.72,
+  "vignette": 0.45, "chroma": 0.0, "scanline": 0.0, "saturation": 0.15,
+  "animSpeed": 1.0, "wobble": 1.4, "trail": 0.8
+}
+@*/
+// Ink Woodcut
+// The game printed by hand: three ink tones, cross-hatching where the shadows
+// fall, a bitten outline around every shape, and paper fibre underneath.
+// One accent - vermilion - survives the desaturation.
+precision mediump float;
+
+varying vec2 vUv;
+uniform sampler2D uScene;
+uniform sampler2D uBloom;
+uniform vec2  uResolution;
+uniform float uTime;
+uniform float uBloomStrength;
+uniform float uVignette;
+uniform float uHit;
+uniform float uSlowmo;
+
+const vec3 PAPER = vec3(0.937, 0.902, 0.824);
+const vec3 INK   = vec3(0.055, 0.047, 0.035);
+const vec3 RED   = vec3(0.690, 0.227, 0.180);
+
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float lum(vec2 uv) {
+  vec3 s = texture2D(uScene, uv).rgb + texture2D(uBloom, uv).rgb * uBloomStrength;
+  return dot(s, vec3(0.299, 0.587, 0.114));
+}
+
+// one family of parallel strokes, wobbling like a hand-cut line
+float hatch(vec2 p, float angle, float spacing, float wobble) {
+  vec2 dir = vec2(cos(angle), sin(angle));
+  float v = dot(p, dir) / spacing;
+  v += sin(dot(p, vec2(-dir.y, dir.x)) * 0.35 + uTime * 0.6) * wobble;
+  return abs(fract(v) - 0.5) * 2.0;
+}
+
+void main() {
+  vec2 uv = vUv;
+  vec2 c = uv - 0.5;
+  float r2 = dot(c, c);
+
+  // the print sits on paper that never lies perfectly flat
+  uv += vec2(sin(uv.y * 9.0 + uTime * 0.4), cos(uv.x * 7.0 - uTime * 0.3)) * 0.0011;
+
+  vec2 px = uv * uResolution;
+  float l = lum(uv);
+
+  // how red was the original pixel? that survives as the one spot colour
+  vec3 raw = texture2D(uScene, uv).rgb + texture2D(uBloom, uv).rgb * uBloomStrength;
+  float redness = clamp((raw.r - max(raw.g, raw.b)) * 2.2, 0.0, 1.0);
+
+  // sobel-ish edge from the luminance field: the carved outline
+  vec2 t = 1.0 / uResolution;
+  float gx = lum(uv + vec2(t.x, 0.0)) - lum(uv - vec2(t.x, 0.0));
+  float gy = lum(uv + vec2(0.0, t.y)) - lum(uv - vec2(0.0, t.y));
+  float edge = smoothstep(0.30, 0.66, length(vec2(gx, gy))) * 0.62;
+
+  // Three hatch layers. The lightest is wide and faint so the distant skyline
+  // reads as a tint, while the mid and dark layers bite hard - that keeps the
+  // arena and the characters solidly inked and always the loudest thing here.
+  float ink = 0.0;
+  float h1 = (1.0 - smoothstep(0.68, 0.94, l)) * (1.0 - smoothstep(0.36, 0.62, hatch(px, 0.79, 7.5, 0.08)));
+  float h2 = (1.0 - smoothstep(0.34, 0.60, l)) * (1.0 - smoothstep(0.30, 0.58, hatch(px, -0.79, 5.2, 0.09)));
+  float h3 = (1.0 - smoothstep(0.12, 0.34, l)) * (1.0 - smoothstep(0.30, 0.58, hatch(px, 0.0, 3.6, 0.12)));
+  ink = max(max(h1 * 0.38, h2 * 0.85), h3);
+
+  // the darkest areas go to solid ink, no texture left
+  ink = max(ink, 1.0 - smoothstep(0.0, 0.05, l));
+  ink = max(ink, edge);
+
+  // paper: fibre, a few flecks, and a slightly uneven wash
+  float fibre = hash(floor(px * 0.75)) * 0.06 + hash(floor(px * 3.0)) * 0.03;
+  vec3 paper = PAPER - fibre;
+  paper -= 0.05 * smoothstep(0.25, 0.85, r2);
+
+  vec3 col = mix(paper, INK, clamp(ink, 0.0, 1.0));
+
+  // vermilion survives, printed as a second plate slightly off-register
+  float redPlate = redness * (0.45 + 0.55 * ink);
+  vec3 shifted = texture2D(uScene, uv + vec2(0.0015, -0.001)).rgb;
+  redPlate = max(redPlate, clamp((shifted.r - max(shifted.g, shifted.b)) * 1.6, 0.0, 1.0) * 0.55);
+  col = mix(col, RED, clamp(redPlate, 0.0, 1.0));
+
+  // a hit stamps the whole page in red
+  col = mix(col, RED, uHit * 0.75);
+  // slow motion drops the hatching and leaves a wash drawing
+  col = mix(col, mix(paper, INK, l < 0.25 ? 0.85 : 0.15), uSlowmo * 0.5);
+
+  col *= 1.0 - uVignette * r2 * 0.7;
+
+  gl_FragColor = vec4(col, 1.0);
+}

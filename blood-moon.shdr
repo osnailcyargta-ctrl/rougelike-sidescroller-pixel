@@ -1,0 +1,105 @@
+/*@theme
+{
+  "name": "Blood Moon",
+
+  "bgFar":  "#070103", "bgMid":  "#140306", "bgNear": "#24060c",
+  "fog":    "#3a070f", "star":   "#ff6b6b",
+
+  "ground": "#2a0a10", "groundTop": "#8c1f2b", "groundEdge": "#ff4d4d",
+  "platform": "#330d14", "platformTop": "#9b2532", "platformGlow": "#ff5a4a",
+
+  "player": "#fff1e0", "playerDark": "#a8746a", "playerAccent": "#ffb703",
+  "cloth": "#8c1f2b", "clothDark": "#4a0a16", "skin": "#f0c39a",
+  "steel": "#ffd9c9", "steelDark": "#a8746a",
+
+  "enemyGrunt": "#ff3b3b", "enemyBrute": "#c2185b", "enemyStinger": "#ff8f3f",
+  "enemyDark": "#1a0206", "eye": "#ffe08a",
+
+  "fire": "#ff6a1f", "fireHot": "#ffd166", "spark": "#ffb703",
+  "blood": "#ff2d3f", "lightning": "#ff9e5e", "slime": "#c8d94a",
+
+  "ui": "#ffe3d6", "uiDim": "#a8746a", "uiAccent": "#ff4d4d", "uiPanel": "#150307",
+  "hp": "#ff2d3f", "hpBack": "#2b060e",
+
+  "bloomStrength": 1.45, "bloomThreshold": 0.44,
+  "vignette": 0.95, "chroma": 0.55, "scanline": 0.10, "saturation": 1.15,
+  "animSpeed": 1.05, "wobble": 1.25, "trail": 1.35
+}
+@*/
+// Blood Moon
+// A red giant hangs over the arena. Heat rises off the floor, the whole frame
+// breathes with a slow pulse, and the corners bleed to black.
+precision mediump float;
+
+varying vec2 vUv;
+uniform sampler2D uScene;
+uniform sampler2D uBloom;
+uniform vec2  uResolution;
+uniform float uTime;
+uniform float uBloomStrength;
+uniform float uVignette;
+uniform float uChroma;
+uniform float uScanline;
+uniform float uSaturation;
+uniform float uHit;
+uniform float uSlowmo;
+
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+void main() {
+  vec2 uv = vUv;
+  vec2 c = uv - 0.5;
+  float r2 = dot(c, c);
+
+  // the moon breathes: everything swells very slightly, twice a second
+  float pulse = 0.5 + 0.5 * sin(uTime * 1.6);
+  uv = 0.5 + c * (1.0 - pulse * 0.0022);
+
+  // heat shimmer rising off the floor, strongest along the bottom edge
+  float heat = smoothstep(0.45, 1.0, uv.y);
+  uv.x += sin(uv.y * 46.0 - uTime * 3.4) * 0.0016 * heat;
+  uv.x += sin(uv.y * 17.0 + uTime * 1.1) * 0.0011 * heat;
+
+  // chromatic bleed pushed outward, and harder while you are being hit
+  vec2 off = c * r2 * (0.016 * uChroma + uHit * 0.03);
+  vec3 col;
+  col.r = texture2D(uScene, uv + off * 1.35).r;
+  col.g = texture2D(uScene, uv).g;
+  col.b = texture2D(uScene, uv - off * 0.8).b;
+
+  // bloom tinted toward ember
+  vec3 bloom = texture2D(uBloom, uv).rgb;
+  col += bloom * uBloomStrength * vec3(1.35, 0.72, 0.55);
+
+  float l = dot(col, vec3(0.299, 0.587, 0.114));
+  col = mix(vec3(l), col, uSaturation);
+
+  // tint the midtones crimson by scaling, never by adding - the blacks stay black
+  vec3 crimson = col * vec3(1.30, 0.46, 0.52);
+  col = mix(crimson, col, smoothstep(0.06, 0.75, l));
+
+  // the moon's own glow, low and centred
+  float moon = exp(-length((uv - vec2(0.5, 0.16)) * vec2(1.5, 2.2)) * 4.2);
+  col += vec3(0.17, 0.02, 0.03) * moon * (0.6 + 0.4 * pulse);
+
+  // slow-motion drains toward bone white
+  col = mix(col, vec3(l) * vec3(1.15, 1.02, 0.95), uSlowmo * 0.45);
+
+  col += vec3(0.75, 0.06, 0.10) * uHit;
+
+  float scan = 1.0 - uScanline * 0.6 * (0.5 + 0.5 * sin(uv.y * uResolution.y * 3.14159));
+  col *= scan;
+
+  // ash drifting in front of the lens
+  float ash = hash(floor(uv * uResolution * 0.5) + floor(uTime * 8.0));
+  col += vec3(0.30, 0.10, 0.06) * step(0.9975, ash) * 0.7;
+
+  // heavy vignette, slightly warm at the edge before it goes black
+  float vig = 1.0 - uVignette * r2 * 1.35;
+  col *= vig;
+  col += vec3(0.055, 0.006, 0.012) * smoothstep(0.22, 0.55, r2) * (1.0 - smoothstep(0.55, 0.95, r2));
+
+  gl_FragColor = vec4(col, 1.0);
+}
