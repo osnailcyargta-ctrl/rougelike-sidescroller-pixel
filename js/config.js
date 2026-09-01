@@ -43,13 +43,23 @@ export const BOW = {
   range: 10 * BLOCK, damage: 5, ammo: 10, reload: 2.0, cooldown: 0.4, speed: 340,
 };
 
-// Every room past the first makes the regular enemies tougher.
+// Regular enemies stay at their base stats through the first five rooms, then
+// step up once every two rooms from room 6 on.
 export const ROOM_SCALING = {
-  hpPerRoom: 0.18,        // +18% max HP per room
-  damagePerRoom: 0.12,    // +12% damage per room
+  startRoom: 6,
+  everyRooms: 2,
+  hpPerStep: 0.18,        // +18% max HP per step
+  damagePerStep: 0.12,    // +12% damage per step
   bossHpPerTier: 0.40,    // +40% boss HP per boss room after the first
   bossDamagePerTier: 0.25,
 };
+
+// How many scaling steps a given room has earned.
+export function roomScaleSteps(room) {
+  const { startRoom, everyRooms } = ROOM_SCALING;
+  if (room < startRoom) return 0;
+  return Math.floor((room - startRoom) / everyRooms) + 1;
+}
 
 export const BOSS_ROOM_INTERVAL = 5;   // rooms 5, 10, 15 ... get a third wave
 

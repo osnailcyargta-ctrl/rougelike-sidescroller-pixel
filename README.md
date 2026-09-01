@@ -51,8 +51,10 @@ one you aren't already carrying, so it can open up the other playstyle) and a ga
 it, right-click the gate to descend into the next room. Rooms get denser and
 add new enemy types as you go.
 
-Every enemy gains **+18% max HP and +12% damage per room**, so the same Ghoul
-that had 80 HP in room 1 has 210 HP by room 10.
+Enemies keep their base stats through the first five rooms. From **room 6** they
+step up **once every two rooms**: +18% max HP and +12% damage per step, so a
+Ghoul is 80 HP / 12 damage until room 5, 94 / 13 in rooms 6–7, and 123 / 17 by
+rooms 10–11.
 
 Clearing a wave restores **25% of max HP**, and stepping through the gate into
 the next room restores you to **full HP**.

@@ -7,7 +7,7 @@ import { Camera, burst, floatText, spawnParticle, limb, pxRect, glowDot, boltPat
 import { Sfx } from './audio.js';
 import {
   VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, ENEMY_TYPES, PERK,
-  ROOM_SCALING,
+  ROOM_SCALING, roomScaleSteps,
 } from './config.js';
 import { ITEMS, Inventory } from './items.js';
 
@@ -91,10 +91,11 @@ export class Enemy {
     this.vx = 0; this.vy = 0;
     this.onGround = false;
     this.platform = null;
-    // Regular enemies get tougher every room.
+    // Base stats until room 6, then one step up every two rooms.
     const room = Math.max(1, game?.roomIndex ?? 1);
-    this.hpScale = 1 + ROOM_SCALING.hpPerRoom * (room - 1);
-    this.dmgScale = 1 + ROOM_SCALING.damagePerRoom * (room - 1);
+    const steps = roomScaleSteps(room);
+    this.hpScale = 1 + ROOM_SCALING.hpPerStep * steps;
+    this.dmgScale = 1 + ROOM_SCALING.damagePerStep * steps;
     this.maxHp = Math.round(def.hp * this.hpScale);
     this.hp = this.maxHp;
     this.dmg = Math.round(def.damage * this.dmgScale);
