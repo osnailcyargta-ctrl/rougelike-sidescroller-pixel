@@ -45,6 +45,22 @@ export const PLAYER = {
 };
 
 export const SWORD = { range: 3 * BLOCK, damage: 10, cooldown: 0.45, arc: 1.05, swingTime: 0.22 };
+// Thrown melee weapon: flies out five blocks, comes back, detonates on contact.
+export const NUKERANG = {
+  range: 5 * BLOCK,
+  speed: 300,
+  returnSpeed: 340,
+  catchRadius: 11,
+  cooldown: 0.18,
+  spin: 22,                  // radians per second
+  hitDamage: 7,              // small blast
+  hitRadius: 24,
+  bigDamage: 14,             // every third blast
+  bigRadius: 48,
+  bigEvery: 3,
+  reHitDelay: 0.35,          // per-enemy, so one enemy cannot chain-detonate it
+};
+
 export const BOW = {
   range: 10 * BLOCK, damage: 5, ammo: 10, reload: 2.0, cooldown: 0.4, speed: 340,
 };

@@ -9,7 +9,7 @@ import {
 } from './gfx.js';
 import { Sfx } from './audio.js';
 import {
-  VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, ENEMY_TYPES, PERK,
+  VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, NUKERANG, ENEMY_TYPES, PERK,
   ROOM_SCALING, roomScaleSteps,
 } from './config.js';
 import { ITEMS, Inventory } from './items.js';
@@ -703,12 +703,14 @@ export class Projectile {
       life: 2, t: 0, dead: false, traveled: 0, maxDist: Infinity, gravity: 0,
       mark: false, slow: false, homing: 0, target: null, trail: [],
       spent: false, stuck: false, stuckT: 0, spin: 0,
+      phase: 'out', owner: null, hitLog: null, wobble: 0,
     }, o);
     this.angle = Math.atan2(this.vy, this.vx);
   }
 
   update(dt) {
     this.t += dt;
+    if (this.kind === 'nukerang') { this.updateNukerang(dt); return; }
     if (this.t >= this.life) { this.dead = true; return; }
     if (this.homing && this.target && !this.target.dead) {
       const a = Math.atan2(this.target.cy - this.y, this.target.cx - this.x);
@@ -775,6 +777,69 @@ export class Projectile {
     }
   }
 
+  // Out five blocks, then home back to the hand that threw it.
+  updateNukerang(dt) {
+    const o = this.owner;
+    this.wobble += dt;
+    this.angle += NUKERANG.spin * dt * (this.phase === 'out' ? 1 : 1.25);
+
+    if (this.phase === 'out') {
+      const sp = Math.hypot(this.vx, this.vy);
+      // decelerate over the throw so the turnaround reads as a real arc
+      const k = clamp(1 - this.traveled / NUKERANG.range, 0, 1);
+      const want = NUKERANG.speed * (0.25 + 0.75 * k);
+      const scale = sp > 1 ? want / sp : 1;
+      this.vx *= scale;
+      this.vy *= scale;
+      const dx = this.vx * dt, dy = this.vy * dt;
+      this.x += dx; this.y += dy;
+      this.traveled += Math.hypot(dx, dy);
+      if (this.traveled >= NUKERANG.range || this.x < 4 || this.x > VIEW_W - 4 || this.y < 4 || this.y > GROUND_Y) {
+        this.phase = 'back';
+      }
+    } else {
+      if (!o || o.dead) { this.dead = true; return; }
+      const tx = o.x, ty = o.cy;
+      const a = Math.atan2(ty - this.y, tx - this.x);
+      const sp = NUKERANG.returnSpeed;
+      this.vx = lerp(this.vx, Math.cos(a) * sp, 1 - Math.pow(0.0005, dt));
+      this.vy = lerp(this.vy, Math.sin(a) * sp, 1 - Math.pow(0.0005, dt));
+      this.x += this.vx * dt;
+      this.y += this.vy * dt;
+      if (dist(this.x, this.y, tx, ty) < NUKERANG.catchRadius) {
+        this.dead = true;
+        if (o) {
+          o.boomerangOut = null;
+          o.attackCd = Math.max(o.attackCd, NUKERANG.cooldown);
+        }
+        Sfx.ui();
+        burst(this.x, this.y, 6, {
+          color: Theme.steel, color2: '#ffffff', speedMin: 20, speedMax: 70,
+          lifeMin: 0.1, lifeMax: 0.28, gravity: 0, kind: 'shrink',
+        });
+        return;
+      }
+    }
+
+    this.trail.push([this.x, this.y]);
+    if (this.trail.length > 10) this.trail.shift();
+    if (Math.random() < dt * 30) {
+      spawnParticle({
+        x: this.x + rand(-3, 3), y: this.y + rand(-3, 3), vx: rand(-14, 14), vy: rand(-14, 14),
+        life: rand(0.12, 0.3), size: 1, color: Theme.fire, gravity: 0, kind: 'shrink',
+      });
+    }
+  }
+
+  // The nukerang keeps flying through enemies, but one enemy cannot set it
+  // off again until the re-hit delay has passed.
+  canHit(e) {
+    if (this.kind !== 'nukerang') return true;
+    if (!this.hitLog) this.hitLog = new Map();
+    const last = this.hitLog.get(e.uid) ?? -99;
+    return this.t - last >= NUKERANG.reHitDelay;
+  }
+
   // Out of range: the arrow loses its drive, hangs for a beat, then drops.
   goSpent() {
     if (this.spent) return;
@@ -818,6 +883,16 @@ export class Projectile {
 
   onHit(target, game) {
     if (this.spent) return;
+    if (this.kind === 'nukerang') {
+      if (!this.hitLog) this.hitLog = new Map();
+      this.hitLog.set(target.uid, this.t);
+      game.nukerangBlast(this.x, this.y, this.owner);
+      // a contact nudges it off course, which makes the return arc livelier
+      const a = Math.atan2(this.y - target.cy, this.x - target.cx);
+      this.vx += Math.cos(a) * 40;
+      this.vy += Math.sin(a) * 40;
+      return;
+    }
     this.dead = true;
     if (this.team === 'player') {
       if (this.kind === 'slime') {
@@ -861,6 +936,23 @@ export class Projectile {
       ctx.rotate(this.angle);
       pxRect(ctx, -4, -1, 8, 2, Theme.enemyStinger);
       pxRect(ctx, 2, -2, 3, 4, '#ffffff');
+    } else if (this.kind === 'nukerang') {
+      for (let i = 0; i < this.trail.length; i++) {
+        const a = (i / this.trail.length) * 0.4 * Theme.trail;
+        pxRect(ctx, this.trail[i][0] - 1, this.trail[i][1] - 1, 2, 2, rgba(Theme.fire, a));
+      }
+      glowDot(ctx, this.x, this.y, 12, Theme.fire, 0.45);
+      ctx.translate(Math.round(this.x), Math.round(this.y));
+      ctx.rotate(this.angle);
+      // four blades around a hot core
+      for (let i = 0; i < 4; i++) {
+        ctx.rotate(Math.PI / 2);
+        pxRect(ctx, 2, -1, 5, 2, Theme.steel);
+        pxRect(ctx, 6, -1, 2, 2, '#ffffff');
+      }
+      pxRect(ctx, -3, -3, 6, 6, '#3a2a1a');
+      pxRect(ctx, -2, -2, 4, 4, Theme.fire);
+      pxRect(ctx, -1, -1, 2, 2, Theme.fireHot);
     } else if (this.stuck) {
       // planted in the floor, fading out
       const k = clamp(1 - (this.stuckT - 1.0) / 0.6, 0, 1);
@@ -932,6 +1024,8 @@ export class Player {
     this.shieldMax = 0;
     this.shieldRegenT = 0;
     this.hitStreak = 0;
+    this.boomerangOut = null;
+    this.nukeBlasts = 0;
     this.afterimages = [];
     this.scarf = makeChain(4, this.x, this.y - 16);
     this.cape = makeChain(5, this.x, this.y - 14);
@@ -1352,6 +1446,27 @@ export class Player {
       this.doSwing(SWORD.range * 0.5, PLAYER.punchDamage, 0.9);
       return;
     }
+    if (weapon.weapon === 'boomerang') {
+      if (this.boomerangOut && !this.boomerangOut.dead) return;   // still in flight
+      this.attackCd = NUKERANG.cooldown;
+      const a = this.aim;
+      const pr = new Projectile({
+        x: this.x + Math.cos(a) * 8, y: this.cy + Math.sin(a) * 8,
+        vx: Math.cos(a) * NUKERANG.speed, vy: Math.sin(a) * NUKERANG.speed,
+        damage: NUKERANG.hitDamage, kind: 'nukerang', team: 'player',
+        life: 99, owner: this, game: this.game,
+      });
+      this.boomerangOut = pr;
+      this.game.projectiles.push(pr);
+      this.swing = { t: 0, angle: a, kind: 'throw' };
+      Sfx.swing();
+      Camera.add(1.5);
+      burst(this.x + Math.cos(a) * 10, this.cy + Math.sin(a) * 10, 6, {
+        color: Theme.fire, color2: '#ffffff', speedMin: 25, speedMax: 90,
+        lifeMin: 0.1, lifeMax: 0.26, angle: a, spread: 0.5, gravity: 0,
+      });
+      return;
+    }
     if (weapon.weapon === 'melee') {
       this.attackCd = SWORD.cooldown;
       this.doSwing(SWORD.range, SWORD.damage, SWORD.arc);
@@ -1596,6 +1711,31 @@ export class Player {
       return;
     }
 
+    if (w && w.weapon === 'boomerang') {
+      // while it is in the air the hand is empty
+      if (this.boomerangOut && !this.boomerangOut.dead) {
+        const back = f > 0 ? Math.PI - 0.5 : 0.5;
+        limb(ctx, x, shoulderY, back, 7, 3, Theme.skin);
+        return;
+      }
+      const throwing = sw && sw.kind === 'throw' ? clamp(1 - sw.t / 0.2, 0, 1) : 0;
+      const a = this.aim * 0.3 + (f > 0 ? -0.3 : Math.PI + 0.3) - f * throwing * 0.9;
+      limb(ctx, x, shoulderY, a, 7, 3, Theme.skin);
+      const gx = x + Math.cos(a) * 8, gy = shoulderY + Math.sin(a) * 8;
+      const spin = this.anim * 6;
+      glowDot(ctx, gx, gy, 8, Theme.fire, 0.3);
+      ctx.save();
+      ctx.translate(Math.round(gx), Math.round(gy));
+      ctx.rotate(spin);
+      for (let i = 0; i < 4; i++) {
+        ctx.rotate(Math.PI / 2);
+        pxRect(ctx, 2, -1, 4, 2, Theme.steel);
+      }
+      pxRect(ctx, -2, -2, 4, 4, Theme.fire);
+      pxRect(ctx, -1, -1, 2, 2, Theme.fireHot);
+      ctx.restore();
+      return;
+    }
     if (!w) {
       const p = sw && sw.kind === 'melee' ? clamp(sw.t / SWORD.swingTime, 0, 1) : 0;
       const a = sw ? sw.angle - 0.9 + p * 1.8 : this.aim * 0.3;

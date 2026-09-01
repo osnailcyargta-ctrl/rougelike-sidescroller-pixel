@@ -25,6 +25,11 @@ export const ITEMS = {
     id: 'bow', name: 'Hunter Bow', rarity: 'starter', stack: 1, weapon: 'bow',
     desc: ['Ranged weapon. 10 block range,', '5 damage, 10 ammo, 2s reload.'],
   },
+  nukerang: {
+    id: 'nukerang', name: 'Nukerang', rarity: 'rare', stack: 1, weapon: 'boomerang',
+    desc: ['Thrown melee weapon. 5 block flight,', 'returns to your hand.',
+           'Blasts for 7 on contact; every 3rd', 'blast detonates for 14.'],
+  },
   lifecrystal: {
     id: 'lifecrystal', name: 'Life Crystal', rarity: 'common', stack: MAX_STACK,
     desc: ['+10 max HP while held.', 'Stacks up to 5 (+50 HP).'],
@@ -236,6 +241,20 @@ export function drawItemIcon(ctx, id, x, y, s = 12, t = 0) {
       P(4, 3 + w, 3, 2, '#dfffe6');
       P(4, 7 + w, 2, 2, '#0e3d1a');
       P(7, 7 + w, 2, 2, '#0e3d1a');
+      break;
+    }
+    case 'nukerang': {
+      // four blades around a hot core, spinning
+      const a0 = t * 3.4;
+      P(4, 4, 4, 4, '#ff9d3c');
+      P(5, 5, 2, 2, '#fff0a0');
+      for (let i = 0; i < 4; i++) {
+        const a = a0 + i * (Math.PI / 2);
+        const bx = 5 + Math.cos(a) * 3.6;
+        const by = 5 + Math.sin(a) * 3.6;
+        P(bx, by, 2.4, 2.4, Theme.steel);
+        P(bx + Math.cos(a) * 1.6, by + Math.sin(a) * 1.6, 1.6, 1.6, Theme.steelDark);
+      }
       break;
     }
     case 'bloodstone': {

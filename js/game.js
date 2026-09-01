@@ -10,7 +10,7 @@ import { Sfx, resumeAudio, setVolume, AudioCfg } from './audio.js';
 import { PostFX, parseShaderPack, DEFAULT_COMPOSITE } from './postfx.js';
 import {
   VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, DROP_POINT, PERK, WAVES, PLAYER as PCFG,
-  BOSS_ROOM_INTERVAL,
+  BOSS_ROOM_INTERVAL, NUKERANG,
 } from './config.js';
 import { Player, Enemy, Projectile } from './entities.js';
 import { makeBoss } from './boss.js';
@@ -208,6 +208,7 @@ export class Game {
     this.player.x = 120;
     this.player.y = GROUND_Y;
     this.player.vx = this.player.vy = 0;
+    this.player.boomerangOut = null;
     this.player.resetChains();
     if (index > 1) this.player.healPct(1);
     this.startWave(1);
@@ -245,6 +246,45 @@ export class Game {
       if (d < bd) { bd = d; best = e; }
     }
     return best;
+  }
+
+  // Every third contact detonates properly instead of popping.
+  nukerangBlast(x, y, owner) {
+    if (owner) owner.nukeBlasts = (owner.nukeBlasts ?? 0) + 1;
+    const big = owner ? owner.nukeBlasts % NUKERANG.bigEvery === 0 : false;
+    const radius = big ? NUKERANG.bigRadius : NUKERANG.hitRadius;
+    const damage = big ? NUKERANG.bigDamage : NUKERANG.hitDamage;
+    const col = big ? Theme.fireHot : Theme.fire;
+
+    for (const e of this.enemies) {
+      if (e.dead || e.spawnT > 0) continue;
+      if (dist(e.cx, e.cy, x, y) > radius + e.radius) continue;
+      e.damage(damage, {
+        color: col, crit: big, knockback: big ? 150 : 60, fromX: x, shake: 0,
+      });
+    }
+
+    Sfx.slam();
+    Camera.add(big ? 11 : 3.5);
+    Camera.punch(big ? 2.4 : 0.8);
+    if (big) this.hitstop(0.07);
+    impactRing(x, y, { color: '#ffffff', r0: 3, r1: radius * (big ? 1.5 : 1.2), life: big ? 0.38 : 0.24, width: big ? 3 : 2 });
+    impactRing(x, y, { color: col, r0: 2, r1: radius * (big ? 2.1 : 1.5), life: big ? 0.5 : 0.32, width: big ? 2.5 : 1.5 });
+    burst(x, y, big ? 34 : 14, {
+      color: col, color2: big ? Theme.fire : Theme.spark, speedMin: 40, speedMax: big ? 280 : 150,
+      lifeMin: 0.2, lifeMax: big ? 0.8 : 0.5, sizeMax: big ? 3 : 2, gravity: 200, drag: 0.9,
+    });
+    burst(x, y, big ? 14 : 6, {
+      color: '#3a2a1a', kind: 'smoke', speedMin: 15, speedMax: big ? 90 : 50,
+      lifeMin: 0.4, lifeMax: big ? 1.1 : 0.7, sizeMin: 2, sizeMax: big ? 5 : 3,
+      gravity: -40, drag: 0.9, glow: false,
+    });
+    if (big) {
+      burst(x, y, 12, {
+        color: '#ffffff', color2: col, kind: 'streak', speedMin: 160, speedMax: 360,
+        lifeMin: 0.12, lifeMax: 0.3, gravity: 0, drag: 0.86,
+      });
+    }
   }
 
   chainLightning(a, b) {
@@ -391,6 +431,7 @@ export class Game {
       if (pr.team === 'player') {
         for (const e of this.enemies) {
           if (e.dead || e.spawnT > 0) continue;
+          if (pr.canHit && !pr.canHit(e)) continue;
           if (Math.abs(pr.x - e.cx) < e.w / 2 + 2 && Math.abs(pr.y - e.cy) < e.h / 2 + 2) {
             pr.onHit(e, this);
             break;
@@ -452,7 +493,9 @@ export class Game {
     this.roomCleared = true;
     if (this.isBossRoom()) {
       // two offers on the centre platform, one pick
-      const [a, b] = rollPerkPair();
+      const [a, rolled] = rollPerkPair();
+      // the second offer is always the Nukerang the first time it comes up
+      const b = this.player.inventory.has('nukerang') ? rolled : 'nukerang';
       const group = `boss-${this.roomIndex}`;
       this.pickups.push(new Pickup(a, DROP_POINT.x - 26, DROP_POINT.y, group));
       this.pickups.push(new Pickup(b, DROP_POINT.x + 26, DROP_POINT.y, group));

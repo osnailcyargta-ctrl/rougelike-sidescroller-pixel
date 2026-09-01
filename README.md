@@ -131,6 +131,19 @@ damage, so the bow's reach stays exactly 10 blocks.
 Player HP is 100. Regular enemies have 80 HP and deal 10–20 damage depending on
 type (Ghoul 12, Stinger 10 ranged, Brute 20).
 
+### Nukerang
+
+The first boss you kill always offers the **Nukerang** as its second choice —
+once. Take it or leave it; if you already own one it never appears again, and
+that slot goes back to a normal perk.
+
+It is a thrown melee weapon. Left click hurls it five blocks out, it decelerates
+into a turn, then homes back to your hand — while it is in the air your hands
+are empty and you cannot throw again. Every enemy it passes through takes a
+**small blast for 7**, and **every third blast** is a full detonation for **14**
+over a much wider radius. The counter carries across throws, so you can line the
+third one up.
+
 ### Perks
 
 Perks are items — they work while they simply sit anywhere in the inventory.
