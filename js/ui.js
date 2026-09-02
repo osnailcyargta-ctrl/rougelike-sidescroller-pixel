@@ -4,7 +4,7 @@ import { clamp, lerp, rand, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
 import { drawText, drawTextShadow, textWidth } from './font.js';
 import { pxRect, glowDot } from './gfx.js';
-import { VIEW_W, VIEW_H, BOW, PLAYER, ENEMY_TYPES, BOSS_TYPES } from './config.js';
+import { VIEW_W, VIEW_H, BOW, SHARDGUN, PLAYER, ENEMY_TYPES, BOSS_TYPES } from './config.js';
 import { ENEMY_TINT } from './entities.js';
 import { ITEMS, RARITY, INV_COLS, INV_ROWS, INV_SIZE, HOTBAR_SIZE, drawItemIcon } from './items.js';
 import { Input, Binds, BIND_ORDER, BIND_LABELS, bindLabel } from './input.js';
@@ -222,15 +222,21 @@ function drawHotbar(ctx, game) {
   }
   // ammo / reload for the bow
   const w = p.inventory.selectedWeapon();
-  if (w && w.weapon === 'bow') {
+  const gun = w && (w.weapon === 'bow' ? BOW : w.weapon === 'shardgun' ? SHARDGUN : null);
+  if (gun) {
     const ax = x0 + total + 8;
     if (p.reloadT > 0) {
       drawTextShadow(ctx, 'RELOAD', ax, y + 2, Theme.uiAccent, 1);
-      const k = 1 - p.reloadT / BOW.reload;
+      const k = 1 - p.reloadT / gun.reload;
       pxRect(ctx, ax, y + 12, 40, 3, rgba('#000000', 0.7));
       pxRect(ctx, ax, y + 12, Math.round(40 * k), 3, Theme.uiAccent);
+    } else if (gun.ammo === 1) {
+      // a single shell reads better as one loaded slug than as one tick
+      const hot = p.ammo > 0;
+      pxRect(ctx, ax, y + 3, 7, 10, hot ? '#a98cff' : rgba(Theme.uiDim, 0.3));
+      pxRect(ctx, ax + 1, y + 4, 5, 4, hot ? '#ffffff' : rgba(Theme.uiDim, 0.4));
     } else {
-      for (let i = 0; i < BOW.ammo; i++) {
+      for (let i = 0; i < gun.ammo; i++) {
         pxRect(ctx, ax + (i % 5) * 5, y + 3 + Math.floor(i / 5) * 7, 2, 5, i < p.ammo ? Theme.steel : rgba(Theme.uiDim, 0.35));
       }
     }

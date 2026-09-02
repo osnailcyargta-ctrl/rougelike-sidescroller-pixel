@@ -82,6 +82,8 @@ export class AlphadsBoss {
     this.ray = null;
     this.orbs = [];
     this.rainMarks = [];
+    this.pillars = [];       // light columns the shardlings arrive down
+    this.sweep = -1;         // the time-stop clock hand, -1 when idle
     this.shardlingsSpawned = 0;
     this.script = AlphadsBoss.buildScript();
     this.feathers = [];
@@ -136,7 +138,7 @@ export class AlphadsBoss {
     if (this.body) this.body.dead = true;
     // its congregation goes with it
     for (const e of this.game.enemies) {
-      if (e.type === 'shardling' && !e.dead) e.kill();
+      if (e.type === 'aetherShardling' && !e.dead) e.kill();
     }
     this.game.endTimeStop();
     Camera.add(18);
@@ -160,7 +162,7 @@ export class AlphadsBoss {
     if (s.wait !== undefined) {
       this.state = 'idle';
       this.waitT = s.wait;
-      this.targetX = clamp(this.game.player.x + rand(-110, 110), 60, VIEW_W - 60);
+      this.targetX = clamp(this.game.player.x + rand(-110, 110), 70, VIEW_W - 70);
       return;
     }
     switch (s.a) {
@@ -184,7 +186,7 @@ export class AlphadsBoss {
 
     // it never lands and it never stops drifting
     const hover = d.hoverY + Math.sin(this.bob) * 7 + Math.sin(this.bob * 0.61) * 4;
-    this.x = lerp(this.x, clamp(this.targetX, 46, VIEW_W - 46), 1 - Math.pow(0.35, dt));
+    this.x = lerp(this.x, clamp(this.targetX, 70, VIEW_W - 70), 1 - Math.pow(0.35, dt));
     this.y = lerp(this.y, hover, 1 - Math.pow(0.02, dt));
     if (this.body) {
       this.body.x = this.x;
@@ -194,6 +196,7 @@ export class AlphadsBoss {
     this.updateOrbs(dt);
     this.updateRay(dt);
     this.updateRainMarks(dt);
+    this.updatePillars(dt);
     this.ambient(dt);
 
     switch (this.state) {
@@ -232,11 +235,31 @@ export class AlphadsBoss {
       f.x += Math.sin(f.p + f.y * 0.03) * 8 * dt;
       if (f.y > VIEW_H + 6) { f.y = -6; f.x = rand(VIEW_W); }
     }
-    if (Math.random() < dt * 12) {
+    // motes lifting off the body
+    if (Math.random() < dt * 34) {
       spawnParticle({
-        x: this.x + rand(-26, 26), y: this.y + rand(-18, 18),
-        vx: rand(-8, 8), vy: rand(-4, 16), life: rand(0.6, 1.4),
-        size: 1, color: TINT.halo, gravity: 6, drag: 0.98, kind: 'shrink',
+        x: this.x + rand(-26, 26), y: this.y + rand(-20, 20),
+        vx: rand(-10, 10), vy: rand(-22, 8), life: rand(0.6, 1.6),
+        size: 1, color: Math.random() < 0.3 ? '#ffffff' : TINT.halo,
+        gravity: -8, drag: 0.98, kind: 'shrink',
+      });
+    }
+    // sparks shaken loose from the wing tips as they beat
+    if (Math.random() < dt * 22) {
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const a = (side > 0 ? -0.66 : Math.PI + 0.66);
+      spawnParticle({
+        x: this.x + Math.cos(a) * 40, y: this.y - 11 + Math.sin(-0.66) * 34 + rand(-6, 6),
+        vx: side * rand(10, 50), vy: rand(-6, 26), life: rand(0.35, 0.9),
+        size: 1, color: TINT.gold, gravity: 22, drag: 0.96, kind: 'streak',
+      });
+    }
+    // and a slow rain of down under it
+    if (Math.random() < dt * 10) {
+      spawnParticle({
+        x: this.x + rand(-46, 46), y: this.y + rand(6, 22),
+        vx: rand(-6, 6), vy: rand(10, 26), life: rand(1.0, 2.2),
+        size: 1, color: TINT.wing, gravity: 4, drag: 0.99, kind: 'shrink',
       });
     }
   }
@@ -272,11 +295,19 @@ export class AlphadsBoss {
       damage: cfg.damage, team: 'enemy', kind: 'godarrow', life: 4, game: this.game,
     }));
     Sfx.bow();
-    Camera.add(1.6);
-    burst(o.x, o.y, 6, {
-      color: TINT.gold, color2: '#ffffff', kind: 'streak', speedMin: 80, speedMax: 220,
-      lifeMin: 0.08, lifeMax: 0.2, gravity: 0, angle: a, spread: 0.4, drag: 0.85,
+    Camera.add(3.2);
+    Camera.punch(0.5);
+    burst(o.x, o.y, 16, {
+      color: TINT.gold, color2: '#ffffff', kind: 'streak', speedMin: 120, speedMax: 380,
+      lifeMin: 0.07, lifeMax: 0.22, gravity: 0, angle: a, spread: 0.45, drag: 0.82,
     });
+    burst(o.x, o.y, 8, {
+      color: '#ffffff', color2: TINT.ray, speedMin: 30, speedMax: 140,
+      lifeMin: 0.1, lifeMax: 0.3, gravity: 0, kind: 'shrink',
+    });
+    // a flat ring squashed along the shot, so the release reads as a snap
+    impactRing(o.x, o.y, { color: '#ffffff', r0: 2, r1: 30, life: 0.2, width: 2 });
+    impactRing(o.x, o.y, { color: TINT.gold, r0: 2, r1: 52, life: 0.34, width: 1.5 });
     this.recoil = 1;
   }
 
@@ -295,7 +326,20 @@ export class AlphadsBoss {
     const cfg = this.def.arrowRain;
     const o = this.bowTip();
     Sfx.wave();
-    Camera.add(6);
+    Camera.add(13);
+    Camera.punch(1.8);
+    this.game.hitstop(0.05);
+    // the whole sky lights up as the volley leaves
+    impactRing(o.x, o.y, { color: '#ffffff', r0: 4, r1: 150, life: 0.45, width: 4 });
+    impactRing(o.x, o.y, { color: TINT.gold, r0: 4, r1: 240, life: 0.75, width: 2.5 });
+    for (let i = 0; i < 26; i++) {
+      const a = -Math.PI / 2 + rand(-0.9, 0.9);
+      spawnParticle({
+        x: o.x, y: o.y, vx: Math.cos(a) * rand(120, 420), vy: Math.sin(a) * rand(160, 520),
+        life: rand(0.2, 0.6), size: 1, color: i % 3 === 0 ? '#ffffff' : TINT.gold,
+        gravity: 260, drag: 0.9, kind: 'streak',
+      });
+    }
     for (let i = 0; i < cfg.count; i++) {
       // straight up, fanned just enough that they come down spread across the room
       const vx = ((i / (cfg.count - 1)) - 0.5) * 2 * cfg.spread + rand(-14, 14);
@@ -310,6 +354,52 @@ export class AlphadsBoss {
       color: TINT.gold, color2: '#ffffff', speedMin: 60, speedMax: 220,
       lifeMin: 0.2, lifeMax: 0.6, gravity: 120, angle: -Math.PI / 2, spread: 0.9,
     });
+  }
+
+  updatePillars(dt) {
+    for (let i = this.pillars.length - 1; i >= 0; i--) {
+      const p = this.pillars[i];
+      p.t += dt;
+      if (p.t > 0.9) this.pillars.splice(i, 1);
+    }
+    if (this.sweep >= 0) {
+      this.sweep += dt;
+      if (this.sweep > 1.4) this.sweep = -1;
+    }
+  }
+
+  drawPillars(ctx) {
+    for (const p of this.pillars) {
+      const k = clamp(1 - p.t / 0.9, 0, 1);
+      const w = 3 + k * 9;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const g = ctx.createLinearGradient(0, 0, 0, p.y);
+      g.addColorStop(0, rgba('#a98cff', 0));
+      g.addColorStop(1, rgba('#ffffff', 0.5 * k));
+      ctx.fillStyle = g;
+      ctx.fillRect(p.x - w / 2, 0, w, p.y);
+      ctx.restore();
+      glowDot(ctx, p.x, p.y, 14 + k * 22, '#a98cff', k * 0.5);
+    }
+    // the clock hand: one sweep of the room the instant time stops
+    if (this.sweep >= 0) {
+      const k = clamp(this.sweep / 1.4, 0, 1);
+      const a = -Math.PI / 2 + k * TAU;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const g = ctx.createLinearGradient(this.x, this.y,
+        this.x + Math.cos(a) * 300, this.y + Math.sin(a) * 300);
+      g.addColorStop(0, rgba('#ffffff', 0.5 * (1 - k)));
+      g.addColorStop(1, rgba(TINT.gold, 0));
+      ctx.strokeStyle = g;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(this.x, this.y);
+      ctx.lineTo(this.x + Math.cos(a) * 300, this.y + Math.sin(a) * 300);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
   // Sights on the floor under anything falling from above the screen.
@@ -330,18 +420,39 @@ export class AlphadsBoss {
       this.tsFired = true;
       this.game.beginTimeStop(cfg.duration);
       Sfx.zap();
-      Camera.add(10);
-      Camera.punch(2.4);
-      impactRing(this.x, this.y, { color: '#ffffff', r0: 8, r1: 260, life: 0.7, width: 4 });
+      Camera.add(16);
+      Camera.punch(3.2);
+      this.game.hitstop(0.12);
+      this.sweep = 0;                       // the clock hand that sweeps the room
+      // three rings leaving the god, then the whole room stops
+      impactRing(this.x, this.y, { color: '#ffffff', r0: 8, r1: 300, life: 0.7, width: 5 });
+      impactRing(this.x, this.y, { color: TINT.gold, r0: 4, r1: 420, life: 1.0, width: 3 });
+      impactRing(this.x, this.y, { color: TINT.ray, r0: 2, r1: 190, life: 0.45, width: 2 });
+      for (let i = 0; i < 48; i++) {
+        const a = (i / 48) * TAU;
+        spawnParticle({
+          x: this.x + Math.cos(a) * 14, y: this.y + Math.sin(a) * 14,
+          vx: Math.cos(a) * rand(180, 460), vy: Math.sin(a) * rand(180, 460),
+          life: rand(0.2, 0.5), size: 1, color: i % 4 === 0 ? TINT.gold : '#ffffff',
+          gravity: 0, drag: 0.86, kind: 'streak',
+        });
+      }
       const room = Math.max(0, cfg.maxShardlings - this.shardlingsSpawned);
       const n = Math.min(cfg.spawn, room);
       for (let i = 0; i < n; i++) {
         const sx = clamp(this.x + (i - (n - 1) / 2) * 54 + rand(-10, 10), 30, VIEW_W - 30);
-        const e = new Enemy('shardling', sx, this.y + rand(-14, 26), this.game);
+        const e = new Enemy('aetherShardling', sx, this.y + rand(-14, 26), this.game);
         e.spawnT = 0.45;
         this.game.enemies.push(e);
         this.shardlingsSpawned++;
-        impactRing(sx, e.y, { color: '#ffffff', r0: 3, r1: 30, life: 0.4, width: 2 });
+        // each one arrives down a pillar of light
+        this.pillars.push({ x: sx, y: e.y, t: 0 });
+        impactRing(sx, e.y, { color: '#ffffff', r0: 3, r1: 44, life: 0.5, width: 2 });
+        impactRing(sx, e.y, { color: '#a98cff', r0: 2, r1: 66, life: 0.7, width: 1.5 });
+        burst(sx, e.y, 18, {
+          color: '#a98cff', color2: '#ffffff', speedMin: 30, speedMax: 170,
+          lifeMin: 0.2, lifeMax: 0.6, gravity: 0, drag: 0.9, kind: 'shrink',
+        });
       }
     }
     if (this.tsFired && this.stateT >= cfg.windUp + cfg.duration + 0.15) this.nextStep();
@@ -354,13 +465,20 @@ export class AlphadsBoss {
     if (!this.healFired && this.stateT >= cfg.windUp) {
       this.healFired = true;
       Sfx.pickup();
+      Camera.add(7);
+      impactRing(this.x, this.y, { color: TINT.orb, r0: 6, r1: 210, life: 0.7, width: 3 });
       for (const e of this.game.enemies) {
-        if (e.type !== 'shardling' || e.dead) continue;
-        this.orbs.push({ x: e.cx, y: e.cy, vx: rand(-40, 40), vy: rand(-60, -20), t: 0 });
-        burst(e.cx, e.cy, 14, {
-          color: TINT.orb, color2: '#ffffff', speedMin: 30, speedMax: 130,
-          lifeMin: 0.2, lifeMax: 0.6, gravity: 0, kind: 'shrink',
+        if (e.type !== 'aetherShardling' || e.dead) continue;
+        this.orbs.push({ x: e.cx, y: e.cy, vx: rand(-40, 40), vy: rand(-60, -20), t: 0, trail: [] });
+        burst(e.cx, e.cy, 26, {
+          color: TINT.orb, color2: '#ffffff', speedMin: 30, speedMax: 190,
+          lifeMin: 0.2, lifeMax: 0.7, gravity: 0, drag: 0.9, kind: 'shrink',
         });
+        burst(e.cx, e.cy, 10, {
+          color: '#ffffff', color2: TINT.orb, kind: 'streak', speedMin: 90, speedMax: 260,
+          lifeMin: 0.08, lifeMax: 0.22, gravity: 0, drag: 0.85,
+        });
+        impactRing(e.cx, e.cy, { color: TINT.orb, r0: 2, r1: 40, life: 0.4, width: 2 });
         e.dead = true;                    // it is unmade, not killed
       }
     }
@@ -377,6 +495,8 @@ export class AlphadsBoss {
       o.vy = lerp(o.vy, Math.sin(a) * cfg.orbSpeed, 1 - Math.pow(0.01, dt));
       o.x += o.vx * dt;
       o.y += o.vy * dt;
+      (o.trail ??= []).push([o.x, o.y]);
+      if (o.trail.length > 14) o.trail.shift();
       if (Math.random() < dt * 40) {
         spawnParticle({
           x: o.x + rand(-3, 3), y: o.y + rand(-3, 3), vx: rand(-14, 14), vy: rand(-14, 14),
@@ -402,7 +522,13 @@ export class AlphadsBoss {
         this.orbs.splice(i, 1);
         this.heal(cfg.perOrb);
         Sfx.pickup();
-        impactRing(this.x, this.y, { color: TINT.orb, r0: 4, r1: 34, life: 0.3, width: 2 });
+        Camera.add(3);
+        impactRing(this.x, this.y, { color: TINT.orb, r0: 4, r1: 54, life: 0.35, width: 2.5 });
+        impactRing(this.x, this.y, { color: '#ffffff', r0: 2, r1: 26, life: 0.2, width: 1.5 });
+        burst(this.x, this.y, 16, {
+          color: TINT.orb, color2: '#ffffff', speedMin: 40, speedMax: 170,
+          lifeMin: 0.15, lifeMax: 0.5, gravity: 0, drag: 0.88, kind: 'shrink',
+        });
       }
     }
   }
@@ -421,6 +547,21 @@ export class AlphadsBoss {
     Sfx.zap();
   }
 
+  // Called the frame the beam actually opens.
+  rayOpened() {
+    const b = this.ray;
+    Sfx.slam();
+    Camera.add(11);
+    Camera.punch(2.0);
+    this.game.hitstop(0.05);
+    impactRing(b.ox, b.oy, { color: '#ffffff', r0: 3, r1: 120, life: 0.35, width: 4 });
+    impactRing(b.ox, b.oy, { color: TINT.gold, r0: 3, r1: 190, life: 0.6, width: 2.5 });
+    burst(b.ox, b.oy, 24, {
+      color: '#ffffff', color2: TINT.gold, kind: 'streak', speedMin: 140, speedMax: 420,
+      lifeMin: 0.08, lifeMax: 0.24, gravity: 0, angle: b.angle, spread: 0.7, drag: 0.84,
+    });
+  }
+
   updateRay(dt) {
     const cfg = this.def.godRay;
     const b = this.ray;
@@ -435,7 +576,9 @@ export class AlphadsBoss {
     b.ey = o.y + Math.sin(b.angle) * b.len;
 
     if (b.charge > 0) {
+      const was = b.charge;
       b.charge -= dt;
+      if (was > 0 && b.charge <= 0) this.rayOpened();
       if (Math.random() < dt * 50) {
         const a = rand(0, TAU);
         spawnParticle({
@@ -466,7 +609,20 @@ export class AlphadsBoss {
       b.nextWave = cfg.waveEvery;
       b.waves.push({ r: 0 });
       Sfx.slam();
-      Camera.add(4);
+      Camera.add(7);
+      Camera.punch(0.9);
+      impactRing(b.ox, b.oy, { color: TINT.ray, r0: 2, r1: 70, life: 0.3, width: 2 });
+      const nx0 = -Math.sin(b.angle), ny0 = Math.cos(b.angle);
+      for (let i = 0; i < 14; i++) {
+        const side = i % 2 ? 1 : -1;
+        const along = rand(20, 200);
+        spawnParticle({
+          x: b.ox + Math.cos(b.angle) * along, y: b.oy + Math.sin(b.angle) * along,
+          vx: nx0 * side * rand(120, 320), vy: ny0 * side * rand(120, 320),
+          life: rand(0.15, 0.4), size: 1, color: i % 3 === 0 ? '#ffffff' : TINT.ray,
+          gravity: 0, drag: 0.9, kind: 'streak',
+        });
+      }
     }
     for (let i = b.waves.length - 1; i >= 0; i--) {
       const w = b.waves[i];
@@ -492,39 +648,89 @@ export class AlphadsBoss {
 
   // --- art ---------------------------------------------------------------
 
-  // Drawn under everything else: the light it stands in.
+  // Drawn under everything else: the cathedral it fights inside.
   drawBackdrop(ctx) {
     const t = this.body ? this.body.anim : 0;
+    const pulse = 0.5 + 0.5 * Math.sin(t * 1.1);
+    const charge = this.state === 'godray' || this.state === 'timestop' ? 1 : 0;
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    // a column of light falling from above it
+
+    // 1. the whole room washes gold, brighter while it is winding something up
+    const wash = ctx.createRadialGradient(this.x, this.y, 10, this.x, this.y, 260);
+    wash.addColorStop(0, rgba(TINT.halo, 0.16 + charge * 0.10 + pulse * 0.03));
+    wash.addColorStop(0.5, rgba(TINT.gold, 0.05 + charge * 0.04));
+    wash.addColorStop(1, rgba(TINT.gold, 0));
+    ctx.fillStyle = wash;
+    ctx.fillRect(0, 0, VIEW_W, GROUND_Y + 8);
+
+    // 2. a column of light falling from the ceiling onto the floor
     const g = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
-    g.addColorStop(0, rgba(TINT.halo, 0.16));
+    g.addColorStop(0, rgba(TINT.halo, 0.20));
     g.addColorStop(1, rgba(TINT.halo, 0));
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.moveTo(this.x - 26, 0);
     ctx.lineTo(this.x + 26, 0);
-    ctx.lineTo(this.x + 96, GROUND_Y);
-    ctx.lineTo(this.x - 96, GROUND_Y);
+    ctx.lineTo(this.x + 110, GROUND_Y);
+    ctx.lineTo(this.x - 110, GROUND_Y);
     ctx.closePath();
     ctx.fill();
-    // slow rays turning behind it
-    for (let i = 0; i < 8; i++) {
-      const a = t * 0.16 + (i / 8) * TAU;
-      ctx.strokeStyle = rgba(TINT.halo, 0.05 + 0.03 * Math.sin(t * 1.4 + i));
-      ctx.lineWidth = 6;
+    // and the pool it makes where it lands
+    const pool = ctx.createLinearGradient(0, GROUND_Y - 26, 0, GROUND_Y);
+    pool.addColorStop(0, rgba(TINT.halo, 0));
+    pool.addColorStop(1, rgba(TINT.halo, 0.16 + pulse * 0.05));
+    ctx.fillStyle = pool;
+    ctx.fillRect(this.x - 108, GROUND_Y - 26, 216, 26);
+
+    // 3. two counter-rotating fans of rays behind it
+    for (let i = 0; i < 14; i++) {
+      const a = t * 0.16 + (i / 14) * TAU;
+      ctx.strokeStyle = rgba(TINT.halo, 0.055 + 0.035 * Math.sin(t * 1.4 + i));
+      ctx.lineWidth = 7;
       ctx.beginPath();
       ctx.moveTo(this.x, this.y);
-      ctx.lineTo(this.x + Math.cos(a) * 210, this.y + Math.sin(a) * 210);
+      ctx.lineTo(this.x + Math.cos(a) * 240, this.y + Math.sin(a) * 240);
       ctx.stroke();
+    }
+    for (let i = 0; i < 9; i++) {
+      const a = -t * 0.27 + (i / 9) * TAU;
+      ctx.strokeStyle = rgba('#ffffff', 0.028 + 0.022 * Math.sin(t * 2.1 - i));
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(this.x, this.y);
+      ctx.lineTo(this.x + Math.cos(a) * 190, this.y + Math.sin(a) * 190);
+      ctx.stroke();
+    }
+
+    // 4. three haloes of scripture turning at their own speeds behind it
+    const rings = [[52, 0.42, 24], [76, -0.29, 32], [104, 0.19, 40]];
+    for (let r = 0; r < rings.length; r++) {
+      const [rad, spin, n] = rings[r];
+      const wob = rad + Math.sin(t * 0.9 + r) * 3;
+      ctx.strokeStyle = rgba(TINT.gold, 0.10 + 0.05 * Math.sin(t * 1.3 + r * 2));
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(this.x, this.y, wob, wob * 0.94, 0, 0, TAU);
+      ctx.stroke();
+      for (let i = 0; i < n; i++) {
+        const a = t * spin + (i / n) * TAU;
+        const on = (i + r) % 3 === 0;
+        const px = this.x + Math.cos(a) * wob;
+        const py = this.y + Math.sin(a) * wob * 0.94;
+        pxRect(ctx, px - 1, py - 1, on ? 2 : 1, on ? 2 : 1,
+               rgba(on ? '#ffffff' : TINT.gold, 0.22 + 0.3 * Math.sin(t * 3 + i)));
+      }
     }
     ctx.restore();
 
-    // drifting feathers
+    // 5. feathers drifting the length of the room, each one turning as it falls
     for (const f of this.feathers) {
       const a = 0.18 + 0.16 * Math.sin(f.p + f.y * 0.05);
-      pxRect(ctx, f.x, f.y, 1, Math.max(1, Math.round(f.s * 2)), rgba(TINT.wing, a));
+      const h = Math.max(1, Math.round(f.s * 2));
+      const sway = Math.sin(f.p + f.y * 0.04) * 2;
+      pxRect(ctx, f.x + sway, f.y, 1, h, rgba(TINT.wing, a));
+      pxRect(ctx, f.x + sway, f.y + h, 1, 1, rgba(TINT.gold, a * 0.6));
     }
   }
 
@@ -663,27 +869,42 @@ export class AlphadsBoss {
     this.drawRay(ctx);
     this.drawOrbs(ctx);
     this.drawRainMarks(ctx);
+    this.drawPillars(ctx);
     ctx.restore();
   }
 
   drawRainMarks(ctx) {
+    const t = this.body ? this.body.anim : 0;
     for (const mx of this.rainMarks) {
       const x = clamp(mx, 4, VIEW_W - 4);
+      const beat = 0.7 + 0.3 * Math.sin(t * 14 + x);
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      const g = ctx.createLinearGradient(0, GROUND_Y - 40, 0, GROUND_Y);
+      const g = ctx.createLinearGradient(0, GROUND_Y - 64, 0, GROUND_Y);
       g.addColorStop(0, rgba(TINT.gold, 0));
-      g.addColorStop(1, rgba(TINT.gold, 0.30));
+      g.addColorStop(1, rgba(TINT.gold, 0.34 * beat));
       ctx.fillStyle = g;
-      ctx.fillRect(x - 3, GROUND_Y - 40, 6, 40);
+      ctx.fillRect(x - 4, GROUND_Y - 64, 8, 64);
+      // a target ring on the floor that tightens as it comes in
+      ctx.strokeStyle = rgba('#ffffff', 0.4 * beat);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(x, GROUND_Y - 1, 8 + beat * 4, 3 + beat * 1.5, 0, 0, TAU);
+      ctx.stroke();
       ctx.restore();
-      pxRect(ctx, x - 4, GROUND_Y - 1, 8, 1, rgba(TINT.gold, 0.7));
+      pxRect(ctx, x - 5, GROUND_Y - 1, 10, 1, rgba(TINT.gold, 0.85 * beat));
+      pxRect(ctx, x - 1, GROUND_Y - 4, 2, 3, rgba('#ffffff', 0.5 * beat));
     }
   }
 
   drawOrbs(ctx) {
     for (const o of this.orbs) {
-      glowDot(ctx, o.x, o.y, 12, TINT.orb, 0.5);
+      if (o.trail && o.trail.length > 1) {
+        ribbon(ctx, o.trail, TINT.orb, 3.5, 0.55);
+        ribbon(ctx, o.trail.slice(-6), '#ffffff', 1.6, 0.5);
+      }
+      glowDot(ctx, o.x, o.y, 18, TINT.orb, 0.55);
+      glowDot(ctx, o.x, o.y, 7, '#ffffff', 0.7);
       pxRect(ctx, o.x - 2, o.y - 2, 4, 4, TINT.orb);
       pxRect(ctx, o.x - 1, o.y - 1, 2, 2, '#ffffff');
     }
@@ -697,15 +918,37 @@ export class AlphadsBoss {
       const k = 1 - b.charge / cfg.windUp;
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      ctx.strokeStyle = rgba(TINT.gold, 0.2 + 0.4 * k);
-      ctx.lineWidth = 1;
-      ctx.setLineDash([3, 5]);
+      // the sight line, tightening as it locks on
+      ctx.strokeStyle = rgba(TINT.gold, 0.2 + 0.5 * k);
+      ctx.lineWidth = 1 + k;
+      ctx.setLineDash([3, 5 - k * 3]);
       ctx.beginPath();
       ctx.moveTo(b.ox, b.oy);
       ctx.lineTo(b.ex, b.ey);
       ctx.stroke();
+      ctx.setLineDash([]);
+      // chevrons running down the line into the muzzle
+      const nx = -Math.sin(b.angle), ny = Math.cos(b.angle);
+      for (let i = 0; i < 5; i++) {
+        const d = ((1 - ((k * 1.6 + i * 0.2) % 1)) * 130) + 12;
+        const cx = b.ox + Math.cos(b.angle) * d, cy = b.oy + Math.sin(b.angle) * d;
+        const w = 4 + (d / 130) * 12;
+        ctx.strokeStyle = rgba('#ffffff', (1 - d / 150) * 0.55);
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(cx + nx * w, cy + ny * w);
+        ctx.lineTo(cx + Math.cos(b.angle) * 7, cy + Math.sin(b.angle) * 7);
+        ctx.lineTo(cx - nx * w, cy - ny * w);
+        ctx.stroke();
+      }
+      // the muzzle itself winding up
+      ctx.strokeStyle = rgba('#ffffff', 0.25 + k * 0.55);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(b.ox, b.oy, 26 - k * 20, 0, TAU);
+      ctx.stroke();
       ctx.restore();
-      glowDot(ctx, b.ox, b.oy, 8 + k * 26, TINT.ray, 0.35 + k * 0.5);
+      glowDot(ctx, b.ox, b.oy, 10 + k * 34, TINT.ray, 0.35 + k * 0.6);
       return;
     }
     const fade = clamp(Math.min(b.t * 9, (b.dur - b.t) * 9), 0, 1);
@@ -745,7 +988,26 @@ export class AlphadsBoss {
       }
     }
     ctx.restore();
-    glowDot(ctx, b.ox, b.oy, 34, TINT.ray, 0.6 * fade);
-    glowDot(ctx, b.ox, b.oy, 14, '#ffffff', 0.8 * fade);
+    glowDot(ctx, b.ox, b.oy, 40, TINT.ray, 0.65 * fade);
+    glowDot(ctx, b.ox, b.oy, 16, '#ffffff', 0.85 * fade);
+    // where the beam meets the floor it burns a pool of light
+    if (Math.abs(Math.sin(b.angle)) > 0.05) {
+      const tHit = (GROUND_Y - b.oy) / Math.sin(b.angle);
+      if (tHit > 0) {
+        const hx = b.ox + Math.cos(b.angle) * tHit;
+        if (hx > -40 && hx < VIEW_W + 40) {
+          const flick = 0.75 + 0.25 * Math.sin(b.t * 40);
+          glowDot(ctx, hx, GROUND_Y, 34 * fade * flick, TINT.gold, 0.55 * fade);
+          glowDot(ctx, hx, GROUND_Y, 14 * fade, '#ffffff', 0.8 * fade);
+          if (Math.random() < 0.6) {
+            spawnParticle({
+              x: hx + rand(-4, 4), y: GROUND_Y, vx: rand(-90, 90), vy: rand(-190, -60),
+              life: rand(0.2, 0.6), size: 1, color: Math.random() < 0.4 ? '#ffffff' : TINT.gold,
+              gravity: 420, drag: 0.92, kind: 'streak',
+            });
+          }
+        }
+      }
+    }
   }
 }

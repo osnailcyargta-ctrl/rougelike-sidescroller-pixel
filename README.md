@@ -143,7 +143,10 @@ that aims wherever its next shot is going. Five attacks:
   they arc back down as rain, with sights marking the floor under each one.
 * *Time stop* — for **2 seconds** the player and every enemy stop dead (no
   movement, no attacks, no grapple) and the whole screen drains to grayscale.
-  Only Alphads acts, calling up **3 shardlings** — at most **6** in the fight.
+  Only Alphads acts, calling up **3 shardlings** — at most **10** summoned in
+  the fight. These are its own: same AI and same sprite as the room's
+  Shardlings, but only they count against the cap and they never drop a
+  weapon.
 * *Healing* — every living shardling is unmade into a green orb that homes in
   on Alphads and heals it **15 HP** on contact. Shoot the orbs to pop them
   before they land.
@@ -226,6 +229,7 @@ Perks are items — they work while they simply sit anywhere in the inventory.
 | Wet Slime | Uncommon | Every 2s spits a homing glob that slows the target 30% for 1.5s |
 | Bloodstone | Common | Every 5th hit you land heals 3 HP (+2 per extra stack) |
 | Aegis Shard | Uncommon | +20 absorb shield that soaks damage before your HP; refills 5s after you stop taking hits |
+| Shardgun | Rare | Ranged. **1 shell, 1.5s reload, 20 damage.** Each shot throws 5 shards over 5 blocks; they stop dead at that range, hang there **0.87s**, then re-form as splinters that streak at your **cursor** for **50%** damage with no range limit. Two splinters that meet burst into **8 fragments** at **75%** of base — so where you point when they let go is where the room detonates. Drops from a **Shardling, 10% of the time**, falling from where it broke. One per run |
 | Grappling Hook | Rare | `Q` fires a hook at the cursor. It bites terrain, reels you in on a rope you can swing from, and `Q` again lets go. Past its 11-block reach the hook **falls under gravity and keeps biting** on the way down, so a lobbed shot still catches. One per run |
 
 Inventory is a 4x4 grid (16 slots); the top row doubles as the hotbar. Non-weapon

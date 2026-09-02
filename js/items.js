@@ -31,6 +31,12 @@ export const ITEMS = {
     desc: ['Thrown melee weapon. 5 block flight,', 'returns to your hand.',
            'Blasts for 14 on contact; every 3rd', 'blast detonates for 28.'],
   },
+  shardgun: {
+    id: 'shardgun', name: 'Shardgun', rarity: 'rare', stack: 1, weapon: 'shardgun',
+    desc: ['Ranged weapon. 1 shell, 1.5s reload.', 'Fires 5 shards over 5 blocks; they',
+           'hang there 0.87s, then streak at the', 'cursor for half damage, forever.',
+           'Two splinters that meet burst into 8.'],
+  },
   graplinghook: {
     id: 'graplinghook', name: 'Grappling Hook', rarity: 'rare', stack: 1,
     desc: ['Press Q to fire a hook at the cursor.', 'It bites terrain, reels you in and',
@@ -67,7 +73,7 @@ export const DROP_POOL = [
   'graplinghook',
 ];
 // Things you only ever need one of.
-const UNIQUE = new Set(['graplinghook', 'nukerang']);
+const UNIQUE = new Set(['graplinghook', 'nukerang', 'shardgun']);
 const PERK_WEIGHTS = {
   lifecrystal: 3, fireyblade: 3, bloodstone: 3,
   lightningarrow: 2, wetslime: 2, aegis: 2,
@@ -208,6 +214,20 @@ export function drawItemIcon(ctx, id, x, y, s = 12, t = 0) {
       P(7, 1, 1, 10, Theme.steelDark);
       P(4, 5, 6, 1, Theme.steel);
       break;
+    case 'shardgun': {
+      // a stubby barrel with three violet shards fanning out of the muzzle
+      P(1, 6, 6, 3, Theme.steelDark);
+      P(1, 5, 5, 1, Theme.steel);
+      P(2, 9, 2, 2, '#7a4a2a');
+      P(6, 6, 2, 3, Theme.steel);
+      const fan = [[8, 3], [9, 5.5], [8, 8]];
+      for (let i = 0; i < fan.length; i++) {
+        const o = Math.sin(t * 5 + i * 1.5) * 0.5;
+        P(fan[i][0] + o, fan[i][1], 2, 2, '#a98cff');
+        P(fan[i][0] + o, fan[i][1], 1, 1, '#ffffff');
+      }
+      break;
+    }
     case 'lifecrystal':
       P(5, 1 + bob, 2, 2, '#ffd9e6');
       P(4, 3 + bob, 4, 5, Theme.hp);

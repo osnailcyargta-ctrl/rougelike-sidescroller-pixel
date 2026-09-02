@@ -10,9 +10,9 @@ import { Sfx, resumeAudio, setVolume, AudioCfg } from './audio.js';
 import { PostFX, parseShaderPack, DEFAULT_COMPOSITE } from './postfx.js';
 import {
   VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, DROP_POINT, PERK, WAVES, PLAYER as PCFG,
-  BOSS_ROOM_INTERVAL, NUKERANG, FINAL_ROOM,
+  BOSS_ROOM_INTERVAL, NUKERANG, FINAL_ROOM, SHARDGUN,
 } from './config.js';
-import { Player, Enemy, Projectile } from './entities.js';
+import { Player, Enemy, Projectile, SHARD_TINT } from './entities.js';
 import { makeBoss } from './boss.js';
 import { Cutscene } from './cutscene.js';
 import { drawBackground, drawArena, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal } from './world.js';
@@ -338,6 +338,80 @@ export class Game {
     Sfx.wave();
   }
 
+  // Two shardgun splinters that meet burst into eight fragments each hitting
+  // for three quarters of the gun's base damage. It is the gun's whole trick,
+  // so it is worth a real bang.
+  updateShardCollisions() {
+    const list = [];
+    for (const pr of this.projectiles) {
+      if (!pr.dead && pr.kind === 'shard' && pr.shardPhase === 'splinter') list.push(pr);
+    }
+    if (list.length < 2) return;
+    const r = SHARDGUN.collideRadius;
+    for (let i = 0; i < list.length; i++) {
+      const a = list[i];
+      if (a.dead) continue;
+      for (let j = i + 1; j < list.length; j++) {
+        const b = list[j];
+        if (b.dead) continue;
+        if (dist(a.x, a.y, b.x, b.y) > r * 2) continue;
+        a.dead = true;
+        b.dead = true;
+        this.shardBurst((a.x + b.x) / 2, (a.y + b.y) / 2, a.baseDamage || SHARDGUN.damage, a.mark);
+        break;
+      }
+    }
+  }
+
+  shardBurst(x, y, baseDamage, mark) {
+    const C = SHARDGUN;
+    const dmg = Math.max(1, Math.round(baseDamage * C.fragmentDamage));
+    const off = rand(0, Math.PI * 2);
+    for (let i = 0; i < C.fragments; i++) {
+      const a = off + (i / C.fragments) * Math.PI * 2;
+      const sp = C.fragmentSpeed * rand(0.85, 1.15);
+      this.projectiles.push(new Projectile({
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        damage: dmg, baseDamage, kind: 'shard', shardPhase: 'fragment',
+        team: 'player', life: C.fragmentLife, mark, game: this,
+      }));
+    }
+    Sfx.zap();
+    Camera.add(6);
+    Camera.punch(1.3);
+    this.hitstop(0.045);
+    impactRing(x, y, { color: '#ffffff', r0: 2, r1: 42, life: 0.3, width: 3 });
+    impactRing(x, y, { color: SHARD_TINT, r0: 2, r1: 66, life: 0.45, width: 2 });
+    burst(x, y, 26, {
+      color: SHARD_TINT, color2: '#ffffff', speedMin: 60, speedMax: 260,
+      lifeMin: 0.15, lifeMax: 0.5, sizeMax: 2, gravity: 0, drag: 0.88,
+    });
+    burst(x, y, 10, {
+      color: '#ffffff', kind: 'streak', speedMin: 160, speedMax: 400,
+      lifeMin: 0.06, lifeMax: 0.18, gravity: 0, drag: 0.8,
+    });
+  }
+
+  // A regular enemy leaving a weapon behind: it drops where the body broke and
+  // falls to whatever is under it, ready to be picked up.
+  rollEnemyDrop(enemy) {
+    const id = enemy.def.dropId;
+    if (!id || !ITEMS[id]) return;
+    if (this.player && this.player.inventory.has(id)) return;   // one is enough
+    if (Math.random() >= (SHARDGUN.dropChance ?? 0.1)) return;
+    const pk = new Pickup(id, enemy.cx, enemy.cy, null, {
+      falling: true, vx: rand(-40, 40), vy: rand(-150, -70),
+    });
+    this.pickups.push(pk);
+    const col = RARITY[ITEMS[id].rarity].color;
+    burst(enemy.cx, enemy.cy, 22, {
+      color: col, color2: '#ffffff', speedMin: 40, speedMax: 190,
+      lifeMin: 0.25, lifeMax: 0.7, sizeMax: 3, gravity: 180, drag: 0.9,
+    });
+    impactRing(enemy.cx, enemy.cy, { color: col, r0: 2, r1: 46, life: 0.45, width: 2 });
+    Sfx.pickup();
+  }
+
   nearestEnemy(x, y) {
     let best = null, bd = Infinity;
     for (const e of this.enemies) {
@@ -574,6 +648,7 @@ export class Game {
         if (Math.abs(pr.x - p.x) < p.w / 2 + 2 && Math.abs(pr.y - p.cy) < p.h / 2 + 2) pr.onHit(p, this);
       }
     }
+    if (!frozen) this.updateShardCollisions();
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       if (this.projectiles[i].dead) this.projectiles.splice(i, 1);
     }

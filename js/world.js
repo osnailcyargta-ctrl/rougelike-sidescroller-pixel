@@ -292,7 +292,7 @@ export function drawSpawnPads(ctx, t, active) {
 // --- pickups -------------------------------------------------------------
 
 export class Pickup {
-  constructor(itemId, x, y, group = null) {
+  constructor(itemId, x, y, group = null, opts = {}) {
     this.itemId = itemId;
     this.x = x;
     this.y = y;
@@ -301,11 +301,60 @@ export class Pickup {
     this.born = 0;
     this.group = group;      // choice pickups share a group id
     this.disabled = false;   // the offer you did not take
+    // A drop torn out of an enemy falls from where it died; the ones placed on
+    // the centre platform are simply put there and never move.
+    this.falling = !!opts.falling;
+    this.vx = opts.vx ?? 0;
+    this.vy = opts.vy ?? 0;
+    this.landed = !this.falling;
   }
+
+  // Simple arc: gravity, one soft bounce, then it settles wherever it lands.
+  updateFall(dt) {
+    this.vy += 620 * dt;
+    const py = this.y;
+    this.x = clamp(this.x + this.vx * dt, 6, VIEW_W - 6);
+    this.y += this.vy * dt;
+    this.vx *= Math.pow(0.25, dt);
+    let floor = GROUND_Y;
+    for (const pl of PLATFORMS) {
+      if (this.x < pl.x - 2 || this.x > pl.x + pl.w + 2) continue;
+      const top = pl.y;
+      if (py <= top + 1 && this.y >= top && this.vy > 0) floor = Math.min(floor, top);
+    }
+    if (this.y >= floor) {
+      this.y = floor;
+      if (this.vy > 90) {
+        this.vy *= -0.34;                       // one small bounce
+        this.vx *= 0.5;
+        burst(this.x, this.y, 6, {
+          color: RARITY[ITEMS[this.itemId].rarity].color, speedMin: 20, speedMax: 80,
+          lifeMin: 0.15, lifeMax: 0.4, gravity: 300, angle: -Math.PI / 2, spread: 1.1,
+        });
+      } else {
+        this.vy = 0;
+        this.vx = 0;
+        this.falling = false;
+        this.landed = true;
+      }
+    }
+  }
+
   update(dt) {
     this.t += dt;
     this.born += dt;
     if (this.disabled) return;
+    if (this.falling) {
+      this.updateFall(dt);
+      if (Math.random() < dt * 40) {
+        spawnParticle({
+          x: this.x + rand(-3, 3), y: this.y - 8 + rand(-4, 4), vx: rand(-12, 12), vy: rand(-8, 8),
+          life: rand(0.15, 0.4), size: 1, color: RARITY[ITEMS[this.itemId].rarity].color,
+          gravity: 0, kind: 'streak',
+        });
+      }
+      return;
+    }
     if (Math.random() < dt * 6) {
       spawnParticle({
         x: this.x + rand(-6, 6), y: this.y + rand(-8, 2), vx: rand(-5, 5), vy: rand(-22, -8),

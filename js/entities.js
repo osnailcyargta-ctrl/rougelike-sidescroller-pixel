@@ -9,11 +9,11 @@ import {
 } from './gfx.js';
 import { Sfx } from './audio.js';
 import {
-  VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, NUKERANG, GRAPPLE,
+  VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, SHARDGUN, NUKERANG, GRAPPLE,
   ENEMY_TYPES, PERK, ROOM_SCALING, roomScaleSteps,
 } from './config.js';
 import { ITEMS, Inventory } from './items.js';
-import { Binds } from './input.js';
+import { Binds, Input } from './input.js';
 
 // --- shared physics ------------------------------------------------------
 
@@ -80,12 +80,15 @@ export class Status {
 
 // --- enemies -------------------------------------------------------------
 
+export const SHARD_TINT = '#a98cff';
+
 export const ENEMY_TINT = {
   get grunt() { return Theme.enemyGrunt; },
   get brute() { return Theme.enemyBrute; },
   get stinger() { return Theme.enemyStinger; },
   get lurker() { return '#ff7a3c'; },
   get shardling() { return '#a98cff'; },
+  get aetherShardling() { return '#a98cff'; },
   get spitter() { return '#a8e04a'; },
   get golemBody() { return Theme.enemyBrute; },
   get golemHead() { return Theme.lightning; },
@@ -136,6 +139,9 @@ export class Enemy {
   get cx() { return this.x; }
   get cy() { return this.y - this.h / 2; }
   get radius() { return Math.max(this.w, this.h) / 2; }
+  // Which behaviour to run. Two types can share one AI and one sprite while
+  // staying separate creatures everywhere else (spawn caps, drops).
+  get ai() { return this.def.ai ?? this.type; }
 
   // Subclasses (boss parts) override this to share one HP pool.
   applyRawDamage(amount) {
@@ -199,7 +205,7 @@ export class Enemy {
     Sfx.die();
     Camera.add(4);
     this.game.hitstop(0.055);
-    const c = ENEMY_TINT[this.type] ?? Theme.enemyGrunt;
+    const c = ENEMY_TINT[this.type] ?? ENEMY_TINT[this.ai] ?? Theme.enemyGrunt;
     burst(this.cx, this.cy, 26, {
       color: c, color2: '#ffffff', speedMin: 40, speedMax: 210,
       lifeMin: 0.3, lifeMax: 0.8, sizeMax: 3, gravity: 300,
@@ -216,6 +222,7 @@ export class Enemy {
     impactRing(this.cx, this.cy, { color: c, r0: 3, r1: 40, life: 0.4, width: 3 });
     impactRing(this.cx, this.cy, { color: '#ffffff', r0: 2, r1: 22, life: 0.26, width: 2 });
     Camera.punch(1.4);
+    if (this.def.dropId) this.game.rollEnemyDrop(this);
     this.game.onEnemyKilled(this);
   }
 
@@ -365,7 +372,7 @@ export class Enemy {
   }
 
   updateFlyer(dt, p, slow) {
-    if (this.type === 'shardling') return this.updateShardling(dt, p, slow);
+    if (this.ai === 'shardling') return this.updateShardling(dt, p, slow);
     this.hover += dt * 3;
     const target = p && !p.dead ? p : null;
     if (target) {
@@ -639,8 +646,11 @@ export class Enemy {
     // squash on landing, stretch while falling
     const sq = this.squash;
     const air = this.def.flying ? 0 : clamp(this.vy / 620, -1, 1);
-    const sx = 1 + sq * 0.28 - Math.abs(air) * 0.08;
-    const sy = 1 - sq * 0.24 + Math.abs(air) * 0.12;
+    // a hit briefly pinches the body in - it eases out over the flash
+    const hit = clamp(this.hurtFlash / 0.16, 0, 1);
+    const pinch = Math.sin(hit * Math.PI) * 0.16;
+    const sx = 1 + sq * 0.28 - Math.abs(air) * 0.08 - pinch;
+    const sy = 1 - sq * 0.24 + Math.abs(air) * 0.12 + pinch * 0.8;
     if (Math.abs(sx - 1) > 0.004 || Math.abs(sy - 1) > 0.004) {
       ctx.translate(this.x, this.y);
       ctx.scale(sx, sy);
@@ -652,7 +662,7 @@ export class Enemy {
     else if (this.type === 'brute') this.drawBrute(ctx, t, flash);
     else if (this.type === 'lurker') this.drawLurker(ctx, t, flash);
     else if (this.type === 'spitter') this.drawSpitter(ctx, t, flash);
-    else if (this.type === 'shardling') this.drawShardling(ctx, t, flash);
+    else if (this.ai === 'shardling') this.drawShardling(ctx, t, flash);
     else this.drawStinger(ctx, t, flash);
     ctx.restore();
 
@@ -875,6 +885,8 @@ export class Projectile {
       spent: false, stuck: false, stuckT: 0, spin: 0,
       phase: 'out', owner: null, hitLog: null, wobble: 0,
       keepTop: false,        // arrow rain arcs above the screen and falls back
+      shardPhase: null,      // shardgun: 'fly' -> 'hover' -> 'splinter' / 'fragment'
+      hoverT: 0, baseDamage: 0, splinterAim: null,
     }, o);
     this.angle = Math.atan2(this.vy, this.vx);
   }
@@ -882,6 +894,7 @@ export class Projectile {
   update(dt) {
     this.t += dt;
     if (this.kind === 'nukerang') { this.updateNukerang(dt); return; }
+    if (this.kind === 'shard') { this.updateShard(dt); return; }
     if (this.t >= this.life) { this.dead = true; return; }
     if (this.homing && this.target && !this.target.dead) {
       const a = Math.atan2(this.target.cy - this.y, this.target.cx - this.x);
@@ -948,6 +961,97 @@ export class Projectile {
     if (this.kind === 'slime' && Math.random() < dt * 40) {
       spawnParticle({ x: this.x, y: this.y, vx: rand(-10, 10), vy: rand(-10, 10), life: 0.3, size: 1, color: Theme.slime, gravity: 40, kind: 'shrink' });
     }
+  }
+
+  // Shardgun round. Three acts: fly out five blocks, hang there for 0.87s
+  // gathering light, then re-form as a splinter and streak at the cursor.
+  updateShard(dt) {
+    const C = SHARDGUN;
+    if (this.t >= this.life) { this.expire(); return; }
+
+    if (this.shardPhase === 'fly') {
+      const dx = this.vx * dt, dy = this.vy * dt;
+      this.x += dx; this.y += dy;
+      this.traveled += Math.hypot(dx, dy);
+      this.angle = Math.atan2(this.vy, this.vx);
+      this.pushTrail();
+      if (Math.random() < dt * 50) {
+        spawnParticle({
+          x: this.x, y: this.y, vx: -this.vx * 0.08, vy: -this.vy * 0.08, life: rand(0.1, 0.26),
+          size: 1, color: SHARD_TINT, gravity: 0, kind: 'streak',
+        });
+      }
+      if (this.traveled >= C.range) {
+        this.shardPhase = 'hover';
+        this.hoverT = C.hoverTime;
+        this.vx = this.vy = 0;
+        this.trail.length = 0;
+        impactRing(this.x, this.y, { color: SHARD_TINT, r0: 1, r1: 14, life: 0.28, width: 1.5 });
+        burst(this.x, this.y, 6, {
+          color: SHARD_TINT, color2: '#ffffff', speedMin: 20, speedMax: 70,
+          lifeMin: 0.1, lifeMax: 0.3, gravity: 0, kind: 'shrink',
+        });
+      }
+      return;
+    }
+
+    if (this.shardPhase === 'hover') {
+      this.hoverT -= dt;
+      // it trembles harder the closer it gets to letting go
+      const k = 1 - clamp(this.hoverT / C.hoverTime, 0, 1);
+      this.angle += dt * (3 + k * 26);
+      if (Math.random() < dt * (14 + k * 60)) {
+        const a = rand(0, TAU), r = 10 + k * 10;
+        spawnParticle({
+          x: this.x + Math.cos(a) * r, y: this.y + Math.sin(a) * r,
+          vx: -Math.cos(a) * (40 + k * 90), vy: -Math.sin(a) * (40 + k * 90),
+          life: rand(0.12, 0.3), size: 1, color: k > 0.6 ? '#ffffff' : SHARD_TINT,
+          gravity: 0, kind: 'shrink',
+        });
+      }
+      if (this.hoverT <= 0) this.becomeSplinter();
+      return;
+    }
+
+    // splinter / fragment: straight, fast, and nothing stops it but a hit
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.angle = Math.atan2(this.vy, this.vx);
+    this.pushTrail();
+    if (Math.random() < dt * 70) {
+      spawnParticle({
+        x: this.x, y: this.y, vx: rand(-16, 16), vy: rand(-16, 16), life: rand(0.06, 0.18),
+        size: 1, color: this.shardPhase === 'fragment' ? '#ffffff' : SHARD_TINT,
+        gravity: 0, kind: 'streak',
+      });
+    }
+    if (this.x < -40 || this.x > VIEW_W + 40 || this.y < -40 || this.y > GROUND_Y + 20) {
+      this.dead = true;
+    }
+  }
+
+  pushTrail() {
+    this.trail.push([this.x, this.y]);
+    if (this.trail.length > 9) this.trail.shift();
+  }
+
+  // The hover ends: it points itself at wherever the cursor is right now.
+  becomeSplinter() {
+    const C = SHARDGUN;
+    const aim = this.splinterAim ? this.splinterAim() : { x: this.x, y: this.y - 1 };
+    const a = Math.atan2(aim.y - this.y, aim.x - this.x);
+    this.shardPhase = 'splinter';
+    this.vx = Math.cos(a) * C.splinterSpeed;
+    this.vy = Math.sin(a) * C.splinterSpeed;
+    this.damage = Math.max(1, Math.round(this.baseDamage * C.splinterDamage));
+    this.life = this.t + C.splinterLife;
+    this.trail.length = 0;
+    Sfx.zap();
+    impactRing(this.x, this.y, { color: '#ffffff', r0: 1, r1: 20, life: 0.22, width: 2 });
+    burst(this.x, this.y, 8, {
+      color: '#ffffff', color2: SHARD_TINT, kind: 'streak', speedMin: 120, speedMax: 300,
+      lifeMin: 0.06, lifeMax: 0.16, gravity: 0, angle: a, spread: 0.5, drag: 0.85,
+    });
   }
 
   // Out five blocks, then home back to the hand that threw it.
@@ -1047,6 +1151,26 @@ export class Projectile {
       Sfx.slime();
       return;
     }
+    if (this.kind === 'godarrow') {
+      // gold splash and a low ring wherever a god-arrow lands
+      burst(this.x, this.y, 14, {
+        color: '#ffd76a', color2: '#ffffff', speedMin: 40, speedMax: 200,
+        lifeMin: 0.15, lifeMax: 0.5, gravity: 420, angle: -Math.PI / 2, spread: 1.2, drag: 0.9,
+      });
+      burst(this.x, this.y, 6, {
+        color: '#ffffff', kind: 'streak', speedMin: 90, speedMax: 240,
+        lifeMin: 0.06, lifeMax: 0.16, gravity: 0, angle: -Math.PI / 2, spread: 1.4, drag: 0.82,
+      });
+      impactRing(this.x, this.y, { color: '#ffe9a8', r0: 2, r1: 26, life: 0.28, width: 1.5, squash: 0.35 });
+      return;
+    }
+    if (this.kind === 'shard') {
+      burst(this.x, this.y, 8, {
+        color: SHARD_TINT, color2: '#ffffff', speedMin: 30, speedMax: 140,
+        lifeMin: 0.1, lifeMax: 0.3, gravity: 0, drag: 0.88, kind: 'shrink',
+      });
+      return;
+    }
     if (this.kind === 'laser') {
       burst(this.x, this.y, 8, {
         color: Theme.lightning, color2: '#ffffff', speedMin: 20, speedMax: 110,
@@ -1107,6 +1231,34 @@ export class Projectile {
       pxRect(ctx, -7, -2, 14, 4, rgba(Theme.lightning, 0.35));
       pxRect(ctx, -6, -1, 12, 2, Theme.lightning);
       pxRect(ctx, -2, -1, 6, 2, '#ffffff');
+    } else if (this.kind === 'shard') {
+      const frag = this.shardPhase === 'fragment';
+      const hover = this.shardPhase === 'hover';
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 0; i < this.trail.length; i++) {
+        const k = (i / this.trail.length);
+        const w = frag ? 1 : 2;
+        pxRect(ctx, this.trail[i][0] - w / 2, this.trail[i][1] - w / 2, w, w,
+               rgba(SHARD_TINT, k * 0.55 * Theme.trail));
+      }
+      if (hover) {
+        // suspended: a caged shard with a ring winding in around it
+        const k = 1 - clamp(this.hoverT / SHARDGUN.hoverTime, 0, 1);
+        glowDot(ctx, this.x, this.y, 8 + k * 16, SHARD_TINT, 0.3 + k * 0.5);
+        ctx.strokeStyle = rgba('#ffffff', 0.25 + k * 0.6);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, 12 - k * 9, 0, TAU);
+        ctx.stroke();
+      } else {
+        glowDot(ctx, this.x, this.y, frag ? 6 : 10, frag ? '#ffffff' : SHARD_TINT, 0.45);
+      }
+      ctx.translate(Math.round(this.x), Math.round(this.y));
+      ctx.rotate(this.angle);
+      const L = frag ? 2 : this.shardPhase === 'splinter' ? 5 : 4;
+      const H = frag ? 1 : 2;
+      pxRect(ctx, -L, -H / 2, L * 2, H, SHARD_TINT);
+      pxRect(ctx, -1, -H / 2, L, H, '#ffffff');
     } else if (this.kind === 'godarrow') {
       // a shaft of light with a gold head - it reads at a glance against the rain
       ctx.globalCompositeOperation = 'lighter';
@@ -1199,6 +1351,7 @@ export class Player {
     this.swing = null;
     this.ammo = BOW.ammo;
     this.reloadT = 0;
+    this.lastGunId = null;
     this.slimeT = PERK.slimeInterval;
     this.chainCd = 0;
     this.shield = 0;
@@ -1828,21 +1981,38 @@ export class Player {
     }
   }
 
+  // Both guns share one magazine model; only the numbers differ.
+  gunCfg(weapon = this.inventory.selectedWeapon()) {
+    if (!weapon) return null;
+    if (weapon.weapon === 'bow') return BOW;
+    if (weapon.weapon === 'shardgun') return SHARDGUN;
+    return null;
+  }
+
   updateReload(dt) {
+    // Swapping guns hands you a fresh magazine of the right size and drops any
+    // reload that was in progress on the other one.
+    const w = this.inventory.selectedWeapon();
+    const id = w ? w.id : null;
+    if (id !== this.lastGunId) {
+      this.lastGunId = id;
+      const cfg = this.gunCfg(w);
+      if (cfg) { this.ammo = cfg.ammo; this.reloadT = 0; }
+    }
     if (this.reloadT > 0) {
       this.reloadT -= dt;
       if (this.reloadT <= 0) {
-        this.ammo = BOW.ammo;
+        this.ammo = (this.gunCfg() ?? BOW).ammo;
         Sfx.reload();
       }
     }
   }
 
   startReload() {
-    const w = this.inventory.selectedWeapon();
-    if (!w || w.weapon !== 'bow') return;
-    if (this.reloadT > 0 || this.ammo >= BOW.ammo) return;
-    this.reloadT = BOW.reload;
+    const cfg = this.gunCfg();
+    if (!cfg) return;
+    if (this.reloadT > 0 || this.ammo >= cfg.ammo) return;
+    this.reloadT = cfg.reload;
     Sfx.reload();
   }
 
@@ -1932,7 +2102,50 @@ export class Player {
         lifeMin: 0.1, lifeMax: 0.25, angle: a, spread: 0.5, gravity: 0,
       });
       if (this.ammo <= 0) this.startReload();
+    } else if (weapon.weapon === 'shardgun') {
+      this.fireShardgun();
     }
+  }
+
+  // One shell, five shards in a cone. Each one carries the base damage so the
+  // splinters and fragments it turns into can scale off it later.
+  fireShardgun() {
+    const C = SHARDGUN;
+    if (this.reloadT > 0) return;
+    if (this.ammo <= 0) { this.startReload(); return; }
+    this.attackCd = C.cooldown;
+    this.ammo--;
+    const a = this.aim;
+    const mark = this.inventory.has('lightningarrow');
+    const game = this.game;
+    const aimAt = () => ({ x: Input.mouse.x, y: Input.mouse.y });
+    for (let i = 0; i < C.pellets; i++) {
+      const spread = ((i / (C.pellets - 1)) - 0.5) * 2 * C.spread + rand(-0.02, 0.02);
+      const ang = a + spread;
+      const sp = C.speed * rand(0.92, 1.08);
+      game.projectiles.push(new Projectile({
+        x: this.x + Math.cos(a) * 9, y: this.cy + Math.sin(a) * 9,
+        vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+        damage: C.damage, baseDamage: C.damage, kind: 'shard', shardPhase: 'fly',
+        team: 'player', life: 6, mark, splinterAim: aimAt, game,
+      }));
+    }
+    this.swing = { t: 0, angle: a, kind: 'bow' };
+    Sfx.bow();
+    Camera.add(5);
+    Camera.punch(1.1);
+    this.vx -= Math.cos(a) * 70;              // it kicks
+    const mx = this.x + Math.cos(a) * 12, my = this.cy + Math.sin(a) * 12;
+    burst(mx, my, 18, {
+      color: SHARD_TINT, color2: '#ffffff', kind: 'streak', speedMin: 90, speedMax: 320,
+      lifeMin: 0.07, lifeMax: 0.2, angle: a, spread: C.spread * 2.2, gravity: 0, drag: 0.84,
+    });
+    burst(mx, my, 6, {
+      color: '#3a3550', kind: 'smoke', speedMin: 20, speedMax: 70, lifeMin: 0.25, lifeMax: 0.6,
+      sizeMin: 1, sizeMax: 3, angle: a, spread: 0.9, gravity: -20, glow: false,
+    });
+    impactRing(mx, my, { color: SHARD_TINT, r0: 2, r1: 26, life: 0.22, width: 2 });
+    if (this.ammo <= 0) this.startReload();
   }
 
   doSwing(range, damage, arc) {
@@ -2216,6 +2429,35 @@ export class Player {
       limb(ctx, x, shoulderY, a, 7, 3, Theme.skin);
       return;
     }
+    if (w.weapon === 'shardgun') {
+      const a = this.aim;
+      const kick = sw && sw.kind === 'bow' ? clamp(1 - sw.t / 0.22, 0, 1) : 0;
+      const reach = 9 - kick * 4;
+      const hx = x + Math.cos(a) * reach;
+      const hy = shoulderY + Math.sin(a) * reach;
+      limb(ctx, x, shoulderY, a, reach, 3, Theme.skin);
+      limb(ctx, x - f * 2, shoulderY + 2, a + (f > 0 ? 0.5 : -0.5), 6, 3, Theme.skin);
+      ctx.save();
+      ctx.translate(Math.round(hx), Math.round(hy));
+      ctx.rotate(a + kick * (f > 0 ? -0.28 : 0.28));
+      pxRect(ctx, -5, -3, 12, 5, Theme.steelDark);
+      pxRect(ctx, -5, -3, 11, 1, Theme.steel);
+      pxRect(ctx, 6, -2, 4, 3, Theme.steel);
+      pxRect(ctx, -6, 1, 4, 4, '#7a4a2a');
+      if (this.reloadT > 0) {
+        // the breech hangs open while it reloads
+        pxRect(ctx, 0, -6, 5, 3, Theme.steelDark);
+      } else if (this.ammo > 0) {
+        pxRect(ctx, 2, -2, 3, 3, SHARD_TINT);
+      }
+      if (kick > 0) {
+        glowDot(ctx, 11, 0, 10 + kick * 12, SHARD_TINT, 0.35 + kick * 0.45);
+        pxRect(ctx, 9, -1, 4 + kick * 6, 2, '#ffffff');
+      }
+      ctx.restore();
+      return;
+    }
+
     if (w.weapon === 'bow') {
       const a = this.aim;
       const recoil = sw && sw.kind === 'bow' ? clamp(1 - sw.t / 0.18, 0, 1) : 0;

@@ -82,6 +82,23 @@ export const BOW = {
   range: 10 * BLOCK, damage: 5, ammo: 10, reload: 2.0, cooldown: 0.4, speed: 340,
 };
 
+// Shardgun: one shell, five shards, and a second act. The shards stop dead at
+// their range, hang there, then re-form as splinters that chase the cursor.
+export const SHARDGUN = {
+  range: 5 * BLOCK, damage: 20, ammo: 1, reload: 1.5, cooldown: 0.45,
+  pellets: 5, speed: 400, spread: 0.30,
+  hoverTime: 0.87,                 // how long the shards hang at max range
+  splinterSpeed: 1180,             // very fast, and it never expires on range
+  splinterDamage: 0.5,             // of the base damage
+  splinterLife: 2.4,
+  fragments: 8,                    // when two splinters meet
+  fragmentDamage: 0.75,            // of the base damage
+  fragmentSpeed: 300,
+  fragmentLife: 0.7,
+  collideRadius: 5,
+  dropChance: 0.10,                // a Shardling's chance to leave one behind
+};
+
 // Regular enemies stay at their base stats through the first five rooms, then
 // step up once every two rooms from room 6 on.
 export const ROOM_SCALING = {
@@ -132,9 +149,18 @@ export const ENEMY_TYPES = {
   // frontal hit, so it has to be opened up from behind or above.
   shardling: {
     id: 'shardling', name: 'Shardling', hp: 80, speed: 74, damage: 10, w: 17, h: 16,
-    attackCooldown: 2.0, attackRange: 150, flying: true,
+    attackCooldown: 2.0, attackRange: 150, flying: true, ai: 'shardling',
     standOff: 92, windUp: 0.55, chargeSpeed: 395, chargeTime: 0.34,
     frontGuard: 0.25,          // fraction of damage that gets through the plate
+    dropId: 'shardgun',        // 10% chance, at the spot where it broke
+  },
+  // The ones Alphads calls up. Same AI, same sprite, different bookkeeping:
+  // only these count against the summon cap, and they leave nothing behind.
+  aetherShardling: {
+    id: 'aetherShardling', name: 'Shardling', hp: 80, speed: 74, damage: 10, w: 17, h: 16,
+    attackCooldown: 2.0, attackRange: 150, flying: true, ai: 'shardling',
+    standOff: 92, windUp: 0.55, chargeSpeed: 395, chargeTime: 0.34,
+    frontGuard: 0.25, summoned: true,
   },
   // Alphads' body. Censored-black, always airborne, and a ground slam cannot
   // touch it.
@@ -185,7 +211,7 @@ export const BOSS_TYPES = {
 
     shot: { arrows: 5, spacing: 0.13, speed: 330, damage: 20, windUp: 0.35 },
     arrowRain: { count: 20, speed: 545, spread: 150, gravity: 430, windUp: 0.5 },
-    timeStop: { duration: 2.0, spawn: 3, maxShardlings: 6, windUp: 0.6 },
+    timeStop: { duration: 2.0, spawn: 3, maxShardlings: 10, windUp: 0.6 },
     healing: { perOrb: 15, orbSpeed: 150, windUp: 0.45 },
     godRay: {
       duration: 2.0, windUp: 0.85, damage: 26, width: 7, lag: 0.14,
