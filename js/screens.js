@@ -4,7 +4,7 @@ import { clamp, rand, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
 import { drawText, drawTextShadow, textWidth } from './font.js';
 import { pxRect, glowDot, spawnParticle } from './gfx.js';
-import { VIEW_W, VIEW_H } from './config.js';
+import { VIEW_W, VIEW_H, FINAL_ROOM } from './config.js';
 import { panel, button, slider, textField, drawTooltip, UI } from './ui.js';
 import { drawItemIcon, ITEMS, RARITY } from './items.js';
 import { AudioCfg, setVolume, Sfx } from './audio.js';
@@ -322,5 +322,104 @@ export function drawGameOver(ctx, game, t) {
     game.goClassSelect();
   }
   if (button(ctx, 'gmenu', VIEW_W / 2 - 54, 204, 108, 18, 'MAIN MENU')) game.quitToMenu();
+  ctx.globalAlpha = 1;
+}
+
+// The run's last screen: the god is down and the vault has nothing left to
+// throw. Same summary as the death screen, wearing the opposite colours.
+export function drawVictory(ctx, game, t) {
+  const vt = game.victoryT;
+  ctx.fillStyle = rgba('#0a0a12', clamp(vt * 0.45, 0, 0.82));
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+  // light climbing the frame while the summary settles in
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const beam = clamp(vt / 1.2, 0, 1);
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * TAU + t * 0.09;
+    const w = 26 + Math.sin(t * 0.7 + i) * 10;
+    ctx.fillStyle = rgba('#ffe9a8', 0.05 * beam);
+    ctx.save();
+    ctx.translate(VIEW_W / 2, -30);
+    ctx.rotate(a * 0.12 + Math.sin(t * 0.2 + i) * 0.05);
+    ctx.fillRect(-w / 2 + (i - 3) * 44, 0, w, VIEW_H + 80);
+    ctx.restore();
+  }
+  ctx.restore();
+
+  // motes drifting up
+  if (Math.random() < 0.6) {
+    spawnParticle({
+      x: rand(VIEW_W), y: VIEW_H + 4, vx: rand(-8, 8), vy: rand(-26, -10),
+      life: rand(1.2, 2.6), size: 1, color: '#ffe9a8', gravity: -4, drag: 0.99, kind: 'shrink',
+    });
+  }
+
+  if (vt < 0.5) return;
+  const k = clamp((vt - 0.5) / 0.6, 0, 1);
+  const ease = 1 - Math.pow(1 - k, 3);
+  ctx.globalAlpha = ease;
+
+  const glow = 0.6 + Math.sin(t * 2.2) * 0.25;
+  glowDot(ctx, VIEW_W / 2, 20, 90, '#ffe9a8', 0.1 * glow);
+  drawTextShadow(ctx, 'THE VAULT IS QUIET', VIEW_W / 2, 14 - (1 - ease) * 8, '#ffe9a8', 2, 'center');
+  drawText(ctx, 'ALPHADS HAS FALLEN', VIEW_W / 2, 32, Theme.uiDim, 1, 'center');
+
+  const st = game.runStats;
+  const pw = 264, px = Math.round((VIEW_W - pw) / 2), py = 44;
+  panel(ctx, px, py, pw, 118, { alpha: 0.9 });
+  drawText(ctx, 'RUN COMPLETE', px + pw / 2, py + 6, '#ffd76a', 1, 'center');
+  pxRect(ctx, px + 10, py + 16, pw - 20, 1, rgba(Theme.uiDim, 0.5));
+
+  if (st) {
+    const mins = Math.floor(st.time / 60);
+    const secs = Math.floor(st.time % 60);
+    const rows = [
+      ['CLASS', st.classId === 'melee' ? 'MELEE' : 'RANGER'],
+      ['CLEARED', `${FINAL_ROOM} ROOMS`],
+      ['KILLS', String(st.kills)],
+      ['TIME', `${mins}:${String(secs).padStart(2, '0')}`],
+      ['SEED', st.seed || '-'],
+    ];
+    let ry = py + 24;
+    for (const [label, value] of rows) {
+      drawText(ctx, label, px + 12, ry, Theme.uiDim, 1);
+      drawText(ctx, value, px + pw - 12, ry, Theme.ui, 1, 'right');
+      ry += 11;
+    }
+
+    drawText(ctx, 'CARRIED', px + 12, ry + 3, Theme.uiDim, 1);
+    let ix = px + 62;
+    let hoverTip = null;
+    for (const item of st.items) {
+      const def = ITEMS[item.id];
+      if (!def) continue;
+      const hot = Input.mouse.x >= ix && Input.mouse.x < ix + 14 &&
+        Input.mouse.y >= ry && Input.mouse.y < ry + 14;
+      ctx.fillStyle = rgba('#000000', 0.45);
+      ctx.fillRect(ix, ry, 14, 14);
+      ctx.strokeStyle = rgba(RARITY[def.rarity].color, hot ? 1 : 0.6);
+      ctx.strokeRect(ix + 0.5, ry + 0.5, 13, 13);
+      drawItemIcon(ctx, item.id, ix + 1, ry + 1, 12, t);
+      if (item.count > 1) drawText(ctx, item.count, ix + 12, ry + 8, Theme.ui, 1, 'right');
+      if (hot) hoverTip = { id: item.id, x: ix + 7, y: ry - 2 };
+      ix += 17;
+      if (ix > px + pw - 20) break;
+    }
+    if (!st.items.length) drawText(ctx, 'NOTHING', px + 62, ry + 3, Theme.uiDim, 1);
+    if (hoverTip) drawTooltip(ctx, hoverTip);
+  }
+
+  const bw = 108;
+  if (button(ctx, 'vretry', VIEW_W / 2 - bw - 4, 182, bw, 18, 'SAME SEED')) {
+    game.seedText = st ? st.seed : game.seedText;
+    game.goClassSelect();
+  }
+  if (button(ctx, 'vnew', VIEW_W / 2 + 4, 182, bw, 18, 'NEW RUN')) {
+    game.seedText = '';
+    game.goClassSelect();
+  }
+  if (button(ctx, 'vmenu', VIEW_W / 2 - 54, 204, 108, 18, 'MAIN MENU')) game.quitToMenu();
   ctx.globalAlpha = 1;
 }

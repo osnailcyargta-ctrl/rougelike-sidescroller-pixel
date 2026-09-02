@@ -20,6 +20,7 @@ const window01 = (t, a, b) => clamp((t - a) / Math.max(0.0001, b - a), 0, 1);
 const SUBTITLE = {
   golem: 'ANCHOR OF THE DEEP VAULT',
   bigdude: 'TWENTY BLOCKS OF APPETITE',
+  alphads: 'THE AETHER GOD',
 };
 
 export class Cutscene {
@@ -44,6 +45,8 @@ export class Cutscene {
     this.boss = boss;
     this.booms = 0;
     this.nextBoom = 0.35;
+    this.roared = false;
+    this.finalFlash = false;
     this.flash = type === 'outro' ? 1 : 0;
     this.title = (boss?.name ?? 'BOSS').toUpperCase();
     this.subtitle = SUBTITLE[boss?.def?.id] ?? '';
@@ -108,20 +111,35 @@ export class Cutscene {
     if (this.t >= this.len) this.finish();
   }
 
+  get holy() { return this.boss?.kind === 'god'; }
+
   updateIntro(dt) {
-    // the roar: one shock at 0.45s that shakes the whole frame
+    const holy = this.holy;
+    // the roar: one shock at 0.45s that shakes the whole frame. The god does
+    // not roar - it simply arrives, and the room brightens around it.
     if (this.t >= 0.45 && !this.roared) {
       this.roared = true;
-      Camera.add(13);
-      Camera.punch(2.6);
+      Camera.add(holy ? 9 : 13);
+      Camera.punch(holy ? 2.0 : 2.6);
       Sfx.slam();
-      impactRing(this.focus.x, this.focus.y, { color: Theme.hp, r0: 8, r1: 150, life: 0.7, width: 4 });
-      impactRing(this.focus.x, this.focus.y, { color: '#ffffff', r0: 4, r1: 90, life: 0.45, width: 2.5 });
-      burst(this.focus.x, this.focus.y, 40, {
-        color: Theme.uiAccent, color2: '#ffffff', kind: 'streak',
-        speedMin: 120, speedMax: 340, lifeMin: 0.2, lifeMax: 0.5, gravity: 0, drag: 0.9,
+      impactRing(this.focus.x, this.focus.y, { color: holy ? '#ffd76a' : Theme.hp, r0: 8, r1: holy ? 210 : 150, life: 0.8, width: 4 });
+      impactRing(this.focus.x, this.focus.y, { color: '#ffffff', r0: 4, r1: holy ? 130 : 90, life: 0.45, width: 2.5 });
+      burst(this.focus.x, this.focus.y, holy ? 54 : 40, {
+        color: holy ? '#ffe9a8' : Theme.uiAccent, color2: '#ffffff', kind: 'streak',
+        speedMin: 120, speedMax: 340, lifeMin: 0.2, lifeMax: 0.6, gravity: 0, drag: 0.9,
       });
-      this.flash = 0.5;
+      this.flash = holy ? 0.75 : 0.5;
+    }
+    if (holy) {
+      // feathers falling through the frame instead of embers rising
+      if (Math.random() < dt * 30) {
+        spawnParticle({
+          x: rand(0, VIEW_W), y: rand(-10, 40), vx: rand(-16, 16), vy: rand(14, 40),
+          life: rand(1.2, 2.4), size: 1, color: Math.random() < 0.4 ? '#ffd76a' : '#f6f1e4',
+          gravity: 6, drag: 0.99, kind: 'shrink',
+        });
+      }
+      return;
     }
     // embers drifting up through the frame the whole time
     if (Math.random() < dt * 26) {
@@ -134,6 +152,7 @@ export class Cutscene {
 
   updateOutro(dt) {
     this.game.postfx.slowmo = 1;
+    if (this.holy) return this.updateAscension(dt);
     // a chain of detonations walking along the body
     this.nextBoom -= dt;
     if (this.nextBoom <= 0 && this.t < 2.3) {
@@ -155,6 +174,44 @@ export class Cutscene {
         lifeMin: 0.5, lifeMax: 1.3, sizeMin: 2, sizeMax: 5, gravity: -40, glow: false,
       });
       if (big) this.flash = 0.55;
+    }
+  }
+
+  // The god does not explode. Its wings come apart a row at a time and the
+  // light it was holding goes back up through the ceiling.
+  updateAscension(dt) {
+    this.nextBoom -= dt;
+    if (this.nextBoom <= 0 && this.t < 2.6) {
+      this.nextBoom = rand(0.16, 0.3);
+      this.booms++;
+      const big = this.booms % 3 === 0;
+      const x = this.focus.x + rand(-34, 34);
+      const y = this.focus.y + rand(-30, 22);
+      Camera.add(big ? 6 : 2.5);
+      Camera.punch(big ? 1.1 : 0.4);
+      Sfx.zap();
+      impactRing(x, y, { color: '#ffffff', r0: 2, r1: big ? 80 : 40, life: 0.5, width: big ? 3 : 1.5 });
+      impactRing(x, y, { color: '#ffd76a', r0: 2, r1: big ? 120 : 60, life: 0.7, width: 2 });
+      burst(x, y, big ? 26 : 12, {
+        color: '#f6f1e4', color2: '#ffd76a', speedMin: 20, speedMax: big ? 140 : 80,
+        lifeMin: 0.5, lifeMax: 1.6, sizeMax: 2, gravity: -34, drag: 0.94, kind: 'shrink',
+      });
+      if (big) this.flash = 0.4;
+    }
+    // a steady column of light leaving through the top of the frame
+    if (Math.random() < dt * 70) {
+      spawnParticle({
+        x: this.focus.x + rand(-26, 26), y: this.focus.y + rand(-10, 24),
+        vx: rand(-10, 10), vy: rand(-150, -60), life: rand(0.6, 1.5),
+        size: 1, color: Math.random() < 0.35 ? '#ffd76a' : '#ffffff',
+        gravity: -40, drag: 0.98, kind: 'streak',
+      });
+    }
+    if (this.t > this.len - 0.5 && !this.finalFlash) {
+      this.finalFlash = true;
+      this.flash = 1;
+      Camera.add(12);
+      Sfx.wave();
     }
   }
 

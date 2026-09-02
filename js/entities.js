@@ -874,6 +874,7 @@ export class Projectile {
       mark: false, slow: false, homing: 0, target: null, trail: [],
       spent: false, stuck: false, stuckT: 0, spin: 0,
       phase: 'out', owner: null, hitLog: null, wobble: 0,
+      keepTop: false,        // arrow rain arcs above the screen and falls back
     }, o);
     this.angle = Math.atan2(this.vy, this.vx);
   }
@@ -923,10 +924,12 @@ export class Projectile {
       this.goSpent();
       return;
     }
-    if (this.x < -8 || this.x > VIEW_W + 8 || this.y < -20 || this.y > GROUND_Y + 4) {
+    if (this.x < -8 || this.x > VIEW_W + 8 || this.y > GROUND_Y + 4 ||
+        (this.y < -20 && !this.keepTop)) {
       this.expire();
       return;
     }
+    if (this.keepTop && this.y < -400) { this.dead = true; return; }
     this.trail.push([this.x, this.y]);
     if (this.trail.length > 8) this.trail.shift();
 
@@ -1104,6 +1107,18 @@ export class Projectile {
       pxRect(ctx, -7, -2, 14, 4, rgba(Theme.lightning, 0.35));
       pxRect(ctx, -6, -1, 12, 2, Theme.lightning);
       pxRect(ctx, -2, -1, 6, 2, '#ffffff');
+    } else if (this.kind === 'godarrow') {
+      // a shaft of light with a gold head - it reads at a glance against the rain
+      ctx.globalCompositeOperation = 'lighter';
+      glowDot(ctx, this.x, this.y, 11, '#ffd76a', 0.4);
+      ctx.translate(Math.round(this.x), Math.round(this.y));
+      ctx.rotate(this.angle);
+      pxRect(ctx, -11, -1, 14, 2, rgba('#ffe9a8', 0.5));
+      pxRect(ctx, -7, 0, 9, 1, '#ffd76a');
+      pxRect(ctx, 1, -2, 4, 4, '#fff6d8');
+      pxRect(ctx, 2, -1, 3, 2, '#ffffff');
+      pxRect(ctx, -8, -2, 3, 1, rgba('#ffe9a8', 0.85));
+      pxRect(ctx, -8, 1, 3, 1, rgba('#ffe9a8', 0.85));
     } else if (this.team === 'enemy') {
       glowDot(ctx, this.x, this.y, 9, Theme.enemyStinger, 0.4);
       ctx.translate(Math.round(this.x), Math.round(this.y));
@@ -1542,9 +1557,15 @@ export class Player {
     if (!g) return;
     g.t += dt;
 
-    if (g.state === 'flying') {
+    if (g.state === 'flying' || g.state === 'falling') {
+      if (g.state === 'falling') {
+        // out of reach: it stops driving forward and drops, but it is still a
+        // live hook - anything it lands on still catches and still pulls
+        g.vx *= Math.pow(0.35, dt);
+        g.vy += GRAPPLE.fallGravity * dt;
+      }
       // step in small slices so a fast hook cannot tunnel through a platform
-      const steps = Math.max(1, Math.ceil((GRAPPLE.hookSpeed * dt) / 4));
+      const steps = Math.max(1, Math.ceil((Math.hypot(g.vx, g.vy) * dt) / 4));
       for (let i = 0; i < steps; i++) {
         const px = g.x, py = g.y;
         g.x += (g.vx * dt) / steps;
@@ -1567,8 +1588,17 @@ export class Player {
           });
           break;
         }
-        if (g.len >= GRAPPLE.maxLength) {
-          // ran out of rope without biting anything
+        if (g.state === 'flying' && g.len >= GRAPPLE.maxLength) {
+          g.state = 'falling';
+          g.vx *= GRAPPLE.fallDrag;
+          g.vy = Math.min(g.vy * GRAPPLE.fallDrag, 0);
+          burst(g.x, g.y, 5, {
+            color: Theme.hookColor, speedMin: 8, speedMax: 40, lifeMin: 0.1, lifeMax: 0.28,
+            gravity: 120, kind: 'shrink',
+          });
+        }
+        if (g.len >= GRAPPLE.maxLength * GRAPPLE.maxRope) {
+          // the line itself finally runs out
           this.releaseGrapple(true);
           burst(px, py, 4, {
             color: Theme.hookColor, speedMin: 10, speedMax: 50, lifeMin: 0.1, lifeMax: 0.25,
@@ -1623,7 +1653,8 @@ export class Player {
     if (!g) return;
     const sx = this.x, sy = this.cy;
     const d = dist(sx, sy, g.x, g.y);
-    const slack = g.state === 'attached' ? clamp((g.len - d) / 30, 0, 1) : 0.35;
+    const slack = g.state === 'attached' ? clamp((g.len - d) / 30, 0, 1)
+      : g.state === 'falling' ? 0.85 : 0.35;
     const segs = 10;
     const pts = [];
     for (let i = 0; i <= segs; i++) {
@@ -1780,7 +1811,7 @@ export class Player {
       });
       for (const e of this.game.enemies) {
         if (e.dead || e.spawnT > 0) continue;
-        if (e.untargetable) continue;
+        if (e.untargetable || e.def.slamImmune) continue;   // nothing airborne and holy cares
         if (dist(e.cx, e.cy, this.x, this.y) < PLAYER.slamRadius + e.radius) {
           e.damage(PLAYER.slamDamage, {
             knockback: 170, fromX: this.x, color: Theme.uiAccent, shake: 0, crit: true,

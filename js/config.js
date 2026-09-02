@@ -73,6 +73,9 @@ export const GRAPPLE = {
   minLength: 16,             // let go once you are basically there
   airControl: 0.45,          // how much steering you keep while swinging
   cooldown: 0.22,
+  fallGravity: 760,          // past its reach the hook drops instead of vanishing
+  fallDrag: 0.4,             // how much forward speed it keeps when it starts to fall
+  maxRope: 1.75,             // multiple of maxLength before the line finally runs out
 };
 
 export const BOW = {
@@ -98,6 +101,7 @@ export function roomScaleSteps(room) {
 }
 
 export const BOSS_ROOM_INTERVAL = 5;   // rooms 5, 10, 15 ... get a third wave
+export const FINAL_ROOM = 15;          // Alphads waits here; there is no room 16
 
 export const ENEMY_TYPES = {
   grunt: {
@@ -132,6 +136,12 @@ export const ENEMY_TYPES = {
     standOff: 92, windUp: 0.55, chargeSpeed: 395, chargeTime: 0.34,
     frontGuard: 0.25,          // fraction of damage that gets through the plate
   },
+  // Alphads' body. Censored-black, always airborne, and a ground slam cannot
+  // touch it.
+  alphadsBody: {
+    id: 'alphadsBody', name: 'Alphads', hp: 1750, speed: 0, damage: 22, w: 34, h: 46,
+    attackCooldown: 1, attackRange: 30, flying: true, boss: true, slamImmune: true,
+  },
   // Boss parts live in the normal enemy list so every existing hit test works.
   golemBody: {
     id: 'golemBody', name: 'Aether Golem', hp: 600, speed: 0, damage: 18, w: 48, h: 60,
@@ -165,6 +175,24 @@ export const BOSS_TYPES = {
     headSpeed: 88, headHover: 74,
     attackDelay: 3.0,   // pause between one attack ending and the next starting
   },
+  // The last thing in the vault. It never lands, and it never stops.
+  alphads: {
+    id: 'alphads', name: 'Alphads', short: 'Alphads', title: 'THE AETHER GOD',
+    kind: 'god',
+    hp: 1750,
+    w: 34, h: 46,
+    hoverY: 84, driftSpeed: 96, driftRange: 128,
+
+    shot: { arrows: 5, spacing: 0.13, speed: 330, damage: 20, windUp: 0.35 },
+    arrowRain: { count: 20, speed: 545, spread: 150, gravity: 430, windUp: 0.5 },
+    timeStop: { duration: 2.0, spawn: 3, maxShardlings: 6, windUp: 0.6 },
+    healing: { perOrb: 15, orbSpeed: 150, windUp: 0.45 },
+    godRay: {
+      duration: 2.0, windUp: 0.85, damage: 26, width: 7, lag: 0.14,
+      waveEvery: 0.75, waveRange: 10 * BLOCK, waveSpeed: 320, waveDamage: 18,
+    },
+  },
+
   // A twenty-block worm that lives under the floor and only surfaces to strike.
   bigdude: {
     id: 'bigdude', name: 'Big Dude', short: 'Big Dude', kind: 'worm',

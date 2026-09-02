@@ -10,7 +10,7 @@ import { Sfx, resumeAudio, setVolume, AudioCfg } from './audio.js';
 import { PostFX, parseShaderPack, DEFAULT_COMPOSITE } from './postfx.js';
 import {
   VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, DROP_POINT, PERK, WAVES, PLAYER as PCFG,
-  BOSS_ROOM_INTERVAL, NUKERANG,
+  BOSS_ROOM_INTERVAL, NUKERANG, FINAL_ROOM,
 } from './config.js';
 import { Player, Enemy, Projectile } from './entities.js';
 import { makeBoss } from './boss.js';
@@ -19,7 +19,7 @@ import { drawBackground, drawArena, drawSpawnPads, updateWorld, buildWave, activ
 import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
 import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, panel, button } from './ui.js';
 import { drawText, drawTextShadow } from './font.js';
-import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, drawControls } from './screens.js';
+import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, drawControls, drawVictory } from './screens.js';
 
 // Health restored to the player after every cleared wave; clearing a room and
 // stepping through the gate restores the rest.
@@ -68,6 +68,8 @@ export class Game {
     this.invOpen = false;
     this.debugOpen = false;
     this.debug = { god: false, infHealth: false };
+    this.timeStopT = 0;      // Alphads' held breath
+    this.victoryT = 0;
     this.hint = null;
     this.hintT = 0;
 
@@ -278,6 +280,10 @@ export class Game {
   onPlayerDeath() {
     this.screen = 'gameover';
     this.deathT = 0;
+    this.captureRunStats();
+  }
+
+  captureRunStats() {
     const inv = this.player ? this.player.inventory : null;
     const held = [];
     if (inv) {
@@ -299,6 +305,37 @@ export class Game {
       maxHp: this.player ? this.player.maxHp : 0,
       items: held,
     };
+  }
+
+  // --- time stop ---------------------------------------------------------
+
+  // Everything but the god holds still: no movement, no attacks, no grapple.
+  beginTimeStop(duration) {
+    this.timeStopT = Math.max(this.timeStopT, duration);
+    if (this.player) {
+      this.player.vx = 0;
+      this.player.vy = 0;
+      this.player.releaseGrapple(true);
+    }
+  }
+
+  endTimeStop() { this.timeStopT = 0; }
+
+  get timeStopped() { return this.timeStopT > 0; }
+
+  // --- the end -----------------------------------------------------------
+
+  finishRun() {
+    this.captureRunStats();
+    this.runStats.room = FINAL_ROOM;
+    this.screen = 'victory';
+    this.victoryT = 0;
+    this.boss = null;
+    this.enemies.length = 0;
+    this.projectiles.length = 0;
+    this.timeStopT = 0;
+    Camera.clearCinematic();
+    Sfx.wave();
   }
 
   nearestEnemy(x, y) {
@@ -390,6 +427,7 @@ export class Game {
     uiBeginFrame(dt);
     this.time += dt;
     if (this.hintT > 0) this.hintT -= dt;
+    if (this.screen === 'victory') this.victoryT += dt;
 
     let gdt = dt;
     if (this.freezeT > 0) {
@@ -397,6 +435,8 @@ export class Game {
       gdt = dt * 0.08;
     }
     this.postfx.slowmo = lerp(this.postfx.slowmo, this.freezeT > 0 ? 1 : 0, 1 - Math.pow(0.001, dt));
+    // the world drains of colour while the god holds it still
+    this.postfx.timeStop = lerp(this.postfx.timeStop, this.timeStopT > 0 ? 1 : 0, 1 - Math.pow(1e-6, dt));
 
     // One bad frame must never end the run: log it and keep the loop alive.
     try {
@@ -479,20 +519,34 @@ export class Game {
         if (Input.pressed.has(String(i))) { p.inventory.selected = i - 1; Sfx.ui(); }
       }
     }
-    p.controls = !this.invOpen && this.screen === 'playing' && !p.dead;
+    const frozen = this.timeStopT > 0;
+    if (frozen) {
+      this.timeStopT -= dt;
+      if (this.timeStopT <= 0) this.timeStopT = 0;
+    }
+    p.controls = !frozen && !this.invOpen && this.screen === 'playing' && !p.dead;
 
     // --- right click interact
-    if (Input.mouseDown.right && !this.invOpen && this.screen === 'playing') this.interact();
+    if (Input.mouseDown.right && !this.invOpen && !frozen && this.screen === 'playing') this.interact();
 
-    p.update(dt, Input);
+    if (frozen) {
+      // held in amber: pose only, no physics, no timers running down
+      p.vx = 0;
+      p.vy = 0;
+      p.anim += dt * 0.15;
+    } else {
+      p.update(dt, Input);
+    }
 
     // --- waves
-    if (!this.roomCleared) this.updateWaves(dt);
+    if (!this.roomCleared && !frozen) this.updateWaves(dt);
 
     if (this.boss) this.boss.update(dt);
-    for (const e of this.enemies) e.update(dt);
+    // Frozen: nothing acts. Anything still materialising keeps doing that, so
+    // the shardlings the god calls up actually appear during the stop.
+    for (const e of this.enemies) { if (!frozen || e.spawnT > 0) e.update(dt); }
     // contact damage from bodies
-    for (const e of this.enemies) {
+    if (!frozen) for (const e of this.enemies) {
       if (e.dead || e.spawnT > 0 || e.def.flying || e.noContact || e.untargetable) continue;
       if (Math.abs(e.cx - p.x) < (e.w + p.w) / 2 - 1 && Math.abs(e.cy - p.cy) < (e.h + p.h) / 2 - 1) {
         if (p.dashT <= 0) p.hurt(Math.round(e.dmg * 0.35), e.x);
@@ -503,7 +557,7 @@ export class Game {
     }
 
     // --- projectiles
-    for (const pr of this.projectiles) {
+    if (!frozen) for (const pr of this.projectiles) {
       pr.update(dt);
       if (pr.dead) continue;
       if (pr.spent) continue;      // out of range: falling, and harmless
@@ -571,6 +625,8 @@ export class Game {
 
   clearRoom() {
     this.roomCleared = true;
+    // The vault has no room past the god.
+    if (this.roomIndex >= FINAL_ROOM) { this.finishRun(); return; }
     if (this.isBossRoom()) {
       // two offers on the centre platform, one pick
       const [a, rolled] = rollPerkPair(this.player.inventory);
@@ -693,13 +749,14 @@ export class Game {
     }
     ctx.restore();
 
-    if (!this.cutscene.active) drawHUD(ctx, this);
+    if (!this.cutscene.active && this.screen !== 'victory') drawHUD(ctx, this);
     this.cutscene.draw(ctx);
     if (this.invOpen) drawInventory(ctx, this);
     else if (UI.tooltip) drawTooltip(ctx, UI.tooltip);
 
     if (this.screen === 'paused') drawPause(ctx, this, this.time);
     if (this.screen === 'gameover') drawGameOver(ctx, this, this.time);
+    if (this.screen === 'victory') drawVictory(ctx, this, this.time);
     if (this.debugOpen) drawDebugMenu(ctx, this);
     this.drawToast(ctx);
   }

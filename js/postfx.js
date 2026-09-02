@@ -51,6 +51,7 @@ uniform float uScanline;
 uniform float uSaturation;
 uniform float uHit;      // 0..1 damage flash
 uniform float uSlowmo;   // 0..1 slow-motion amount
+uniform float uTimeStop; // 0..1 frozen time: drains the colour out of the world
 
 void main() {
   vec2 uv = vUv;
@@ -73,6 +74,10 @@ void main() {
 
   // slow-motion cools the image down a touch
   col = mix(col, col * vec3(0.75, 0.88, 1.25), uSlowmo * 0.5);
+
+  // stopped time: the world goes grey and slightly brighter, like a held frame
+  float grey = dot(col, vec3(0.299, 0.587, 0.114));
+  col = mix(col, vec3(grey) * vec3(1.02, 1.0, 1.06) + 0.02, uTimeStop);
 
   // damage flash
   col += vec3(0.55, 0.05, 0.12) * uHit;
@@ -145,6 +150,7 @@ export class PostFX {
     this.error = null;
     this.hit = 0;
     this.slowmo = 0;
+    this.timeStop = 0;
     this.time = 0;
     this.compositeSource = DEFAULT_COMPOSITE;
     try { this.init(); } catch (e) { this.ok = false; this.error = String(e); }
@@ -262,6 +268,7 @@ export class PostFX {
     gl.uniform1f(this.uni(p, 'uSaturation'), Theme.saturation);
     gl.uniform1f(this.uni(p, 'uHit'), this.hit);
     gl.uniform1f(this.uni(p, 'uSlowmo'), this.slowmo);
+    gl.uniform1f(this.uni(p, 'uTimeStop'), this.timeStop);
     this.drawQuad(p);
     gl.activeTexture(gl.TEXTURE0);
   }

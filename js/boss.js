@@ -5,9 +5,10 @@ import { clamp, lerp, rand, randInt, choice, dist, distToSegment, sign, rgba, TA
 import { Theme } from './theme.js';
 import { Camera, burst, floatText, spawnParticle, impactRing, limb, pxRect, glowDot, boltPath, strokeBolt } from './gfx.js';
 import { Sfx } from './audio.js';
-import { VIEW_W, VIEW_H, GRAVITY, GROUND_Y, BOSS_TYPES, ROOM_SCALING, BOSS_ROOM_INTERVAL } from './config.js';
+import { VIEW_W, VIEW_H, GRAVITY, GROUND_Y, BOSS_TYPES, ROOM_SCALING, BOSS_ROOM_INTERVAL, FINAL_ROOM } from './config.js';
 import { Enemy, Projectile } from './entities.js';
 import { WormBoss } from './worm.js';
+import { AlphadsBoss } from './alphads.js';
 
 // How far a ray from (ox, oy) travels before it leaves the arena.
 function rayLength(ox, oy, dx, dy) {
@@ -828,6 +829,9 @@ export class GolemBoss {
 export function makeBoss(game, roomIndex, which = null) {
   if (which === 'golem') return new GolemBoss(game, roomIndex);
   if (which === 'bigdude') return new WormBoss(game, roomIndex);
+  if (which === 'alphads') return new AlphadsBoss(game, roomIndex);
+  // the last room belongs to the god, whatever the rotation says
+  if (roomIndex >= FINAL_ROOM) return new AlphadsBoss(game, roomIndex);
   const tier = Math.max(1, Math.round(roomIndex / BOSS_ROOM_INTERVAL));
   return tier % 2 === 1 ? new GolemBoss(game, roomIndex) : new WormBoss(game, roomIndex);
 }

@@ -187,6 +187,8 @@ function drawBossBar(ctx, game) {
   ctx.strokeStyle = rgba(Theme.uiDim, 0.9);
   ctx.strokeRect(x - 0.5, y - 0.5, w + 1, 7);
   if (boss.phase2At > 0) drawTextShadow(ctx, `PHASE ${boss.phase}`, x + w + 6, y, Theme.uiDim, 1);
+  // some bosses carry a title under the bar
+  if (boss.title) drawTextShadow(ctx, boss.title, VIEW_W / 2, y + 9, rgba(Theme.uiDim, 0.95), 1, 'center');
 }
 
 function slotBox(ctx, x, y, s, selected, item, t) {

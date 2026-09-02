@@ -70,7 +70,8 @@ centre activates as a third spawn pad. When wave 2 ends, a drop appears on that
 centre platform — a perk 80% of the time, a **weapon** the other 20% (favouring
 one you aren't already carrying, so it can open up the other playstyle) and a gate opens on the right — right-click the drop to take
 it, right-click the gate to descend into the next room. Rooms get denser and
-add new enemy types as you go.
+add new enemy types as you go. A run is **15 rooms long**: Alphads waits in
+room 15 and killing it finishes the game.
 
 Enemies keep their base stats through the first five rooms. From **room 6** they
 step up **once every two rooms**: +18% max HP and +12% damage per step, so a
@@ -131,8 +132,33 @@ hurts far more than the back). Its loop: buried 3s, leap, wait 2s, leap, wait
 2s, leap + spit, buried 3s, spit + leap, wait 2s, repeat. The spit is a fan of
 20 globs thrown up on their own arcs.
 
-Boss rooms alternate between the two, and each boss scales from its own first
-appearance, so a debut boss always fights at its listed stats.
+**Alphads, THE AETHER GOD** (1750 HP, fixed — it does not scale). The run's
+last fight, waiting in **room 15**. It never lands and **ground slam does
+nothing to it**. The body is a black censor bar under a halo, with two wings on
+each side — a large one above and a small one below — and it carries a gold bow
+that aims wherever its next shot is going. Five attacks:
+
+* *Shot* — five arrows in a row, 20 damage each.
+* *Arrow rain* — twenty arrows fired straight up and off the top of the screen;
+  they arc back down as rain, with sights marking the floor under each one.
+* *Time stop* — for **2 seconds** the player and every enemy stop dead (no
+  movement, no attacks, no grapple) and the whole screen drains to grayscale.
+  Only Alphads acts, calling up **3 shardlings** — at most **6** in the fight.
+* *Healing* — every living shardling is unmade into a green orb that homes in
+  on Alphads and heals it **15 HP** on contact. Shoot the orbs to pop them
+  before they land.
+* *God rays* — a laser that tracks you for 2 seconds, and every **0.75s** a
+  shock wave peels off it and runs out **10 blocks** to either side.
+
+Its liturgy: `(shot, 0.5s, shot, 1s, arrow rain, 3s) x3, 1s, time stop,
+(god ray, 2.3s, god ray, 1s, shot, shot, shot), healing`, then repeat.
+
+**Room 15 is the last room.** Killing Alphads ends the run — no drops, no
+portal, no room 16, just the ending screen with your run summary.
+
+Rooms 5 and 10 alternate between the golem and Big Dude, and each of those
+scales from its own first appearance, so a debut boss always fights at its
+listed stats.
 
 ### Boss cutscenes
 
@@ -144,8 +170,10 @@ instead of sitting invisible underground. The outro walks a chain of
 detonations along the body in slow motion, strikes the boss's name through and
 stamps DEFEATED. The golem's outro tears its head free (even if it died in
 phase 1), drops it, bounces it off the floor, settles it on its side and then
-lets it crumble away the same way a spent arrow does. Any key skips after half
-a second.
+lets it crumble away the same way a spent arrow does. Alphads gets its own pair
+instead of the explosions: feathers fall through the reveal, and the outro has
+it come apart a wing-row at a time and rise out of the top of the frame in a
+column of light. Any key skips after half a second.
 
 ### Enemies
 
@@ -198,7 +226,7 @@ Perks are items — they work while they simply sit anywhere in the inventory.
 | Wet Slime | Uncommon | Every 2s spits a homing glob that slows the target 30% for 1.5s |
 | Bloodstone | Common | Every 5th hit you land heals 3 HP (+2 per extra stack) |
 | Aegis Shard | Uncommon | +20 absorb shield that soaks damage before your HP; refills 5s after you stop taking hits |
-| Grappling Hook | Rare | `Q` fires a hook at the cursor. It bites terrain, reels you in on a rope you can swing from, and `Q` again lets go. One per run |
+| Grappling Hook | Rare | `Q` fires a hook at the cursor. It bites terrain, reels you in on a rope you can swing from, and `Q` again lets go. Past its 11-block reach the hook **falls under gravity and keeps biting** on the way down, so a lobbed shot still catches. One per run |
 
 Inventory is a 4x4 grid (16 slots); the top row doubles as the hotbar. Non-weapon
 items stack to 10, weapons don't stack. Drag items between slots with the mouse.
