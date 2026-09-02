@@ -131,7 +131,7 @@ export const ENEMY_TYPES = {
   // Golem wreckage that reassembled itself. Its front plate turns most of a
   // frontal hit, so it has to be opened up from behind or above.
   shardling: {
-    id: 'shardling', name: 'Shardling', hp: 80, speed: 74, damage: 20, w: 17, h: 16,
+    id: 'shardling', name: 'Shardling', hp: 80, speed: 74, damage: 10, w: 17, h: 16,
     attackCooldown: 2.0, attackRange: 150, flying: true,
     standOff: 92, windUp: 0.55, chargeSpeed: 395, chargeTime: 0.34,
     frontGuard: 0.25,          // fraction of damage that gets through the plate

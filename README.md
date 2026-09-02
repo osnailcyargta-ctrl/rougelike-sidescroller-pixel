@@ -184,7 +184,7 @@ column of light. Any key skips after half a second.
 | Brute | Slow, heavy, occasionally charges | 20 |
 | Lurker | Circles at range, then commits to a long telegraphed lunge | 15 |
 | Spitter | Holds a stand-off and lobs acid on a high arc | 16 |
-| Shardling | Golem wreckage, from room 6. Hovers with its plate toward you, sights a line, then commits to one straight charge it cannot steer. The plate turns **75% of any frontal hit** — open it up from behind or above | 20 |
+| Shardling | Golem wreckage, from room 6. Hovers with its plate toward you, sights a line, then commits to one straight charge it cannot steer. The plate turns **75% of any frontal hit** — open it up from behind or above | 10 |
 
 ### Classes
 
