@@ -15,7 +15,7 @@ import {
 import { Player, Enemy, Projectile, SHARD_TINT } from './entities.js';
 import { makeBoss } from './boss.js';
 import { Cutscene } from './cutscene.js';
-import { drawBackground, drawArena, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal } from './world.js';
+import { drawBackground, drawArena, drawLightShafts, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal } from './world.js';
 import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
 import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, panel, button } from './ui.js';
 import { drawText, drawTextShadow } from './font.js';
@@ -24,6 +24,15 @@ import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, d
 // Health restored to the player after every cleared wave; clearing a room and
 // stepping through the gate restores the rest.
 const WAVE_HEAL = 0.25;
+
+// A hot pinprick of light, used where something ignites.
+function glowFlashAt(x, y) {
+  impactRing(x, y, { color: '#ffe9a8', r0: 1, r1: 20, life: 0.18, width: 2 });
+  burst(x, y, 6, {
+    color: '#ffe9a8', color2: '#ffffff', speedMin: 20, speedMax: 90,
+    lifeMin: 0.08, lifeMax: 0.2, gravity: 0, kind: 'shrink',
+  });
+}
 
 export class Game {
   static get WAVE_HEAL() { return WAVE_HEAL; }
@@ -413,7 +422,9 @@ export class Game {
       const cfg = ORIGAMI.forms[id];
       return { id, name: cfg.name, cost: cfg.cost };
     });
-    this.fold = { options, sel: 0, t: 0, aim: p.aim };
+    // rot is where the ring is; targetRot is where it is heading. Scrolling
+    // adds a full slice to the target, so it always spins the way you scrolled.
+    this.fold = { options, sel: 0, t: 0, aim: p.aim, rot: 0, targetRot: 0, spin: 0 };
     Sfx.ui();
   }
 
@@ -422,19 +433,28 @@ export class Game {
   updateFoldWheel(dt) {
     const f = this.fold;
     f.t += dt;
-    const p = this.player;
     const n = f.options.length;
-    // both in world space, which is what Input.mouse already is
-    const dx = Input.mouse.x - p.x, dy = Input.mouse.y - (p.cy - 42);
-    if (Math.hypot(dx, dy) > 9) {
-      // slice 0 sits at the top and they run clockwise
-      let a = Math.atan2(dy, dx) + Math.PI / 2;
-      a = ((a % TAU) + TAU) % TAU;
-      const sel = Math.floor((a + Math.PI / n) / (TAU / n)) % n;
-      if (sel !== f.sel) { f.sel = sel; Sfx.ui(); }
+    const step = TAU / n;
+
+    // scroll cycles the folds; the ring chases the new angle instead of jumping
+    if (Input.wheel !== 0 && n > 1) {
+      const dir = sign(Input.wheel);
+      f.sel = (f.sel + dir + n) % n;
+      f.targetRot -= dir * step;
+      f.spin = 1;
+      Sfx.ui();
+      Camera.punch(0.18);
     }
+    // a springy ease so the ring overshoots a touch and settles
+    f.rot = lerp(f.rot, f.targetRot, 1 - Math.pow(0.00004, dt));
+    f.spin = Math.max(0, f.spin - dt * 3.4);
+
     for (let i = 0; i < n && i < 9; i++) {
-      if (Input.pressed.has(String(i + 1))) { f.sel = i; this.chooseFold(f.options[i].id); return; }
+      if (Input.pressed.has(String(i + 1))) {
+        f.sel = i;
+        this.chooseFold(f.options[i].id);
+        return;
+      }
     }
     if (Input.pressed.has('Escape') || Input.mouseDown.right) { this.closeFoldWheel(); return; }
     if (f.t > 0.12 && Input.mouseDown.left) this.chooseFold(f.options[f.sel].id);
@@ -469,17 +489,40 @@ export class Game {
       life: id === 'missile' ? 6 : 14, game: this,
     }));
     Sfx.swing();
-    Camera.add(id === 'missile' ? 3 : 1.4);
-    // a puff of creased paper leaving the hand
-    burst(ox, oy, id === 'missile' ? 14 : 8, {
-      color: '#efeade', color2: id === 'missile' ? '#ff8a5c' : '#ffffff',
-      kind: 'streak', speedMin: 60, speedMax: 200, lifeMin: 0.08, lifeMax: 0.24,
-      gravity: 0, angle: aim, spread: 0.6, drag: 0.85,
+    Camera.add(id === 'missile' ? 5 : 2.2);
+    Camera.punch(id === 'missile' ? 0.7 : 0.3);
+    // the fold itself unfurling: a flat ring along the throw, plus creases
+    impactRing(ox, oy, {
+      color: '#ffffff', r0: 1, r1: 26, life: 0.22, width: 1.6,
+      squash: 0.35, rotate: aim,
     });
-    impactRing(ox, oy, { color: '#efeade', r0: 1, r1: 18, life: 0.2, width: 1.2 });
+    impactRing(ox, oy, {
+      color: '#efeade', r0: 2, r1: 44, life: 0.34, width: 1.2,
+      squash: 0.28, rotate: aim,
+    });
+    burst(ox, oy, id === 'missile' ? 20 : 12, {
+      color: '#efeade', color2: id === 'missile' ? '#ff8a5c' : '#ffffff',
+      kind: 'streak', speedMin: 70, speedMax: 250, lifeMin: 0.07, lifeMax: 0.22,
+      gravity: 0, angle: aim, spread: 0.55, drag: 0.84,
+    });
+    // scraps of the sheet spinning off the hand
+    burst(ox, oy, id === 'missile' ? 10 : 6, {
+      color: '#efeade', color2: '#c9c2b2', speedMin: 30, speedMax: 130,
+      lifeMin: 0.3, lifeMax: 0.8, sizeMin: 1, sizeMax: 2, gravity: 260, drag: 0.9,
+      angle: aim, spread: 1.5,
+    });
+    if (id === 'missile') {
+      glowFlashAt(ox, oy);
+      burst(ox, oy, 8, {
+        color: '#3a3550', kind: 'smoke', speedMin: 16, speedMax: 70,
+        lifeMin: 0.3, lifeMax: 0.8, sizeMin: 1, sizeMax: 3, gravity: -30,
+        angle: aim + Math.PI, spread: 0.8, glow: false,
+      });
+    }
   }
 
   // The missile going off: five blocks of paper fire.
+  // (a small helper so the launch reads hot without repeating four calls)
   paperBlast(x, y, damage) {
     const cfg = ORIGAMI.forms.missile;
     const r = cfg.blastRadius;
@@ -941,6 +984,7 @@ export class Game {
     ctx.save();
     Camera.apply(ctx);
     drawBackground(ctx, this.time, this.roomIndex);
+    drawLightShafts(ctx, this.time);
     drawArena(ctx, this.time);
     if (!this.roomCleared) drawSpawnPads(ctx, this.time, activeSpawnPads(this.waveIndex));
 

@@ -94,21 +94,21 @@ export const TWINDAGGER = {
 
 // Origamist: paper is ammunition, and every fold is a different weapon.
 export const ORIGAMI = {
-  startPaper: 30,
-  roomPaper: 10,             // handed over on entering a new room
+  startPaper: 100,
+  roomPaper: 50,             // handed over on entering a new room
   dropChance: 0.10,          // per kill, while playing the Origamist
   dropMin: 1, dropMax: 4,
   cooldown: 0.34,
   forms: {
     airplane: {
       id: 'airplane', name: 'PAPER PLANE', book: 'bookairplane', cost: 1,
-      damage: 15, speed: 132, drop: 26,     // drop = downward drift, px/s^2
+      damage: 30, speed: 132, drop: 26,     // drop = downward drift, px/s^2
       bounces: 3, bounceKick: 46,
     },
     missile: {
       id: 'missile', name: 'PAPER MISSILE', book: 'bookmissile', cost: 2,
-      damage: 20, speed: 70, maxSpeed: 520, accel: 620,
-      blastRadius: 5 * BLOCK, blastDamage: 20,
+      damage: 40, speed: 70, maxSpeed: 520, accel: 620,
+      blastRadius: 5 * BLOCK, blastDamage: 40,
     },
   },
 };

@@ -13,6 +13,21 @@ import { Input, Binds, BIND_ORDER, BIND_LABELS, bindLabel, setBind, resetBinds }
 
 const CLASS_LABEL = { melee: 'MELEE', ranger: 'RANGER', origamist: 'ORIGAMIST' };
 
+// Break a line on spaces so it never runs past the width it was given.
+function wrapLine(text, maxW, scale = 1) {
+  if (textWidth(text, scale) <= maxW) return [text];
+  const words = String(text).split(' ');
+  const out = [];
+  let cur = '';
+  for (const w of words) {
+    const next = cur ? `${cur} ${w}` : w;
+    if (cur && textWidth(next, scale) > maxW) { out.push(cur); cur = w; }
+    else cur = next;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
 function titleGlyphs(ctx, t) {
   const title = 'AETHER';
   const sub = 'DESCENT';
@@ -210,16 +225,15 @@ export function drawClassSelect(ctx, game, t) {
   const cards = [
     {
       id: 'melee', name: 'MELEE', item: 'sword', color: Theme.hp,
-      lines: ['IRON SWORD', '3 BLOCK REACH  -  10 DMG', '0.45S SWING'],
+      lines: ['IRON SWORD', '3 BLOCKS - 10 DMG', '0.45S SWING'],
     },
     {
       id: 'ranger', name: 'RANGER', item: 'bow', color: Theme.platformGlow,
-      lines: ['HUNTER BOW', '10 BLOCK RANGE  -  5 DMG', '10 AMMO  -  2S RELOAD'],
+      lines: ['HUNTER BOW', '10 BLOCKS - 5 DMG', '10 AMMO - 2S RELOAD'],
     },
     {
       id: 'origamist', name: 'ORIGAMIST', item: 'paper', color: '#efeade',
-      lines: ['30 PAPER  -  PLANE TUTOR', 'ATTACK OPENS THE FOLD WHEEL',
-              'KILLS AND ROOMS RESTOCK YOU'],
+      lines: ['100 PAPER + TUTOR', 'FOLD WHEEL ON ATTACK', 'RESTOCKS ON KILLS'],
     },
   ];
   const cw = 140, ch = 126;
@@ -238,9 +252,19 @@ export function drawClassSelect(ctx, game, t) {
     ctx.scale(sc, sc);
     drawItemIcon(ctx, c.item, -6, -6, 12, t);
     ctx.restore();
-    drawTextShadow(ctx, c.name, x + cw / 2, y + 70, c.color, 2, 'center');
-    for (let k = 0; k < c.lines.length; k++) {
-      drawText(ctx, c.lines[k], x + cw / 2, y + 90 + k * 10, Theme.ui, 1, 'center');
+    // the name shrinks rather than spilling out of the card
+    const nameScale = textWidth(c.name, 2) > cw - 16 ? 1 : 2;
+    drawTextShadow(ctx, c.name, x + cw / 2, y + (nameScale === 2 ? 70 : 74), c.color, nameScale, 'center');
+    // every stat line is wrapped to the card's inner width, and the block is
+    // centred in the space left under the name so it can never reach the edge
+    const wrapped = [];
+    for (const line of c.lines) {
+      for (const part of wrapLine(line, cw - 16)) wrapped.push(part);
+    }
+    const rows = Math.min(wrapped.length, 4);
+    const top = y + 86 + Math.max(0, (3 - rows)) * 4;
+    for (let k = 0; k < rows; k++) {
+      drawText(ctx, wrapped[k], x + cw / 2, top + k * 9, Theme.ui, 1, 'center');
     }
     if (button(ctx, 'class' + c.id, x + 18, y + ch + 6, cw - 36, 18, 'SELECT')) {
       game.startRun(c.id);

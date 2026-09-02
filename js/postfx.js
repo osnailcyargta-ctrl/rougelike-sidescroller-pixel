@@ -68,9 +68,30 @@ void main() {
   vec3 bloom = texture2D(uBloom, uv).rgb;
   col += bloom * uBloomStrength;
 
+  // halation: the bloom smeared a little wider and tinted warm, the way light
+  // bleeds through film. Cheap, and it is most of what makes bright pixels feel
+  // like they are actually emitting.
+  vec2 hp = 1.6 / uResolution;
+  vec3 halo = texture2D(uBloom, uv + vec2( hp.x,  hp.y)).rgb
+            + texture2D(uBloom, uv + vec2(-hp.x,  hp.y)).rgb
+            + texture2D(uBloom, uv + vec2( hp.x, -hp.y)).rgb
+            + texture2D(uBloom, uv + vec2(-hp.x, -hp.y)).rgb;
+  // only the bright end halates, so darks stay dark instead of lifting
+  float haloLum = dot(halo * 0.25, vec3(0.299, 0.587, 0.114));
+  col += halo * 0.13 * uBloomStrength * smoothstep(0.10, 0.55, haloLum)
+       * vec3(1.15, 0.86, 0.62);
+
   // saturation
   float l = dot(col, vec3(0.299, 0.587, 0.114));
   col = mix(vec3(l), col, uSaturation);
+
+  // split tone: shadows drift cool, highlights drift warm. One line, and the
+  // whole frame stops looking flat.
+  float lum = dot(col, vec3(0.299, 0.587, 0.114));
+  col *= mix(vec3(0.94, 0.98, 1.10), vec3(1.07, 1.01, 0.93), smoothstep(0.15, 0.85, lum));
+
+  // a gentle S-curve for contrast without crushing either end
+  col = mix(col, col * col * (3.0 - 2.0 * col), 0.16);
 
   // slow-motion cools the image down a touch
   col = mix(col, col * vec3(0.75, 0.88, 1.25), uSlowmo * 0.5);

@@ -687,12 +687,43 @@ export class Enemy {
   draw(ctx) {
     const t = this.anim;
     if (this.spawnT > 0) {
+      // it assembles: a seam of light opens, the body climbs out of it, and
+      // sparks fall back into the floor behind it
       const k = 1 - this.spawnT / 0.45;
-      const c = ENEMY_TINT[this.type] ?? Theme.enemyGrunt;
-      glowDot(ctx, this.x, this.y - this.h / 2, 24 * (1 - k) + 6, c, 0.8);
-      ctx.globalAlpha = k;
-      pxRect(ctx, this.x - this.w / 2, this.y - this.h * k, this.w, this.h * k, rgba(c, 0.7));
+      const ease = 1 - Math.pow(1 - k, 3);
+      const c = ENEMY_TINT[this.type] ?? ENEMY_TINT[this.ai] ?? Theme.enemyGrunt;
+      const cy = this.y - this.h / 2;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      // the seam: a hot horizontal slit that widens then thins away
+      const seamW = this.w * (0.4 + ease * 1.9) * (1 - ease * 0.45);
+      const seamA = Math.sin(Math.min(1, k * 1.4) * Math.PI) * 0.9;
+      ctx.fillStyle = rgba('#ffffff', seamA);
+      ctx.fillRect(this.x - seamW / 2, this.y - 1, seamW, 1);
+      ctx.fillStyle = rgba(c, seamA * 0.7);
+      ctx.fillRect(this.x - seamW * 0.75, this.y - 2, seamW * 1.5, 3);
+      // a rising column of light it climbs out of
+      const g = ctx.createLinearGradient(0, this.y, 0, this.y - this.h - 8);
+      g.addColorStop(0, rgba(c, 0.45 * (1 - ease)));
+      g.addColorStop(1, rgba(c, 0));
+      ctx.fillStyle = g;
+      ctx.fillRect(this.x - this.w * 0.7, this.y - this.h - 8, this.w * 1.4, this.h + 8);
+      ctx.restore();
+      glowDot(ctx, this.x, cy, 26 * (1 - ease) + 8, c, 0.75);
+      // the body itself, wiping up out of the seam
+      ctx.globalAlpha = 0.35 + ease * 0.65;
+      pxRect(ctx, this.x - this.w / 2, this.y - this.h * ease, this.w, this.h * ease, rgba(c, 0.75));
+      pxRect(ctx, this.x - this.w / 2, this.y - this.h * ease, this.w, 1, rgba('#ffffff', 0.9));
       ctx.globalAlpha = 1;
+      if (Math.random() < 0.5) {
+        const a = rand(0, TAU);
+        spawnParticle({
+          x: this.x + Math.cos(a) * this.w * 0.7, y: this.y - rand(0, this.h),
+          vx: Math.cos(a) * 26, vy: rand(-40, -8), life: rand(0.2, 0.5),
+          size: 1, color: Math.random() < 0.4 ? '#ffffff' : c,
+          gravity: 140, drag: 0.92, kind: 'shrink',
+        });
+      }
       return;
     }
     const shadowY = surfaceBelow(this.x, this.y);

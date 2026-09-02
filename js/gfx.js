@@ -6,15 +6,21 @@ import { Theme } from './theme.js';
 export const Camera = {
   x: 0, y: 0, shake: 0, shakeT: 0, ox: 0, oy: 0,
   zoom: 1, zoomVel: 0, cx: 240, cy: 135, cine: null,
-  add(amount) { this.shake = Math.min(14, this.shake + amount); },
+  // One dial for how hard the whole game shakes. Every call site asks for the
+  // amount it thinks it deserves; this decides how much of that it actually
+  // gets, so the frame stays readable through a busy fight.
+  shakeScale: 0.42,
+  shakeMax: 7.5,
+  add(amount) { this.shake = Math.min(this.shakeMax, this.shake + amount * this.shakeScale); },
   // A short inward kick on impact, sprung back to 1.
-  punch(amount) { this.zoomVel += amount; },
+  punch(amount) { this.zoomVel += amount * 0.75; },
   update(dt) {
-    this.shakeT += dt * 60;
-    this.shake = Math.max(0, this.shake - dt * 26);
+    this.shakeT += dt * 46;
+    this.shake = Math.max(0, this.shake - dt * 30);
+    // a smooth swing with only a whisper of noise, rather than a buzz
     const s = this.shake;
-    this.ox = Math.round(Math.sin(this.shakeT * 1.7) * s + rand(-s, s) * 0.4);
-    this.oy = Math.round(Math.cos(this.shakeT * 2.3) * s * 0.7 + rand(-s, s) * 0.3);
+    this.ox = Math.round(Math.sin(this.shakeT * 1.6) * s + rand(-s, s) * 0.18);
+    this.oy = Math.round(Math.cos(this.shakeT * 2.1) * s * 0.62 + rand(-s, s) * 0.14);
     if (this.cine) {
       // a cutscene drives the framing directly instead of springing back
       this.cx = this.cine.cx;
@@ -102,6 +108,7 @@ export function burst(x, y, n, opts = {}) {
       drag: opts.drag ?? 0.94,
       kind: opts.kind ?? 'square',
       glow: opts.glow ?? true,
+      spin: opts.spin ?? rand(-9, 9),      // debris tumbles instead of sliding
     });
   }
 }
@@ -129,7 +136,7 @@ export function updateFx(dt) {
     p.vy *= Math.pow(p.drag, dt * 60);
     p.x += p.vx * dt;
     p.y += p.vy * dt;
-    p.angle += p.spin * dt;
+
   }
   for (let i = texts.length - 1; i >= 0; i--) {
     const t = texts[i];
@@ -186,15 +193,22 @@ export function drawRings(ctx) {
     const ease = 1 - Math.pow(1 - k, 3);          // fast out, slow settle
     const rad = lerp(r.r0, r.r1, ease);
     const a = (1 - k) * (1 - k);
-    ctx.strokeStyle = rgba(r.color, a);
-    ctx.lineWidth = Math.max(0.6, r.width * (1 - k));
-    ctx.beginPath();
-    if (r.arc > 0) {
-      ctx.ellipse(r.x, r.y, rad, rad * r.squash, r.rotate, r.angle - r.arc, r.angle + r.arc);
-    } else {
-      ctx.ellipse(r.x, r.y, rad, rad * r.squash, r.rotate, 0, TAU);
-    }
-    ctx.stroke();
+    const trace = (rr, w, col, alpha) => {
+      if (alpha <= 0.004) return;
+      ctx.strokeStyle = rgba(col, alpha);
+      ctx.lineWidth = Math.max(0.6, w);
+      ctx.beginPath();
+      if (r.arc > 0) {
+        ctx.ellipse(r.x, r.y, rr, rr * r.squash, r.rotate, r.angle - r.arc, r.angle + r.arc);
+      } else {
+        ctx.ellipse(r.x, r.y, rr, rr * r.squash, r.rotate, 0, TAU);
+      }
+      ctx.stroke();
+    };
+    // a soft halo outside, the ring itself, then a white echo chasing it in
+    if (r.r1 > 40) trace(rad * 1.06, r.width * 2.6 * (1 - k), r.color, a * 0.16);
+    trace(rad, r.width * (1 - k), r.color, a);
+    if (k < 0.55) trace(rad * 0.88, r.width * 0.55 * (1 - k), '#ffffff', a * (1 - k / 0.55) * 0.7);
   }
   ctx.restore();
 }
@@ -279,23 +293,38 @@ export function drawParticles(ctx) {
     }
     const s = Math.max(1, Math.round(p.size * (p.kind === 'shrink' ? k : 1)));
     if (p.kind === 'smoke') {
-      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, s * 2.2);
-      g.addColorStop(0, rgba(p.color, 0.5));
+      // two offset puffs give it body instead of one flat disc
+      const r = s * 2.4 * (1.15 - k * 0.35);
+      const g = ctx.createRadialGradient(p.x, p.y - r * 0.15, 0, p.x, p.y, r);
+      g.addColorStop(0, rgba(p.color, 0.55));
+      g.addColorStop(0.55, rgba(p.color, 0.26));
       g.addColorStop(1, rgba(p.color, 0));
       ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, s * 2.2, 0, TAU);
+      ctx.arc(p.x, p.y, r, 0, TAU);
       ctx.fill();
     } else if (p.kind === 'streak') {
-      const len = Math.min(14, Math.hypot(p.vx, p.vy) * 0.05);
+      // a tapered comet: bright head, thinning tail
+      const sp = Math.hypot(p.vx, p.vy);
+      const len = Math.min(18, sp * 0.055);
       const a = Math.atan2(p.vy, p.vx);
-      ctx.strokeStyle = col;
-      ctx.lineWidth = Math.max(1, s * 0.8);
+      const tx = p.x - Math.cos(a) * len, ty = p.y - Math.sin(a) * len;
+      const g = ctx.createLinearGradient(p.x, p.y, tx, ty);
+      g.addColorStop(0, col);
+      g.addColorStop(1, rgba(p.color, 0));
+      ctx.strokeStyle = g;
+      ctx.lineWidth = Math.max(1, s * 0.9);
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(p.x, p.y);
-      ctx.lineTo(p.x - Math.cos(a) * len, p.y - Math.sin(a) * len);
+      ctx.lineTo(tx, ty);
       ctx.stroke();
+      if (s > 1) {
+        ctx.fillStyle = '#ffffff';
+        ctx.globalAlpha *= 0.7;
+        ctx.fillRect(Math.round(p.x - 0.5), Math.round(p.y - 0.5), 1, 1);
+        ctx.globalAlpha /= 0.7;
+      }
     } else if (p.kind === 'line') {
       ctx.strokeStyle = col;
       ctx.lineWidth = s;
@@ -304,8 +333,23 @@ export function drawParticles(ctx) {
       ctx.lineTo(Math.round(p.x - p.vx * 0.04), Math.round(p.y - p.vy * 0.04));
       ctx.stroke();
     } else {
-      ctx.fillStyle = col;
-      ctx.fillRect(Math.round(p.x - s / 2), Math.round(p.y - s / 2), s, s);
+      // a chip of debris that tumbles as it flies, with a hot core early on
+      if (s > 1 && p.spin) {
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.spin * (p.t * 6));
+        ctx.fillStyle = col;
+        ctx.fillRect(-s / 2, -s / 2, s, s);
+        if (k > 0.6) {
+          ctx.globalAlpha *= (k - 0.6) / 0.4;
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(-s / 4, -s / 4, Math.max(1, s / 2), Math.max(1, s / 2));
+        }
+        ctx.restore();
+      } else {
+        ctx.fillStyle = col;
+        ctx.fillRect(Math.round(p.x - s / 2), Math.round(p.y - s / 2), s, s);
+      }
     }
     ctx.globalCompositeOperation = 'source-over';
   }

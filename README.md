@@ -212,23 +212,24 @@ type (Ghoul 12, Stinger 10 ranged, Brute 20).
 
 ### Origamist
 
-The Origamist starts with **30 sheets of paper** and the **Paper Plane Tutor**.
-Paper is both weapon and ammunition, stacking to 100.
+The Origamist starts with **100 sheets of paper** and the **Paper Plane Tutor**.
+Paper is both weapon and ammunition, stacking to 100 per slot.
 
 Attacking with paper selected does not fire anything: **the world stops** and a
-fold wheel opens over your head. Every fold you own the tutor book for is a
-slice on it — move the mouse to pick, left click or press its number to commit,
-right click or Escape to back out. Committing spends that fold's sheets and
-throws it; nothing in the room moves until you decide.
+fold carousel opens over your head. Every fold you own the tutor book for is a
+card on it. **Scroll** to turn the wheel — it spins to the new card rather than
+snapping — and the card that lands under the notch is the one you throw. Left
+click or the card's number commits, right click or Escape backs out. Committing
+spends that fold's sheets; nothing in the room moves until you decide.
 
 | Fold | Book | Sheets | Behaviour |
 | --- | --- | --- | --- |
-| Paper Plane | starting kit | 1 | Glides forever, sinking slowly as it goes. **15 damage.** It kicks off side walls (up to 3 times, gaining a little lift each time) and only dies when it meets the ground or a platform, where it crumples |
-| Paper Missile | Big Dude's first offer | 2 | Leaves the hand slow and keeps building speed to a scream. Detonates on anything it touches for **20 over 5 blocks**, tapering to two thirds at the rim |
+| Paper Plane | starting kit | 1 | Glides forever, sinking slowly as it goes. **30 damage.** It kicks off side walls (up to 3 times, gaining a little lift each time) and only dies when it meets the ground or a platform, where it crumples |
+| Paper Missile | Big Dude's first offer | 2 | Leaves the hand slow and keeps building speed to a scream. Detonates on anything it touches for **40 over 5 blocks**, tapering to two thirds at the rim |
 
 Paper comes back to you two ways: every enemy you kill has a **10% chance to
 shed 1–4 sheets**, collected automatically with no need to pick them up, and
-**every new room hands you 10 more** on arrival.
+**every new room hands you 50 more** on arrival.
 
 The **Paper Missile Tutor** is held in the first slot of Big Dude's drop pair,
 once — the same rule the Nukerang follows on the other side.

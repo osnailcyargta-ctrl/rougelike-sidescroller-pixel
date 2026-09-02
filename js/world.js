@@ -187,6 +187,52 @@ export function drawBackground(ctx, t, roomIndex) {
   ctx.restore();
 }
 
+// Slow shafts of light raking down through the room. Drawn under everything,
+// over the skyline, and they drift on their own clock.
+const SHAFTS = [];
+for (let i = 0; i < 5; i++) {
+  SHAFTS.push({
+    x: 40 + i * 96 + rand(-24, 24),
+    w: rand(26, 58),
+    lean: rand(-0.34, 0.34),
+    speed: rand(2.6, 7.5),
+    phase: rand(0, TAU),
+    a: rand(0.030, 0.062),
+  });
+}
+
+export function drawLightShafts(ctx, t) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const sh of SHAFTS) {
+    const drift = Math.sin(t * 0.09 + sh.phase) * 26;
+    const x = sh.x + drift;
+    const breathe = 0.65 + 0.35 * Math.sin(t * 0.31 + sh.phase);
+    const g = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
+    g.addColorStop(0, rgba(Theme.platformGlow, sh.a * breathe));
+    g.addColorStop(0.65, rgba(Theme.platformGlow, sh.a * breathe * 0.35));
+    g.addColorStop(1, rgba(Theme.platformGlow, 0));
+    ctx.fillStyle = g;
+    const spread = sh.w * 1.9;
+    ctx.beginPath();
+    ctx.moveTo(x - sh.w / 2, -4);
+    ctx.lineTo(x + sh.w / 2, -4);
+    ctx.lineTo(x + spread / 2 + sh.lean * GROUND_Y, GROUND_Y);
+    ctx.lineTo(x - spread / 2 + sh.lean * GROUND_Y, GROUND_Y);
+    ctx.closePath();
+    ctx.fill();
+    // dust caught in the beam
+    const dustN = 3;
+    for (let i = 0; i < dustN; i++) {
+      const k = ((t * sh.speed * 0.02 + i / dustN + sh.phase) % 1);
+      const dy = k * GROUND_Y;
+      const dx = x + sh.lean * dy + Math.sin(t * 0.7 + i * 2 + sh.phase) * sh.w * 0.35;
+      pxRect(ctx, dx, dy, 1, 1, rgba('#ffffff', (1 - k) * 0.20 * breathe));
+    }
+  }
+  ctx.restore();
+}
+
 export function drawArena(ctx, t) {
   // --- floor
   ctx.fillStyle = linGrad(ctx, 'floor', 0, GROUND_Y, 0, VIEW_H, [
@@ -379,6 +425,17 @@ export class Pickup {
       return;
     }
     glowDot(ctx, this.x, y + 6, 18 * pop, col, 0.4);
+    // an orbit of motes around the item, which is what makes it read as loot
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 5; i++) {
+      const a = this.t * 1.5 + (i / 5) * TAU;
+      const rr = 9 + Math.sin(this.t * 2 + i) * 2;
+      const oy2 = Math.sin(a) * rr * 0.34;
+      const depth = 0.35 + 0.65 * ((Math.sin(a) + 1) / 2);
+      pxRect(ctx, this.x + Math.cos(a) * rr, y + 6 + oy2, 1, 1, rgba(col, depth * 0.85));
+    }
+    ctx.restore();
     // beam of light
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
@@ -416,26 +473,62 @@ export class Portal {
     const k = this.open;
     const h = 34 * k, w = 20 * k;
     const cy = this.y - 18;
+    const breathe = 1 + Math.sin(this.t * 2.2) * 0.05;
+
+    // a pool of its light on the floor
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    for (let i = 4; i >= 0; i--) {
-      const a = 0.10 + 0.05 * Math.sin(this.t * 3 + i);
+    const pool = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, 40 * k);
+    pool.addColorStop(0, rgba(Theme.platformGlow, 0.28 * k));
+    pool.addColorStop(1, rgba(Theme.platformGlow, 0));
+    ctx.fillStyle = pool;
+    ctx.fillRect(this.x - 44, this.y - 22, 88, 30);
+
+    // nested haloes
+    for (let i = 5; i >= 0; i--) {
+      const a = 0.09 + 0.05 * Math.sin(this.t * 3 + i);
       ctx.fillStyle = rgba(i % 2 ? Theme.platformGlow : Theme.uiAccent, a);
       ctx.beginPath();
-      ctx.ellipse(this.x, cy, (w / 2) * (1 + i * 0.12), (h / 2) * (1 + i * 0.12), 0, 0, TAU);
+      ctx.ellipse(this.x, cy, (w / 2) * (1 + i * 0.13) * breathe, (h / 2) * (1 + i * 0.13) * breathe, 0, 0, TAU);
       ctx.fill();
     }
     ctx.restore();
-    ctx.fillStyle = rgba(Theme.bgFar, 0.85);
+
+    // the mouth: dark, with a swirl turning inside it
+    ctx.save();
     ctx.beginPath();
-    ctx.ellipse(this.x, cy, w / 2, h / 2, 0, 0, TAU);
-    ctx.fill();
+    ctx.ellipse(this.x, cy, (w / 2) * breathe, (h / 2) * breathe, 0, 0, TAU);
+    ctx.clip();
+    ctx.fillStyle = rgba(Theme.bgFar, 0.92);
+    ctx.fillRect(this.x - w, cy - h, w * 2, h * 2);
+    ctx.globalCompositeOperation = 'lighter';
+    for (let arm = 0; arm < 3; arm++) {
+      ctx.strokeStyle = rgba(arm % 2 ? Theme.uiAccent : Theme.platformGlow, 0.30);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = 0; i <= 22; i++) {
+        const u = i / 22;
+        const ang = this.t * 1.5 + arm * (TAU / 3) + u * 5.2;
+        const rr = u * (w / 2);
+        const px = this.x + Math.cos(ang) * rr;
+        const py = cy + Math.sin(ang) * rr * (h / w);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // rim, with a bright travelling highlight
     ctx.strokeStyle = rgba(Theme.platformGlow, 0.9);
     ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(this.x, cy, (w / 2) * breathe, (h / 2) * breathe, 0, 0, TAU);
     ctx.stroke();
-    for (let i = 0; i < 8; i++) {
-      const a = this.t * 1.6 + (i / 8) * TAU;
-      pxRect(ctx, this.x + Math.cos(a) * (w / 2 - 2), cy + Math.sin(a) * (h / 2 - 2), 1, 1, rgba('#ffffff', 0.8));
+    for (let i = 0; i < 10; i++) {
+      const a = this.t * 1.6 + (i / 10) * TAU;
+      const bright = 0.35 + 0.65 * Math.pow(Math.max(0, Math.sin(a - this.t * 3)), 6);
+      pxRect(ctx, this.x + Math.cos(a) * (w / 2 - 1) * breathe,
+             cy + Math.sin(a) * (h / 2 - 1) * breathe, 1, 1, rgba('#ffffff', bright));
     }
   }
 }

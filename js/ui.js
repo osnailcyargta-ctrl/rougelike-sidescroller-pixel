@@ -227,11 +227,13 @@ function drawHotbar(ctx, game) {
   if (w && w.weapon === 'paper') {
     const ax = x0 + total + 8;
     const have = p.inventory.countOf('paper');
-    drawTextShadow(ctx, String(have), ax, y + 4, have > 0 ? '#efeade' : Theme.hp, 2);
     const lift = Math.sin(UI.t * 2.5) * 0.6;
-    pxRect(ctx, ax + 22, y + 3 + lift, 7, 9, '#efeade');
-    pxRect(ctx, ax + 22, y + 3 + lift, 7, 1, '#ffffff');
-    pxRect(ctx, ax + 25, y + 3 + lift, 1, 9, '#c9c2b2');
+    // sheet first, count after it, so a three-digit stack never collides
+    pxRect(ctx, ax, y + 3 + lift, 7, 9, '#efeade');
+    pxRect(ctx, ax, y + 3 + lift, 7, 1, '#ffffff');
+    pxRect(ctx, ax + 3, y + 3 + lift, 1, 9, '#c9c2b2');
+    pxRect(ctx, ax + 1, y + 5 + lift, 2, 1, '#b9b2a2');
+    drawTextShadow(ctx, String(have), ax + 11, y + 4, have > 0 ? '#efeade' : Theme.hp, 2);
   }
   const gun = w && (w.weapon === 'bow' ? BOW : w.weapon === 'shardgun' ? SHARDGUN : null);
   if (gun) {
@@ -254,8 +256,9 @@ function drawHotbar(ctx, game) {
   }
 }
 
-// The fold wheel: a ring of the folds you know, hanging over the player while
-// the world holds its breath.
+// The fold wheel: a carousel of the folds you know, hanging over the player
+// while the world holds its breath. Scroll to spin it; the slice that lands on
+// top is the one you are about to throw.
 export function drawFoldWheel(ctx, game) {
   const f = game.fold;
   const p = game.player;
@@ -264,77 +267,123 @@ export function drawFoldWheel(ctx, game) {
   const pop = clamp(f.t * 7, 0, 1);
   const ease = 1 - Math.pow(1 - pop, 3);
   // the wheel is drawn in screen space, so it stays put while the camera drifts
-  const scr = Camera.project(p.x, p.cy - 42);
-  const cx = Math.round(scr.x), cy = Math.round(clamp(scr.y, 46, VIEW_H - 60));
-  const R = 30 * ease;
+  const scr = Camera.project(p.x, p.cy - 44);
+  const cx = Math.round(clamp(scr.x, 60, VIEW_W - 60));
+  const cy = Math.round(clamp(scr.y, 52, VIEW_H - 66));
+  const R = 32 * ease;
   const n = f.options.length;
+  const step = TAU / n;
+  const have = p.inventory.countOf('paper');
 
-  // the world dims and everything but the wheel falls back
   ctx.save();
-  ctx.fillStyle = rgba('#05060c', 0.42 * ease);
+  ctx.fillStyle = rgba('#05060c', 0.5 * ease);
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
+  // --- the paper mandala behind it
   ctx.globalCompositeOperation = 'lighter';
-  glowDot(ctx, cx, cy, 56 * ease, '#efeade', 0.16 * ease);
-  // a slowly turning paper ring
+  glowDot(ctx, cx, cy, 66 * ease, '#efeade', 0.14 * ease);
+  glowDot(ctx, cx, cy, 26 * ease, '#ffe9a8', 0.10 * ease + f.spin * 0.14);
   for (let i = 0; i < 3; i++) {
-    ctx.strokeStyle = rgba('#efeade', (0.22 - i * 0.06) * ease);
+    const rr = R + i * 6 + Math.sin(t * 2 + i) * 1.5;
+    ctx.strokeStyle = rgba('#efeade', (0.24 - i * 0.06) * ease);
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.ellipse(cx, cy, R + i * 5 + Math.sin(t * 2 + i) * 1.5, (R + i * 5) * 0.96, t * (0.3 + i * 0.2), 0, TAU);
+    ctx.ellipse(cx, cy, rr, rr * 0.97, f.rot * (0.35 + i * 0.25) + t * 0.12, 0, TAU);
     ctx.stroke();
   }
-  // creases radiating out between the slices
-  for (let i = 0; i < n; i++) {
-    const a = -Math.PI / 2 + ((i + 0.5) / n) * TAU;
-    ctx.strokeStyle = rgba('#efeade', 0.18 * ease);
+  // creases sweeping round with the ring, brighter the faster it is turning
+  for (let i = 0; i < n * 2; i++) {
+    const a = -Math.PI / 2 + (i / (n * 2)) * TAU + f.rot;
+    ctx.strokeStyle = rgba('#efeade', (0.10 + f.spin * 0.22) * ease);
     ctx.beginPath();
-    ctx.moveTo(cx + Math.cos(a) * 10, cy + Math.sin(a) * 10);
-    ctx.lineTo(cx + Math.cos(a) * (R + 14), cy + Math.sin(a) * (R + 14));
+    ctx.moveTo(cx + Math.cos(a) * 11, cy + Math.sin(a) * 11);
+    ctx.lineTo(cx + Math.cos(a) * (R + 15), cy + Math.sin(a) * (R + 15));
     ctx.stroke();
+  }
+  // motion arcs while it spins
+  if (f.spin > 0.02) {
+    for (let i = 0; i < 3; i++) {
+      const rr = R - 4 + i * 4;
+      ctx.strokeStyle = rgba('#ffffff', f.spin * 0.3 * ease);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rr, f.rot + i, f.rot + i + 0.9 * f.spin);
+      ctx.stroke();
+    }
   }
   ctx.restore();
 
-  const have = p.inventory.countOf('paper');
+  // --- the slices themselves
   for (let i = 0; i < n; i++) {
     const o = f.options[i];
-    const a = -Math.PI / 2 + (i / n) * TAU;
-    const sel = i === f.sel;
-    const rr = R + (sel ? 5 : 0);
+    const a = -Math.PI / 2 + i * step + f.rot;
+    // how close this slice is to the top, 1 at the notch
+    const up = clamp((Math.cos(a + Math.PI / 2) * -1 + 1) / 2, 0, 1);
+    const near = Math.pow(clamp(1 - Math.abs(shortWrap(a + Math.PI / 2)) / Math.PI, 0, 1), 3);
+    const rr = R + near * 5;
     const ox = cx + Math.cos(a) * rr;
-    const oy = cy + Math.sin(a) * rr;
+    const oy = cy + Math.sin(a) * rr * 0.9;
     const afford = have >= o.cost;
+    const sel = i === f.sel;
     const col = !afford ? Theme.uiDim : sel ? '#ffe9a8' : '#efeade';
-    if (sel) glowDot(ctx, ox, oy, 22, col, 0.45);
+    const sc = (0.72 + near * 0.5) * ease;
+
     ctx.save();
-    ctx.globalAlpha = ease * (afford ? 1 : 0.5);
-    ctx.fillStyle = rgba('#000000', 0.6);
-    ctx.fillRect(ox - 9, oy - 9, 18, 18);
-    ctx.strokeStyle = rgba(col, sel ? 1 : 0.6);
-    ctx.strokeRect(ox - 8.5, oy - 8.5, 17, 17);
-    ctx.save();
+    ctx.globalAlpha = ease * (afford ? 0.45 + near * 0.55 : 0.3 + near * 0.3);
+    if (sel) glowDot(ctx, ox, oy, 26, col, 0.5 * ease);
     ctx.translate(ox, oy);
-    const sc = sel ? 1.25 + Math.sin(t * 6) * 0.06 : 1;
     ctx.scale(sc, sc);
+    // each card counter-rotates a little as the ring turns, like a real carousel
+    ctx.rotate(Math.sin(f.rot * 0.5 + i) * 0.12 * (0.4 + f.spin));
+    ctx.fillStyle = rgba('#000000', 0.62);
+    ctx.fillRect(-10, -10, 20, 20);
+    ctx.strokeStyle = rgba(col, sel ? 1 : 0.55);
+    ctx.lineWidth = sel ? 1.4 : 1;
+    ctx.strokeRect(-9.5, -9.5, 19, 19);
     drawItemIcon(ctx, o.id === 'missile' ? 'bookmissile' : 'bookairplane', -6, -6, 12, t);
     ctx.restore();
-    // cost, and the number key that picks it
-    drawText(ctx, String(o.cost), ox + 8, oy + 4, afford ? col : Theme.hp, 1, 'right');
-    drawText(ctx, String(i + 1), ox - 8, oy - 8, rgba(Theme.uiDim, 0.9), 1);
-    ctx.restore();
+
+    // cost and the number key, only readable on the cards near the front
+    if (near > 0.35) {
+      ctx.save();
+      ctx.globalAlpha = ease * near;
+      drawText(ctx, String(o.cost), ox + 11, oy + 5, afford ? col : Theme.hp, 1, 'right');
+      drawText(ctx, String(i + 1), ox - 11, oy - 10, rgba(Theme.uiDim, 0.9), 1);
+      ctx.restore();
+    }
   }
 
-  // the name of what is under the cursor, and what you are spending
+  // --- the pointer notch, over the cards so it always reads
+  ctx.save();
+  ctx.globalAlpha = ease;
+  ctx.fillStyle = rgba('#ffe9a8', 0.75 + 0.25 * Math.sin(t * 5));
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - R - 6);
+  ctx.lineTo(cx - 4, cy - R - 13);
+  ctx.lineTo(cx + 4, cy - R - 13);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  // --- the label under the notch
   const cur = f.options[f.sel];
   if (cur) {
     ctx.save();
     ctx.globalAlpha = ease;
-    drawTextShadow(ctx, cur.name, cx, cy - R - 26, '#ffe9a8', 1, 'center');
+    drawTextShadow(ctx, cur.name, cx, cy - R - 25, '#ffe9a8', 1, 'center');
     const afford = have >= cur.cost;
-    drawText(ctx, `${cur.cost} / ${have} SHEETS`, cx, cy + R + 20,
+    drawText(ctx, `${cur.cost} / ${have} SHEETS`, cx, cy + R + 18,
              afford ? Theme.ui : Theme.hp, 1, 'center');
+    if (n > 1) drawText(ctx, 'SCROLL TO TURN', cx, cy + R + 30, rgba(Theme.uiDim, 0.8), 1, 'center');
     ctx.restore();
   }
+}
+
+// Wrap an angle into -PI..PI without importing the whole util surface.
+function shortWrap(a) {
+  a = (a + Math.PI) % TAU;
+  if (a < 0) a += TAU;
+  return a - Math.PI;
 }
 
 function drawPerkStrip(ctx, game) {
