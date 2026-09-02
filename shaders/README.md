@@ -48,6 +48,14 @@ plus the animation knobs `animSpeed` (sprite animation rate), `wobble`
 (cape / secondary motion) and `trail` (afterimage and projectile trail
 opacity).
 
+**Dash**, which a pack can restyle completely:
+`dashCore` and `dashGlow` (the two colours of the smear, the launch rings and
+the speed lines), `dashGhost` (tint of the afterimage bodies),
+`dashRibbonWidth`, `dashGhostAlpha`, `dashRingScale` and `dashStreaks`
+(multipliers, 0 turns that piece off).
+
+**Grapple rope**: `ropeColor`, `ropeCore` and `hookColor`.
+
 A pack may ship only a theme (no GLSL) — the built-in composite is kept.
 If the GLSL fails to compile the pack is rejected and the error is shown in
 Settings.

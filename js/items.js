@@ -1,6 +1,7 @@
 // Item / perk definitions plus the inventory model.
 // Passive perks work while the item merely sits anywhere in the inventory.
 import { Theme } from './theme.js';
+import { rng } from './util.js';
 import { pxRect, drawBoomerang } from './gfx.js';
 
 export const INV_COLS = 4;
@@ -30,6 +31,11 @@ export const ITEMS = {
     desc: ['Thrown melee weapon. 5 block flight,', 'returns to your hand.',
            'Blasts for 14 on contact; every 3rd', 'blast detonates for 28.'],
   },
+  graplinghook: {
+    id: 'graplinghook', name: 'Grappling Hook', rarity: 'rare', stack: 1,
+    desc: ['Press Q to fire a hook at the cursor.', 'It bites terrain, reels you in and',
+           'lets you swing. Q again to let go.'],
+  },
   lifecrystal: {
     id: 'lifecrystal', name: 'Life Crystal', rarity: 'common', stack: MAX_STACK,
     desc: ['+10 max HP while held.', 'Stacks up to 5 (+50 HP).'],
@@ -56,57 +62,52 @@ export const ITEMS = {
   },
 };
 
-export const DROP_POOL = ['lifecrystal', 'fireyblade', 'lightningarrow', 'wetslime', 'bloodstone', 'aegis'];
+export const DROP_POOL = [
+  'lifecrystal', 'fireyblade', 'lightningarrow', 'wetslime', 'bloodstone', 'aegis',
+  'graplinghook',
+];
+// Things you only ever need one of.
+const UNIQUE = new Set(['graplinghook', 'nukerang']);
+const PERK_WEIGHTS = {
+  lifecrystal: 3, fireyblade: 3, bloodstone: 3,
+  lightningarrow: 2, wetslime: 2, aegis: 2,
+  graplinghook: 2,
+};
+
+function weightedPerk(inventory) {
+  const pool = DROP_POOL.filter((id) => !(UNIQUE.has(id) && inventory && inventory.has(id)));
+  let total = 0;
+  for (const id of pool) total += PERK_WEIGHTS[id];
+  let r = rng() * total;
+  for (const id of pool) {
+    r -= PERK_WEIGHTS[id];
+    if (r <= 0) return id;
+  }
+  return pool[0] ?? DROP_POOL[0];
+}
 export const WEAPON_POOL = ['sword', 'bow'];
 export const WEAPON_DROP_CHANCE = 0.20;
 
 // One in five room clears drops a weapon instead of a perk, favouring one the
 // player is not already carrying so it actually opens up a second playstyle.
 export function rollDrop(inventory) {
-  if (Math.random() < WEAPON_DROP_CHANCE) {
+  if (rng() < WEAPON_DROP_CHANCE) {
     const missing = WEAPON_POOL.filter((id) => !inventory || !inventory.has(id));
     const pool = missing.length ? missing : WEAPON_POOL;
-    return pool[Math.floor(Math.random() * pool.length)];
+    return pool[Math.floor(rng() * pool.length)];
   }
-  // Commons are twice as likely as uncommons.
-  const weights = {
-    lifecrystal: 3, fireyblade: 3, bloodstone: 3,
-    lightningarrow: 2, wetslime: 2, aegis: 2,
-  };
-  let total = 0;
-  for (const id of DROP_POOL) total += weights[id];
-  let r = Math.random() * total;
-  for (const id of DROP_POOL) {
-    r -= weights[id];
-    if (r <= 0) return id;
-  }
-  return DROP_POOL[0];
+  return weightedPerk(inventory);
 }
 
 // Boss rooms hand out a choice of two perks, never a weapon, and never two of
 // the same thing.
-export function rollPerkPair() {
-  const first = rollPerkOnly();
-  let second = rollPerkOnly();
+export function rollPerkPair(inventory) {
+  const first = weightedPerk(inventory);
+  let second = weightedPerk(inventory);
   let guard = 0;
-  while (second === first && guard++ < 20) second = rollPerkOnly();
+  while (second === first && guard++ < 20) second = weightedPerk(inventory);
   if (second === first) second = DROP_POOL.find((id) => id !== first);
   return [first, second];
-}
-
-function rollPerkOnly() {
-  const weights = {
-    lifecrystal: 3, fireyblade: 3, bloodstone: 3,
-    lightningarrow: 2, wetslime: 2, aegis: 2,
-  };
-  let total = 0;
-  for (const id of DROP_POOL) total += weights[id];
-  let r = Math.random() * total;
-  for (const id of DROP_POOL) {
-    r -= weights[id];
-    if (r <= 0) return id;
-  }
-  return DROP_POOL[0];
 }
 
 export class Inventory {
@@ -241,6 +242,19 @@ export function drawItemIcon(ctx, id, x, y, s = 12, t = 0) {
       P(4, 3 + w, 3, 2, '#dfffe6');
       P(4, 7 + w, 2, 2, '#0e3d1a');
       P(7, 7 + w, 2, 2, '#0e3d1a');
+      break;
+    }
+    case 'graplinghook': {
+      // a claw on a coiled line
+      const sway = Math.sin(t * 2.5) * 0.5;
+      P(1, 2 + sway, 2, 2, Theme.steelDark);
+      P(3, 4 + sway, 2, 2, Theme.steelDark);
+      P(5, 6 + sway, 2, 2, Theme.steelDark);
+      P(6, 1, 1, 5, Theme.steel);
+      P(4, 1, 5, 1, Theme.steel);
+      P(3, 0, 2, 3, Theme.steel);
+      P(8, 0, 2, 3, Theme.steel);
+      P(6, 7 + sway, 3, 3, Theme.steel);
       break;
     }
     case 'nukerang': {

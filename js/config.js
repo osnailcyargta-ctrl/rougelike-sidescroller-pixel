@@ -63,6 +63,18 @@ export const NUKERANG = {
   reHitDelay: 0.35,          // per-enemy, so one enemy cannot chain-detonate it
 };
 
+// Grappling hook: fires on Q, bites terrain, then reels you in on a rope you
+// can swing from. No damage - it is pure movement.
+export const GRAPPLE = {
+  maxLength: 11 * BLOCK,     // how far the hook can reach
+  hookSpeed: 620,
+  reelSpeed: 165,            // how fast the rope shortens once it bites
+  pull: 340,                 // extra acceleration along the rope
+  minLength: 16,             // let go once you are basically there
+  airControl: 0.45,          // how much steering you keep while swinging
+  cooldown: 0.22,
+};
+
 export const BOW = {
   range: 10 * BLOCK, damage: 5, ammo: 10, reload: 2.0, cooldown: 0.4, speed: 340,
 };
@@ -111,6 +123,14 @@ export const ENEMY_TYPES = {
     id: 'spitter', name: 'Spitter', hp: 80, speed: 26, damage: 16, w: 16, h: 16,
     attackCooldown: 2.2, attackRange: 210, knockback: 90,
     standOff: 120, projectileSpeed: 190, windUp: 0.45,
+  },
+  // Golem wreckage that reassembled itself. Its front plate turns most of a
+  // frontal hit, so it has to be opened up from behind or above.
+  shardling: {
+    id: 'shardling', name: 'Shardling', hp: 80, speed: 74, damage: 20, w: 17, h: 16,
+    attackCooldown: 2.0, attackRange: 150, flying: true,
+    standOff: 92, windUp: 0.55, chargeSpeed: 395, chargeTime: 0.34,
+    frontGuard: 0.25,          // fraction of damage that gets through the plate
   },
   // Boss parts live in the normal enemy list so every existing hit test works.
   golemBody: {

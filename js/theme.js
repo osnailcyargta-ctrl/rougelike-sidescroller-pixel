@@ -49,6 +49,20 @@ export const DEFAULT_THEME = {
   animSpeed: 1.0,
   wobble: 1.0,
   trail: 1.0,
+
+  // Dash look. A shader pack can restyle the dash completely from here.
+  dashCore: '#ffffff',
+  dashGlow: '#7ad7ff',
+  dashGhost: '#7ad7ff',
+  dashRibbonWidth: 1.0,
+  dashGhostAlpha: 1.0,
+  dashRingScale: 1.0,
+  dashStreaks: 1.0,
+
+  // Grapple rope look.
+  ropeColor: '#c8b48a',
+  ropeCore: '#fff0d0',
+  hookColor: '#dfe9ff',
 };
 
 export const Theme = { ...DEFAULT_THEME };

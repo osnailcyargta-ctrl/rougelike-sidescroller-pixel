@@ -7,11 +7,13 @@ import { pxRect, glowDot } from './gfx.js';
 import { VIEW_W, VIEW_H, BOW, PLAYER, ENEMY_TYPES, BOSS_TYPES } from './config.js';
 import { ENEMY_TINT } from './entities.js';
 import { ITEMS, RARITY, INV_COLS, INV_ROWS, INV_SIZE, HOTBAR_SIZE, drawItemIcon } from './items.js';
-import { Input } from './input.js';
+import { Input, Binds, BIND_ORDER, BIND_LABELS, bindLabel } from './input.js';
 import { Sfx } from './audio.js';
 
 export const UI = {
   hovered: null,
+  focus: null,             // id of the focused text field, if any
+  rebinding: null,         // action currently waiting for a key
   drag: null,          // { from, item }
   tooltip: null,
   t: 0,
@@ -21,6 +23,7 @@ export function uiBeginFrame(dt) {
   UI.t += dt;
   UI.hovered = null;
   UI.tooltip = null;
+  Input.captureText = false;
 }
 
 function inside(x, y, w, h) {
@@ -79,6 +82,38 @@ export function slider(ctx, id, x, y, w, value, opts = {}) {
     return clamp((Input.mouse.x - x) / w, 0, 1);
   }
   return value;
+}
+
+// A canvas text field. Click to focus; typing is consumed from Input.typed so
+// it never leaks into gameplay. Returns the (possibly edited) value.
+export function textField(ctx, id, x, y, w, h, value, opts = {}) {
+  const focused = UI.focus === id;
+  const hot = inside(x, y, w, h);
+  if (hot) UI.hovered = id;
+  if (Input.mouseDown.left) {
+    if (hot) { UI.focus = id; Sfx.ui(); }
+    else if (focused) UI.focus = null;
+  }
+  ctx.fillStyle = rgba('#000000', 0.55);
+  ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+  ctx.strokeStyle = focused ? Theme.uiAccent : hot ? Theme.ui : rgba(Theme.uiDim, 0.8);
+  ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.round(w) - 1, Math.round(h) - 1);
+
+  let out = value;
+  if (focused) {
+    Input.captureText = true;
+    for (const ch of Input.typed) {
+      if (ch === 'Backspace') out = out.slice(0, -1);
+      else if (ch === 'Enter') UI.focus = null;
+      else if (out.length < (opts.max ?? 12) && /[a-z0-9 \-]/i.test(ch)) out += ch.toUpperCase();
+    }
+  }
+  const shown = out.length ? out : (opts.placeholder ?? '');
+  drawText(ctx, shown, x + 4, y + (h - 7) / 2, out.length ? Theme.ui : rgba(Theme.uiDim, 0.8), 1);
+  if (focused && Math.floor(UI.t * 2.5) % 2 === 0) {
+    pxRect(ctx, x + 4 + textWidth(out, 1) + 1, y + 3, 1, h - 6, Theme.uiAccent);
+  }
+  return out;
 }
 
 // --- HUD -----------------------------------------------------------------

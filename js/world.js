@@ -1,5 +1,5 @@
 // Arena backdrop, platforms, pickups, portal and the wave composer.
-import { clamp, lerp, rand, randInt, choice, rgba, mixHex, TAU, dist } from './util.js';
+import { clamp, lerp, rand, randInt, choice, srand, schoice, rgba, mixHex, TAU, dist } from './util.js';
 import { Theme } from './theme.js';
 import { pxRect, glowDot, spawnParticle, burst, linGrad } from './gfx.js';
 import { VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER, BLOCK } from './config.js';
@@ -403,6 +403,7 @@ export function buildWave(roomIndex, waveIndex) {
   if (roomIndex >= 2) pool.push('brute');
   if (roomIndex >= 3) pool.push('lurker');
   if (roomIndex >= 4) pool.push('spitter');
+  if (roomIndex >= 6) pool.push('shardling');   // golem wreckage, post room 5
   const base = 3 + Math.floor((roomIndex - 1) / 2);
   const early = EARLY_WAVE_COUNTS[roomIndex];
   const count = early ? early[waveIndex - 1] : clamp(base + (waveIndex === 2 ? 2 : 0), 3, 9);
@@ -410,11 +411,12 @@ export function buildWave(roomIndex, waveIndex) {
     ? [SPAWN_LEFT, SPAWN_RIGHT]
     : [SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER];
   const list = [];
+  // every roll here is seeded, so the same seed always sends the same waves
   for (let i = 0; i < count; i++) {
-    let type = i === 0 && roomIndex === 1 && waveIndex === 1 ? 'grunt' : choice(pool);
+    let type = i === 0 && roomIndex === 1 && waveIndex === 1 ? 'grunt' : schoice(pool);
     if (roomIndex >= 2 && waveIndex === 2 && i === count - 1) type = 'brute';
     const p = spawns[i % spawns.length];
-    list.push({ type, x: p.x + rand(-14, 14), y: p.y, delay: i * 0.45 });
+    list.push({ type, x: p.x + srand(-14, 14), y: p.y, delay: i * 0.45 });
   }
   return list;
 }

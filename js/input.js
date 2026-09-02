@@ -6,6 +6,55 @@
 // key can never produce a double tap.
 const DOUBLE_TAP_WINDOW = 0.28;
 
+// --- key bindings -------------------------------------------------------
+// Actions are rebindable; everything in gameplay asks for an action, never a
+// literal key, so remapping is a single source of truth.
+export const BIND_ORDER = ['left', 'right', 'jump', 'down', 'inventory', 'reload', 'grapple'];
+export const BIND_LABELS = {
+  left: 'MOVE LEFT', right: 'MOVE RIGHT', jump: 'JUMP', down: 'DROP / SLAM',
+  inventory: 'INVENTORY', reload: 'RELOAD', grapple: 'GRAPPLE',
+};
+export const DEFAULT_BINDS = {
+  left: 'a', right: 'd', jump: 'w', down: 's',
+  inventory: 'e', reload: 'r', grapple: 'q',
+};
+export const Binds = { ...DEFAULT_BINDS };
+const BIND_STORE = 'aether.binds';
+
+export function loadBinds() {
+  try {
+    const raw = localStorage.getItem(BIND_STORE);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    for (const a of BIND_ORDER) if (typeof saved[a] === 'string') Binds[a] = saved[a];
+  } catch (e) { /* storage unavailable: keep the defaults */ }
+}
+
+export function saveBinds() {
+  try { localStorage.setItem(BIND_STORE, JSON.stringify(Binds)); } catch (e) { /* ignore */ }
+}
+
+export function resetBinds() {
+  Object.assign(Binds, DEFAULT_BINDS);
+  saveBinds();
+}
+
+// Assigning a key that is already used swaps the two, so no action is orphaned.
+export function setBind(action, key) {
+  if (!BIND_ORDER.includes(action)) return;
+  const clash = BIND_ORDER.find((a) => a !== action && Binds[a] === key);
+  if (clash) Binds[clash] = Binds[action];
+  Binds[action] = key;
+  saveBinds();
+}
+
+export function bindLabel(key) {
+  if (!key) return '--';
+  if (key === ' ') return 'SPACE';
+  if (key.length === 1) return key.toUpperCase();
+  return key.toUpperCase();
+}
+
 export const Input = {
   keys: new Set(),
   pressed: new Set(),      // edge-triggered, cleared each frame
@@ -17,6 +66,8 @@ export const Input = {
   mouseDown: { left: false, right: false },   // edge
   mouseUp: { left: false, right: false },
   wheel: 0,
+  typed: [],               // printable characters entered this frame
+  captureText: false,      // when true, gameplay ignores keys and the UI reads typed
   time: 0,
   enabled: true,
   _view: null,
@@ -24,6 +75,7 @@ export const Input = {
 
 // view = { canvas, toWorld(sx, sy) -> {x, y} }
 export function initInput(view) {
+  loadBinds();
   Input._view = view;
   const el = view.canvas;
 
@@ -41,6 +93,8 @@ export function initInput(view) {
     if (e.repeat || Input.keys.has(k)) return;
     Input.keys.add(k);
     Input.pressed.add(k);
+    if (k.length === 1) Input.typed.push(k);
+    else if (k === 'Backspace' || k === 'Enter') Input.typed.push(k);
     const now = Input.time;
     const lastDown = Input.lastTap.get(k) ?? -99;
     const lastUp = Input.lastUp.get(k) ?? -99;
@@ -96,6 +150,7 @@ export function initInput(view) {
 export function inputTick(dt) { Input.time += dt; }
 
 export function inputEndFrame() {
+  Input.typed.length = 0;
   Input.pressed.clear();
   Input.released.clear();
   Input.doubleTap.clear();
@@ -106,4 +161,9 @@ export function inputEndFrame() {
 
 export const key = (k) => Input.keys.has(k);
 export const keyPressed = (k) => Input.pressed.has(k);
+
+// Action-level queries. These are what gameplay code should use.
+export const held = (action) => Input.keys.has(Binds[action]);
+export const pressed = (action) => Input.pressed.has(Binds[action]);
+export const doubleTapped = (action) => Input.doubleTap.has(Binds[action]);
 export const keyDoubleTap = (k) => Input.doubleTap.has(k);

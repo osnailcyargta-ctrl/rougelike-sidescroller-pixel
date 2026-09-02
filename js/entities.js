@@ -9,10 +9,11 @@ import {
 } from './gfx.js';
 import { Sfx } from './audio.js';
 import {
-  VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, NUKERANG, ENEMY_TYPES, PERK,
-  ROOM_SCALING, roomScaleSteps,
+  VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, NUKERANG, GRAPPLE,
+  ENEMY_TYPES, PERK, ROOM_SCALING, roomScaleSteps,
 } from './config.js';
 import { ITEMS, Inventory } from './items.js';
+import { Binds } from './input.js';
 
 // --- shared physics ------------------------------------------------------
 
@@ -84,6 +85,7 @@ export const ENEMY_TINT = {
   get brute() { return Theme.enemyBrute; },
   get stinger() { return Theme.enemyStinger; },
   get lurker() { return '#ff7a3c'; },
+  get shardling() { return '#a98cff'; },
   get spitter() { return '#a8e04a'; },
   get golemBody() { return Theme.enemyBrute; },
   get golemHead() { return Theme.lightning; },
@@ -124,6 +126,7 @@ export class Enemy {
     this.knockT = 0;
     this.telegraph = 0;
     this.squash = 0;
+    this.guardFlash = 0;
     this.wasGround = false;
     // bosses shrug off the whole lightning package: no marks, no electrified,
     // and the arc passes through them
@@ -142,6 +145,24 @@ export class Enemy {
 
   damage(amount, opts = {}) {
     if (this.dead) return;
+    // a plated front turns most of a hit that comes at it head on
+    let guarded = false;
+    if (this.def.frontGuard && opts.angle !== undefined &&
+        Math.cos(opts.angle) * this.facing < -0.2) {
+      guarded = true;
+      amount = Math.max(1, Math.round(amount * this.def.frontGuard));
+      Sfx.ui();
+      burst(this.cx + this.facing * 7, this.cy, 10, {
+        color: '#ffffff', color2: Theme.steel, kind: 'streak',
+        speedMin: 90, speedMax: 240, lifeMin: 0.08, lifeMax: 0.2,
+        gravity: 0, drag: 0.85, angle: opts.angle + Math.PI, spread: 1.0,
+      });
+      impactRing(this.cx + this.facing * 7, this.cy, {
+        color: '#ffffff', r0: 2, r1: 14, life: 0.18, width: 1.5,
+        arc: 0.9, angle: this.facing > 0 ? 0 : Math.PI,
+      });
+      this.guardFlash = 0.18;
+    }
     this.hurtFlash = 0.16;
     const crit = !!opts.crit;
     floatText(this.cx + rand(-3, 3), this.cy - 8, Math.round(amount), opts.color ?? (crit ? Theme.uiAccent : '#ffffff'), { crit });
@@ -272,6 +293,7 @@ export class Enemy {
     this.hurtFlash = Math.max(0, this.hurtFlash - dt);
     this.knockT = Math.max(0, this.knockT - dt);
     this.squash = Math.max(0, this.squash - dt * 4.5);
+    this.guardFlash = Math.max(0, this.guardFlash - dt * 4);
     if (this.onGround && !this.wasGround && !this.def.flying) {
       this.squash = 1;
       burst(this.x, this.y, 4, {
@@ -343,6 +365,7 @@ export class Enemy {
   }
 
   updateFlyer(dt, p, slow) {
+    if (this.type === 'shardling') return this.updateShardling(dt, p, slow);
     this.hover += dt * 3;
     const target = p && !p.dead ? p : null;
     if (target) {
@@ -359,6 +382,95 @@ export class Enemy {
     }
     moveAndCollide(this, dt, { ignorePlatforms: true });
     this.y = clamp(this.y, 30, GROUND_Y - 6);
+  }
+
+  // Shardling: drifts at stand-off with its plate toward you, winds up, then
+  // commits to one straight charge. It cannot steer once it has launched.
+  updateShardling(dt, p, slow) {
+    const d = this.def;
+    const target = p && !p.dead ? p : null;
+    this.hover += dt * 2.4;
+
+    if (this.state === 'charge') {
+      this.chargeT -= dt;
+      if (Math.random() < dt * 70) {
+        spawnParticle({
+          x: this.cx + rand(-5, 5), y: this.cy + rand(-5, 5),
+          vx: -this.vx * 0.12, vy: -this.vy * 0.12, life: rand(0.1, 0.28),
+          size: randInt(1, 2), color: ENEMY_TINT.shardling, gravity: 0, kind: 'streak',
+        });
+      }
+      if (target && Math.abs(target.x - this.x) < (this.w + target.w) / 2 + 2 &&
+          Math.abs((target.y - target.h / 2) - this.cy) < (this.h + target.h) / 2) {
+        target.hurt(this.dmg, this.x);
+        this.chargeT = 0;
+      }
+      if (this.chargeT <= 0) {
+        this.state = 'idle';
+        this.vx *= 0.2;
+        this.vy *= 0.2;
+        this.attackTimer = d.attackCooldown / Math.max(0.2, slow);
+      }
+      moveAndCollide(this, dt, { ignorePlatforms: true });
+      this.x = clamp(this.x, this.w / 2, VIEW_W - this.w / 2);
+      this.y = clamp(this.y, 24, GROUND_Y - 2);
+      return;
+    }
+
+    if (this.telegraph > 0) {
+      this.telegraph -= dt;
+      // pull back a little, the way a fist cocks before it swings
+      if (target) {
+        const a = Math.atan2((target.y - target.h / 2) - this.cy, target.x - this.x);
+        this.facing = sign(Math.cos(a)) || this.facing;
+        this.vx = lerp(this.vx, -Math.cos(a) * 40, 1 - Math.pow(0.004, dt));
+        this.vy = lerp(this.vy, -Math.sin(a) * 40, 1 - Math.pow(0.004, dt));
+        this.aimAngle = a;
+      }
+      if (Math.random() < dt * 30) {
+        const ang = rand(0, TAU);
+        spawnParticle({
+          x: this.cx + Math.cos(ang) * 18, y: this.cy + Math.sin(ang) * 18,
+          vx: -Math.cos(ang) * 70, vy: -Math.sin(ang) * 70, life: 0.25,
+          size: 1, color: ENEMY_TINT.shardling, gravity: 0, kind: 'shrink',
+        });
+      }
+      if (this.telegraph <= 0 && target) {
+        this.state = 'charge';
+        this.chargeT = d.chargeTime;
+        const a = this.aimAngle ?? 0;
+        this.vx = Math.cos(a) * d.chargeSpeed * slow;
+        this.vy = Math.sin(a) * d.chargeSpeed * slow;
+        this.facing = sign(this.vx) || this.facing;
+        Sfx.dash();
+        Camera.add(2);
+      }
+      moveAndCollide(this, dt, { ignorePlatforms: true });
+      return;
+    }
+
+    if (target) {
+      // keep its plate between you and its core
+      const dx = target.x - this.x;
+      const dy = (target.y - target.h / 2) - this.cy;
+      const gap = Math.hypot(dx, dy) || 1;
+      const want = (gap - d.standOff) / gap;
+      const bob = Math.sin(this.hover) * 26;
+      this.vx = lerp(this.vx, clamp(dx * want * 2.2, -d.speed, d.speed) * slow, 1 - Math.pow(0.003, dt));
+      this.vy = lerp(this.vy, clamp(dy * want * 2.2 + bob, -d.speed, d.speed) * slow, 1 - Math.pow(0.003, dt));
+      this.facing = sign(dx) || this.facing;
+      this.attackTimer -= 0;
+      if (this.attackTimer <= 0 && gap < d.attackRange) {
+        this.telegraph = d.windUp;
+        this.attackTimer = d.attackCooldown;
+        this.state = 'wind';
+      }
+    } else {
+      this.vx = lerp(this.vx, 0, 1 - Math.pow(0.004, dt));
+      this.vy = lerp(this.vy, 0, 1 - Math.pow(0.004, dt));
+    }
+    moveAndCollide(this, dt, { ignorePlatforms: true });
+    this.y = clamp(this.y, 24, GROUND_Y - 2);
   }
 
   // Lurker: hover at stand-off range, crouch, then commit to a long lunge.
@@ -540,6 +652,7 @@ export class Enemy {
     else if (this.type === 'brute') this.drawBrute(ctx, t, flash);
     else if (this.type === 'lurker') this.drawLurker(ctx, t, flash);
     else if (this.type === 'spitter') this.drawSpitter(ctx, t, flash);
+    else if (this.type === 'shardling') this.drawShardling(ctx, t, flash);
     else this.drawStinger(ctx, t, flash);
     ctx.restore();
 
@@ -678,6 +791,56 @@ export class Enemy {
     if (charge > 0) {
       const px2 = x + f * (6 + Math.cos(f > 0 ? -0.5 : Math.PI + 0.5) * 7);
       glowDot(ctx, px2, y - 15 - breathe, 6 + charge * 8, ENEMY_TINT.spitter, 0.2 + charge * 0.5);
+    }
+  }
+
+  drawShardling(ctx, t, flash) {
+    const c = flash ? '#ffffff' : ENEMY_TINT.shardling;
+    const dark = flash ? '#ffffff' : '#3a2a58';
+    const plate = flash ? '#ffffff' : '#cfc0ff';
+    const x = Math.round(this.x);
+    const y = Math.round(this.y - this.h / 2 + Math.sin(this.hover * 1.6) * 1.5);
+    const f = this.facing;
+    const winding = this.telegraph > 0;
+    const k = winding ? 1 - this.telegraph / this.def.windUp : 0;
+
+    // orbiting debris
+    for (let i = 0; i < 3; i++) {
+      const a = t * 1.6 + i * (TAU / 3);
+      const r = 13 + Math.sin(t * 2 + i) * 2;
+      pxRect(ctx, x + Math.cos(a) * r, y + Math.sin(a) * r * 0.6, 2, 2, dark);
+    }
+
+    // core
+    glowDot(ctx, x, y, 12 + k * 12, ENEMY_TINT.shardling, 0.25 + k * 0.45);
+    pxRect(ctx, x - 5, y - 6, 10, 12, c);
+    pxRect(ctx, x - 5, y - 6, 10, 2, plate);
+    pxRect(ctx, x - 2, y - 2, 4, 4, flash ? '#fff' : Theme.eye);
+
+    // the front plate: a slab of golem armour, angled
+    const px = x + f * 6;
+    pxRect(ctx, px - 1, y - 9, 4, 18, dark);
+    pxRect(ctx, px + f * 1, y - 8, 3, 16, plate);
+    pxRect(ctx, px + f * 2, y - 5, 2, 10, flash ? '#fff' : '#8f7fd0');
+    if (this.guardFlash > 0) {
+      glowDot(ctx, px + f * 2, y, 16, '#ffffff', this.guardFlash * 2);
+    }
+    // brace arms holding the plate on
+    limb(ctx, x + f * 3, y - 4, f > 0 ? -0.5 : Math.PI + 0.5, 5, 2, dark);
+    limb(ctx, x + f * 3, y + 4, f > 0 ? 0.5 : Math.PI - 0.5, 5, 2, dark);
+    if (winding) {
+      const a = this.aimAngle ?? 0;
+      // a thin sight line showing exactly where it will go
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = rgba(ENEMY_TINT.shardling, 0.15 + k * 0.4);
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 4]);
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + Math.cos(a) * 120, y + Math.sin(a) * 120);
+      ctx.stroke();
+      ctx.restore();
     }
   }
 
@@ -1032,7 +1195,11 @@ export class Player {
     this.throwWind = 0;
     this.throwAim = 0;
     this.catchT = 0;
+    this.grapple = null;
+    this.grappleCd = 0;
     this.afterimages = [];
+    this.dashPath = [];
+    this.dashDir = 1;
     this.scarf = makeChain(4, this.x, this.y - 16);
     this.cape = makeChain(5, this.x, this.y - 14);
     this.bladeTrail = [];
@@ -1118,6 +1285,7 @@ export class Player {
     if (this.hp <= 0) {
       this.hp = 0;
       this.dead = true;
+      this.releaseGrapple(true);
       Sfx.die();
       Camera.add(12);
       burst(this.cx, this.cy, 40, { color: Theme.player, color2: Theme.hp, speedMin: 30, speedMax: 220, lifeMin: 0.4, lifeMax: 1.1, sizeMax: 3 });
@@ -1195,27 +1363,45 @@ export class Player {
     // --- horizontal movement
     let move = 0;
     if (c) {
-      if (c.keys.has('a')) move -= 1;
-      if (c.keys.has('d')) move += 1;
+      if (c.keys.has(Binds.left)) move -= 1;
+      if (c.keys.has(Binds.right)) move += 1;
     }
     if (this.dashT > 0) {
       this.dashT -= dt;
-      if (Math.random() < dt * 90) {
+      // a continuous smear of where the body has been, not just stamps
+      this.dashPath.push([this.x, this.cy]);
+      if (this.dashPath.length > 14) this.dashPath.shift();
+      if (Math.random() < dt * 70) {
         this.afterimages.push({ x: this.x, y: this.y, facing: this.facing, t: 0 });
+      }
+      // speed lines drawn out behind, parallel to the dash
+      if (Math.random() < dt * 90 * Theme.dashStreaks) {
+        spawnParticle({
+          x: this.x - this.dashDir * rand(0, 10), y: this.cy + rand(-9, 9),
+          vx: -this.dashDir * rand(160, 340), vy: rand(-12, 12),
+          life: rand(0.1, 0.24), size: randInt(1, 2), color: Theme.dashCore,
+          color2: Theme.dashGlow, gravity: 0, drag: 0.84, kind: 'streak',
+        });
       }
       spawnParticle({
         x: this.x + rand(-4, 4), y: this.y - rand(0, this.h), vx: rand(-20, 20), vy: rand(-20, 20),
-        life: rand(0.15, 0.35), size: 1, color: Theme.platformGlow, gravity: 0, kind: 'shrink',
+        life: rand(0.15, 0.35), size: 1, color: Theme.dashGlow, gravity: 0, kind: 'shrink',
       });
-      if (this.dashT <= 0) this.vx *= 0.4;
+      if (this.dashT <= 0) {
+        this.vx *= 0.4;
+        this.endDashFlourish();
+      }
     } else {
-      const accel = this.onGround ? PLAYER.accel : PLAYER.airAccel;
+      if (this.dashPath.length) this.dashPath.shift();
+      const swinging = this.grapple && this.grapple.state === 'attached';
+      const accel = (this.onGround ? PLAYER.accel : PLAYER.airAccel) *
+        (swinging ? GRAPPLE.airControl : 1);
       if (move !== 0) {
         this.vx += move * accel * dt;
         this.vx = clamp(this.vx, -PLAYER.speed, PLAYER.speed);
-      } else if (this.onGround) {
+      } else if (this.onGround && !swinging) {
         this.vx = Math.abs(this.vx) < PLAYER.friction * dt ? 0 : this.vx - sign(this.vx) * PLAYER.friction * dt;
-      } else {
+      } else if (!swinging) {
         this.vx *= Math.pow(0.6, dt * 4);
       }
     }
@@ -1224,12 +1410,12 @@ export class Player {
     // buffering, no alternate key, nothing that can go off later: if the tap
     // arrives while the dash is on cooldown it is simply dropped.
     if (c && this.dashCd <= 0 && this.dashT <= 0) {
-      if (c.doubleTap.has('a')) this.startDash(-1);
-      else if (c.doubleTap.has('d')) this.startDash(1);
+      if (c.doubleTap.has(Binds.left)) this.startDash(-1);
+      else if (c.doubleTap.has(Binds.right)) this.startDash(1);
     }
 
     // --- jump
-    if (c && c.pressed.has('w') && this.onGround && !this.slamming) {
+    if (c && c.pressed.has(Binds.jump) && this.onGround && !this.slamming) {
       this.vy = -PLAYER.jumpVel;
       this.onGround = false;
       Sfx.jump();
@@ -1237,13 +1423,13 @@ export class Player {
     }
 
     // --- drop through / ground slam
-    if (c && c.doubleTap.has('s') && !this.onGround && !this.slamming) {
+    if (c && c.doubleTap.has(Binds.down) && !this.onGround && !this.slamming) {
       this.slamming = true;
       this.vy = PLAYER.slamVel;
       this.vx *= 0.3;
       Sfx.dash();
       burst(this.x, this.cy, 10, { color: Theme.uiAccent, speedMin: 20, speedMax: 90, lifeMin: 0.15, lifeMax: 0.4, gravity: -60, angle: -Math.PI / 2, spread: 1.4 });
-    } else if (c && c.pressed.has('s') && this.onGround && this.platform) {
+    } else if (c && c.pressed.has(Binds.down) && this.onGround && this.platform) {
       this.dropT = PLAYER.dropTime;
       this.y += 2;
       this.onGround = false;
@@ -1257,9 +1443,14 @@ export class Player {
       });
     }
 
+    // --- grapple
+    this.grappleCd = Math.max(0, this.grappleCd - dt);
+    if (c && c.pressed.has(Binds.grapple)) this.toggleGrapple();
+    this.updateGrapple(dt);
+
     // --- attacks
     if (c && input.mouse.left && this.attackCd <= 0) this.attack();
-    if (c && c.pressed.has('r')) this.startReload();
+    if (c && c.pressed.has(Binds.reload)) this.startReload();
 
     // --- gravity + collide
     if (this.dashT <= 0) this.vy += GRAVITY * dt;
@@ -1267,6 +1458,7 @@ export class Player {
     this.vy = Math.min(this.vy, 900);
     const before = this.onGround;
     moveAndCollide(this, dt, { ignorePlatforms: this.dropT > 0 });
+    this.applyRopeConstraint();
     if (!before && this.onGround) this.onLand();
   }
 
@@ -1293,6 +1485,178 @@ export class Player {
       speedMin: 120, speedMax: 300, lifeMin: 0.1, lifeMax: 0.26,
       angle: a, spread: 0.45, gravity: 0, drag: 0.86,
     });
+  }
+
+  // --- grappling hook ----------------------------------------------------
+
+  toggleGrapple() {
+    if (!this.inventory.has('graplinghook')) return;
+    if (this.grapple) { this.releaseGrapple(); return; }
+    if (this.grappleCd > 0) return;
+    const a = this.aim;
+    this.grapple = {
+      state: 'flying',
+      x: this.x + Math.cos(a) * 8,
+      y: this.cy + Math.sin(a) * 8,
+      vx: Math.cos(a) * GRAPPLE.hookSpeed,
+      vy: Math.sin(a) * GRAPPLE.hookSpeed,
+      len: 0,
+      angle: a,
+      t: 0,
+    };
+    Sfx.bow();
+    burst(this.x + Math.cos(a) * 10, this.cy + Math.sin(a) * 10, 5, {
+      color: Theme.hookColor, speedMin: 20, speedMax: 80, lifeMin: 0.1, lifeMax: 0.24,
+      angle: a, spread: 0.4, gravity: 0,
+    });
+  }
+
+  releaseGrapple(silent = false) {
+    if (!this.grapple) return;
+    const g = this.grapple;
+    if (g.state === 'attached' && !silent) {
+      burst(g.x, g.y, 8, {
+        color: Theme.hookColor, color2: '#ffffff', speedMin: 25, speedMax: 110,
+        lifeMin: 0.1, lifeMax: 0.3, gravity: 180, kind: 'shrink',
+      });
+      Sfx.ui();
+    }
+    this.grapple = null;
+    this.grappleCd = GRAPPLE.cooldown;
+  }
+
+  // Terrain the hook can bite: the floor, the arena edges, and any platform.
+  hookHit(x, y) {
+    if (y >= GROUND_Y) return { x, y: GROUND_Y };
+    if (y <= 2) return { x, y: 2 };
+    if (x <= 2) return { x: 2, y };
+    if (x >= VIEW_W - 2) return { x: VIEW_W - 2, y };
+    for (const p of PLATFORMS) {
+      if (x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h) return { x, y };
+    }
+    return null;
+  }
+
+  updateGrapple(dt) {
+    const g = this.grapple;
+    if (!g) return;
+    g.t += dt;
+
+    if (g.state === 'flying') {
+      // step in small slices so a fast hook cannot tunnel through a platform
+      const steps = Math.max(1, Math.ceil((GRAPPLE.hookSpeed * dt) / 4));
+      for (let i = 0; i < steps; i++) {
+        const px = g.x, py = g.y;
+        g.x += (g.vx * dt) / steps;
+        g.y += (g.vy * dt) / steps;
+        g.len = dist(this.x, this.cy, g.x, g.y);
+        const bite = this.hookHit(g.x, g.y);
+        if (bite) {
+          g.x = bite.x;
+          g.y = bite.y;
+          g.state = 'attached';
+          g.len = Math.max(GRAPPLE.minLength, dist(this.x, this.cy, g.x, g.y));
+          Sfx.hit();
+          Camera.add(2);
+          Camera.punch(0.4);
+          impactRing(g.x, g.y, { color: Theme.hookColor, r0: 2, r1: 14, life: 0.2, width: 1.5 });
+          burst(g.x, g.y, 7, {
+            color: Theme.groundEdge, color2: '#ffffff', speedMin: 25, speedMax: 100,
+            lifeMin: 0.1, lifeMax: 0.3, gravity: 240,
+            angle: Math.atan2(-g.vy, -g.vx), spread: 1.0,
+          });
+          break;
+        }
+        if (g.len >= GRAPPLE.maxLength) {
+          // ran out of rope without biting anything
+          this.releaseGrapple(true);
+          burst(px, py, 4, {
+            color: Theme.hookColor, speedMin: 10, speedMax: 50, lifeMin: 0.1, lifeMax: 0.25,
+            gravity: 200, kind: 'shrink',
+          });
+          return;
+        }
+      }
+      return;
+    }
+
+    // attached: reel the rope in and haul yourself along it
+    const dx = g.x - this.x, dy = g.y - this.cy;
+    const d = Math.hypot(dx, dy) || 0.0001;
+    g.len = Math.max(GRAPPLE.minLength, g.len - GRAPPLE.reelSpeed * dt);
+    const nx = dx / d, ny = dy / d;
+    this.vx += nx * GRAPPLE.pull * dt;
+    this.vy += ny * GRAPPLE.pull * dt;
+    if (Math.random() < dt * 22) {
+      const k = rand(0.2, 0.9);
+      spawnParticle({
+        x: lerp(this.x, g.x, k), y: lerp(this.cy, g.y, k),
+        vx: rand(-10, 10), vy: rand(-16, 4), life: rand(0.15, 0.35),
+        size: 1, color: Theme.ropeCore, gravity: 20, kind: 'shrink',
+      });
+    }
+    if (d < GRAPPLE.minLength + 4) this.releaseGrapple();
+  }
+
+  // Run after movement: keep the body inside the rope and kill the outward
+  // velocity, which is what turns a taut rope into a swing.
+  applyRopeConstraint() {
+    const g = this.grapple;
+    if (!g || g.state !== 'attached') return;
+    const dx = this.x - g.x, dy = this.cy - g.y;
+    const d = Math.hypot(dx, dy);
+    if (d <= g.len || d < 0.001) return;
+    const nx = dx / d, ny = dy / d;
+    const pull = d - g.len;
+    this.x -= nx * pull;
+    this.y -= ny * pull;
+    const radial = this.vx * nx + this.vy * ny;
+    if (radial > 0) {
+      this.vx -= nx * radial;
+      this.vy -= ny * radial;
+    }
+    this.x = clamp(this.x, this.w / 2, VIEW_W - this.w / 2);
+  }
+
+  drawGrapple(ctx) {
+    const g = this.grapple;
+    if (!g) return;
+    const sx = this.x, sy = this.cy;
+    const d = dist(sx, sy, g.x, g.y);
+    const slack = g.state === 'attached' ? clamp((g.len - d) / 30, 0, 1) : 0.35;
+    const segs = 10;
+    const pts = [];
+    for (let i = 0; i <= segs; i++) {
+      const k = i / segs;
+      // a rope hangs; the slacker it is, the deeper the belly
+      const sag = Math.sin(k * Math.PI) * slack * 14;
+      pts.push([lerp(sx, g.x, k), lerp(sy, g.y, k) + sag]);
+    }
+    ctx.save();
+    ctx.strokeStyle = rgba(Theme.ropeColor, 0.95);
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i <= segs; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.stroke();
+    ctx.strokeStyle = rgba(Theme.ropeCore, 0.55);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+
+    // the claw, pointing the way it flew
+    const ang = g.state === 'attached'
+      ? Math.atan2(g.y - pts[segs - 1][1], g.x - pts[segs - 1][0])
+      : Math.atan2(g.vy, g.vx);
+    ctx.save();
+    ctx.translate(Math.round(g.x), Math.round(g.y));
+    ctx.rotate(ang);
+    pxRect(ctx, -4, -1, 6, 2, Theme.hookColor);
+    limb(ctx, 1, 0, -0.9, 5, 2, Theme.hookColor);
+    limb(ctx, 1, 0, 0.9, 5, 2, Theme.hookColor);
+    ctx.restore();
+    if (g.state === 'attached') glowDot(ctx, g.x, g.y, 9, Theme.hookColor, 0.3);
   }
 
   // Snap the trailing chains to the body, after a teleport or a room change.
@@ -1351,7 +1715,21 @@ export class Player {
     }
   }
 
+  // A short bloom of light where the dash lets go, so it ends on a beat.
+  endDashFlourish() {
+    impactRing(this.x, this.cy, {
+      color: Theme.dashGlow, r0: 3, r1: 20 * Theme.dashRingScale, life: 0.22,
+      width: 1.5, squash: 0.5,
+    });
+    burst(this.x, this.cy, 6, {
+      color: Theme.dashCore, color2: Theme.dashGlow, kind: 'shrink',
+      speedMin: 15, speedMax: 70, lifeMin: 0.1, lifeMax: 0.3, gravity: 0,
+    });
+  }
+
   startDash(dir) {
+    this.dashPath.length = 0;
+    this.dashDir = dir;
     this.dashT = PLAYER.dashTime;
     this.dashCd = PLAYER.dashCooldown;
     this.facing = dir;
@@ -1362,17 +1740,22 @@ export class Player {
     Camera.add(2);
     Camera.punch(-0.9);
     burst(this.x, this.cy, 12, {
-      color: Theme.platformGlow, color2: '#ffffff', speedMin: 40, speedMax: 150,
+      color: Theme.dashGlow, color2: Theme.dashCore, speedMin: 40, speedMax: 150,
       lifeMin: 0.15, lifeMax: 0.4, angle: dir > 0 ? Math.PI : 0, spread: 0.7, gravity: 0,
     });
-    burst(this.x, this.cy, 8, {
-      color: '#ffffff', color2: Theme.platformGlow, kind: 'streak',
-      speedMin: 150, speedMax: 330, lifeMin: 0.1, lifeMax: 0.24, gravity: 0, drag: 0.85,
+    burst(this.x, this.cy, 10, {
+      color: Theme.dashCore, color2: Theme.dashGlow, kind: 'streak',
+      speedMin: 150, speedMax: 340, lifeMin: 0.1, lifeMax: 0.26, gravity: 0, drag: 0.85,
       angle: dir > 0 ? Math.PI : 0, spread: 0.45,
     });
+    // a flat ring thrown out sideways: reads as a launch, not an explosion
     impactRing(this.x, this.cy, {
-      color: Theme.platformGlow, r0: 4, r1: 26, life: 0.28, width: 2,
-      squash: 0.55, rotate: 0,
+      color: Theme.dashGlow, r0: 4, r1: 30 * Theme.dashRingScale, life: 0.3, width: 2,
+      squash: 0.32, rotate: 0,
+    });
+    impactRing(this.x, this.cy, {
+      color: Theme.dashCore, r0: 2, r1: 18 * Theme.dashRingScale, life: 0.2, width: 1.5,
+      squash: 0.32, rotate: 0,
     });
   }
 
@@ -1565,11 +1948,18 @@ export class Player {
   draw(ctx) {
     const shadowY = surfaceBelow(this.x, this.y);
     dropShadow(ctx, this.x, shadowY, this.w * 0.62, shadowY - this.y);
+    this.drawGrapple(ctx);
+
+    // the dash smear: one continuous tapered ribbon through the path
+    if (this.dashPath.length > 1) {
+      ribbon(ctx, this.dashPath, Theme.dashGlow, 15 * Theme.dashRibbonWidth, 0.30);
+      ribbon(ctx, this.dashPath, Theme.dashCore, 5 * Theme.dashRibbonWidth, 0.42);
+    }
 
     // dash afterimages
     for (const a of this.afterimages) {
       const k = 1 - a.t / 0.28;
-      ctx.globalAlpha = k * 0.4 * Theme.trail;
+      ctx.globalAlpha = k * 0.4 * Theme.trail * Theme.dashGhostAlpha;
       this.drawBody(ctx, a.x, a.y, a.facing, true);
       ctx.globalAlpha = 1;
     }
@@ -1625,10 +2015,10 @@ export class Player {
     const x = Math.round(px);
     const y = Math.round(py + bob + squash * 2);
     const f = facing;
-    const body = ghost ? Theme.platformGlow : Theme.cloth;
-    const bodyDark = ghost ? Theme.platformGlow : Theme.clothDark;
-    const skin = ghost ? Theme.platformGlow : Theme.skin;
-    const hair = ghost ? Theme.platformGlow : Theme.player;
+    const body = ghost ? Theme.dashGhost : Theme.cloth;
+    const bodyDark = ghost ? Theme.dashGhost : Theme.clothDark;
+    const skin = ghost ? Theme.dashGhost : Theme.skin;
+    const hair = ghost ? Theme.dashGhost : Theme.player;
 
     const flash = this.hurtFlash > 0 && !ghost;
     const C = (c) => (flash ? '#ffffff' : c);

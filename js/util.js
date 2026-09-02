@@ -1,9 +1,61 @@
 // Small math / helper utilities used across the game.
 export const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 export const lerp = (a, b, t) => a + (b - a) * t;
+
+// --- seeded randomness --------------------------------------------------
+// Every gameplay roll goes through rng(), so a run replays identically from
+// the same seed. Purely cosmetic randomness may still use Math.random.
+let _rngState = (Math.random() * 0xffffffff) >>> 0;
+let _seedLabel = '';
+
+// mulberry32: small, fast, and good enough for shuffling a roguelike.
+export function rng() {
+  _rngState = (_rngState + 0x6d2b79f5) >>> 0;
+  let t = _rngState;
+  t = Math.imul(t ^ (t >>> 15), t | 1);
+  t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
+// Any text works as a seed; it is hashed down to the generator's state.
+export function setSeed(text) {
+  _seedLabel = String(text ?? '').trim().toUpperCase();
+  let h = 2166136261 >>> 0;
+  const src = _seedLabel.length ? _seedLabel : 'AETHER';
+  for (let i = 0; i < src.length; i++) {
+    h ^= src.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  _rngState = h >>> 0;
+  return _seedLabel;
+}
+
+export function getSeed() { return _seedLabel; }
+
+// A fresh pronounceable seed for the "random" button.
+export function randomSeedText() {
+  const cons = 'BCDFGHJKLMNPRSTVWXZ';
+  const vow = 'AEIOU';
+  let out = '';
+  for (let i = 0; i < 6; i++) {
+    const pool = i % 2 === 0 ? cons : vow;
+    out += pool[Math.floor(Math.random() * pool.length)];
+  }
+  return out;
+}
+
+// Two streams on purpose. rand/randInt/choice are the unseeded ones used for
+// particles, timing jitter and anything else purely cosmetic - they fire at
+// frame rate, so folding them into the seed would desync every replay. The
+// s-prefixed ones draw from the seeded stream and are what decides a run:
+// wave composition, enemy types, spawn points and drops.
 export const rand = (a = 1, b = 0) => b + Math.random() * (a - b);
 export const randInt = (a, b) => Math.floor(rand(a, b + 1));
 export const choice = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+export const srand = (a = 1, b = 0) => b + rng() * (a - b);
+export const srandInt = (a, b) => Math.floor(srand(a, b + 1));
+export const schoice = (arr) => arr[Math.floor(rng() * arr.length)];
 export const sign = (v) => (v < 0 ? -1 : v > 0 ? 1 : 0);
 export const TAU = Math.PI * 2;
 

@@ -5,9 +5,11 @@ import { Theme } from './theme.js';
 import { drawText, drawTextShadow, textWidth } from './font.js';
 import { pxRect, glowDot, spawnParticle } from './gfx.js';
 import { VIEW_W, VIEW_H } from './config.js';
-import { panel, button, slider, UI } from './ui.js';
-import { drawItemIcon } from './items.js';
+import { panel, button, slider, textField, drawTooltip, UI } from './ui.js';
+import { drawItemIcon, ITEMS, RARITY } from './items.js';
 import { AudioCfg, setVolume, Sfx } from './audio.js';
+import { randomSeedText } from './util.js';
+import { Input, Binds, BIND_ORDER, BIND_LABELS, bindLabel, setBind, resetBinds } from './input.js';
 
 function titleGlyphs(ctx, t) {
   const title = 'AETHER';
@@ -61,29 +63,60 @@ export function drawMainMenu(ctx, game, t) {
 
 export function drawControls(ctx, game, t) {
   drawMenuBackdrop(ctx, t);
-  panel(ctx, 40, 18, VIEW_W - 80, VIEW_H - 52);
-  drawTextShadow(ctx, 'CONTROLS', VIEW_W / 2, 26, Theme.uiAccent, 2, 'center');
-  const rows = [
-    ['A / D', 'MOVE LEFT / RIGHT'],
-    ['DOUBLE A / D', 'DASH (I-FRAMES)'],
-    ['SHIFT', 'DASH (ONE-KEY VERSION)'],
-    ['W', 'JUMP'],
-    ['S', 'DROP THROUGH PLATFORM'],
-    ['DOUBLE S (AIR)', 'GROUND SLAM'],
-    ['LEFT CLICK', 'ATTACK TOWARD CURSOR'],
-    ['RIGHT CLICK', 'INTERACT AT CURSOR'],
-    ['SCROLL / 1-4', 'CHANGE HOTBAR SLOT'],
-    ['E', 'INVENTORY'],
-    ['R', 'RELOAD BOW'],
+  panel(ctx, 26, 10, VIEW_W - 52, VIEW_H - 34);
+  drawTextShadow(ctx, 'CONTROLS', VIEW_W / 2, 16, Theme.uiAccent, 2, 'center');
+  drawText(ctx, 'CLICK A KEY TO REBIND IT', VIEW_W / 2, 32, Theme.uiDim, 1, 'center');
+
+  // a key press while rebinding is consumed here, never by gameplay
+  if (UI.rebinding) {
+    Input.captureText = true;
+    for (const k of Input.pressed) {
+      if (k === 'Escape') { UI.rebinding = null; break; }
+      if (k === 'Control' || k === 'Shift' || k === 'Alt' || k === 'Meta' || k === 'Tab') continue;
+      setBind(UI.rebinding, k);
+      UI.rebinding = null;
+      Sfx.ui();
+      break;
+    }
+  }
+
+  let y = 46;
+  for (const action of BIND_ORDER) {
+    const waiting = UI.rebinding === action;
+    drawText(ctx, BIND_LABELS[action], 44, y + 4, Theme.ui, 1);
+    const label = waiting ? 'PRESS A KEY' : bindLabel(Binds[action]);
+    if (button(ctx, 'bind-' + action, 190, y, waiting ? 92 : 52, 14, label, { selected: waiting })) {
+      UI.rebinding = waiting ? null : action;
+    }
+    y += 18;
+  }
+
+  // the things that are not rebindable, for reference
+  const fixed = [
+    ['DOUBLE TAP MOVE', 'DASH'],
+    ['DOUBLE TAP DROP', 'GROUND SLAM'],
+    ['LEFT / RIGHT CLICK', 'ATTACK / INTERACT'],
+    ['SCROLL, 1-4', 'HOTBAR'],
     ['ESC', 'PAUSE'],
   ];
-  let y = 52;
-  for (const [k, v] of rows) {
-    drawText(ctx, k, 56, y, Theme.uiAccent, 1);
-    drawText(ctx, v, 168, y, Theme.ui, 1);
-    y += 12;
+  const fx = 292;
+  drawText(ctx, 'FIXED', fx, 46, Theme.uiDim, 1);
+  let fy = 60;
+  for (const [k, v] of fixed) {
+    drawText(ctx, k, fx, fy, Theme.uiAccent, 1);
+    drawText(ctx, v, fx, fy + 9, Theme.uiDim, 1);
+    fy += 22;
   }
-  if (button(ctx, 'back', (VIEW_W - 90) / 2, 202, 90, 18, 'BACK')) game.screen = 'menu';
+
+  if (button(ctx, 'binddef', 44, y + 4, 96, 16, 'RESET DEFAULTS')) {
+    resetBinds();
+    UI.rebinding = null;
+  }
+  if (button(ctx, 'back', VIEW_W - 152, y + 4, 90, 16, 'BACK')) {
+    UI.rebinding = null;
+    game.screen = game.controlsReturn || 'menu';
+    game.controlsReturn = null;
+  }
 }
 
 export function drawSettings(ctx, game, t) {
@@ -123,6 +156,10 @@ export function drawSettings(ctx, game, t) {
     game.screenShake = !game.screenShake;
   }
   if (button(ctx, 'sample', 146, 174, 116, 16, 'DOWNLOAD SAMPLE')) game.downloadSampleShader();
+  if (button(ctx, 'skeys', 40, 194, 100, 16, 'KEY BINDINGS')) {
+    game.controlsReturn = 'settings';
+    game.screen = 'controls';
+  }
 
   // --- format help
   panel(ctx, 274, 40, VIEW_W - 274 - 34, 150, { alpha: 0.5 });
@@ -145,7 +182,7 @@ export function drawSettings(ctx, game, t) {
     drawText(ctx, help[i], 280, 46 + i * 10, i === 0 ? Theme.uiAccent : Theme.uiDim, 1);
   }
 
-  if (button(ctx, 'back', 40, 200, 90, 18, 'BACK')) {
+  if (button(ctx, 'back', 146, 194, 90, 16, 'BACK')) {
     game.screen = game.returnScreen || 'menu';
     game.returnScreen = null;
   }
@@ -153,7 +190,20 @@ export function drawSettings(ctx, game, t) {
 
 export function drawClassSelect(ctx, game, t) {
   drawMenuBackdrop(ctx, t);
-  drawTextShadow(ctx, 'CHOOSE YOUR PATH', VIEW_W / 2, 24, Theme.uiAccent, 2, 'center');
+  drawTextShadow(ctx, 'CHOOSE YOUR PATH', VIEW_W / 2, 12, Theme.uiAccent, 2, 'center');
+
+  // --- seed. Blank means "surprise me"; anything typed replays exactly.
+  const fieldW = 108;
+  const rowW = 30 + fieldW + 4 + 56;
+  const rowX = Math.round((VIEW_W - rowW) / 2);
+  drawText(ctx, 'SEED', rowX, 33, Theme.uiDim, 1);
+  game.seedText = textField(ctx, 'seed', rowX + 30, 30, fieldW, 12, game.seedText, {
+    max: 12, placeholder: 'RANDOM',
+  });
+  if (button(ctx, 'seedroll', rowX + 30 + fieldW + 4, 30, 56, 12, 'ROLL')) {
+    game.seedText = randomSeedText();
+    UI.focus = null;
+  }
 
   const cards = [
     {
@@ -165,23 +215,23 @@ export function drawClassSelect(ctx, game, t) {
       lines: ['HUNTER BOW', '10 BLOCK RANGE  -  5 DMG', '10 AMMO  -  2S RELOAD'],
     },
   ];
-  const cw = 168, ch = 130;
+  const cw = 168, ch = 126;
   for (let i = 0; i < cards.length; i++) {
     const c = cards[i];
     const x = VIEW_W / 2 - cw - 8 + i * (cw + 16);
-    const y = 46;
+    const y = 50;
     const hot = UI.hovered === 'class' + c.id;
     panel(ctx, x, y, cw, ch, { accent: c.color, alpha: hot ? 0.95 : 0.8 });
-    glowDot(ctx, x + cw / 2, y + 44, 34, c.color, hot ? 0.35 : 0.18);
+    glowDot(ctx, x + cw / 2, y + 42, 34, c.color, hot ? 0.35 : 0.18);
     ctx.save();
-    ctx.translate(x + cw / 2, y + 44);
+    ctx.translate(x + cw / 2, y + 42);
     const sc = 3 + (hot ? 0.4 : 0) + Math.sin(t * 3 + i) * 0.1;
     ctx.scale(sc, sc);
     drawItemIcon(ctx, c.item, -6, -6, 12, t);
     ctx.restore();
-    drawTextShadow(ctx, c.name, x + cw / 2, y + 74, c.color, 2, 'center');
+    drawTextShadow(ctx, c.name, x + cw / 2, y + 70, c.color, 2, 'center');
     for (let k = 0; k < c.lines.length; k++) {
-      drawText(ctx, c.lines[k], x + cw / 2, y + 94 + k * 10, Theme.ui, 1, 'center');
+      drawText(ctx, c.lines[k], x + cw / 2, y + 90 + k * 10, Theme.ui, 1, 'center');
     }
     if (button(ctx, 'class' + c.id, x + 24, y + ch + 6, cw - 48, 18, 'SELECT')) {
       game.startRun(c.id);
@@ -205,13 +255,72 @@ export function drawPause(ctx, game, t) {
 }
 
 export function drawGameOver(ctx, game, t) {
-  ctx.fillStyle = rgba('#000000', clamp(game.deathT * 0.5, 0, 0.72));
+  ctx.fillStyle = rgba('#000000', clamp(game.deathT * 0.5, 0, 0.78));
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   if (game.deathT < 0.6) return;
-  drawTextShadow(ctx, 'YOU DIED', VIEW_W / 2, 62, Theme.hp, 3, 'center');
-  drawTextShadow(ctx, `ROOM ${game.roomIndex}`, VIEW_W / 2, 96, Theme.ui, 1, 'center');
-  drawTextShadow(ctx, `KILLS ${game.kills}`, VIEW_W / 2, 108, Theme.ui, 1, 'center');
-  const bw = 120, x = VIEW_W / 2 - bw / 2;
-  if (button(ctx, 'retry', x, 132, bw, 18, 'RETRY')) game.goClassSelect();
-  if (button(ctx, 'gmenu', x, 156, bw, 18, 'MAIN MENU')) game.quitToMenu();
+
+  const st = game.runStats;
+  const k = clamp((game.deathT - 0.6) / 0.5, 0, 1);
+  const ease = 1 - Math.pow(1 - k, 3);
+  ctx.globalAlpha = ease;
+
+  drawTextShadow(ctx, 'YOU DIED', VIEW_W / 2, 22 - (1 - ease) * 8, Theme.hp, 3, 'center');
+
+  const pw = 264, px = Math.round((VIEW_W - pw) / 2), py = 52;
+  panel(ctx, px, py, pw, 122, { alpha: 0.9 });
+  drawText(ctx, 'RUN SUMMARY', px + pw / 2, py + 6, Theme.uiAccent, 1, 'center');
+  pxRect(ctx, px + 10, py + 16, pw - 20, 1, rgba(Theme.uiDim, 0.5));
+
+  if (st) {
+    const mins = Math.floor(st.time / 60);
+    const secs = Math.floor(st.time % 60);
+    const rows = [
+      ['CLASS', st.classId === 'melee' ? 'MELEE' : 'RANGER'],
+      ['REACHED', `ROOM ${st.room}  WAVE ${st.wave}/${st.waves}`],
+      ['KILLS', String(st.kills)],
+      ['TIME', `${mins}:${String(secs).padStart(2, '0')}`],
+      ['MAX HP', String(st.maxHp)],
+      ['SEED', st.seed || '-'],
+    ];
+    let ry = py + 24;
+    for (const [label, value] of rows) {
+      drawText(ctx, label, px + 12, ry, Theme.uiDim, 1);
+      drawText(ctx, value, px + pw - 12, ry, Theme.ui, 1, 'right');
+      ry += 11;
+    }
+
+    // what you were carrying when it ended
+    drawText(ctx, 'CARRIED', px + 12, ry + 3, Theme.uiDim, 1);
+    let ix = px + 62;
+    let hoverTip = null;
+    for (const item of st.items) {
+      const def = ITEMS[item.id];
+      if (!def) continue;
+      const hot = Input.mouse.x >= ix && Input.mouse.x < ix + 14 &&
+        Input.mouse.y >= ry && Input.mouse.y < ry + 14;
+      ctx.fillStyle = rgba('#000000', 0.45);
+      ctx.fillRect(ix, ry, 14, 14);
+      ctx.strokeStyle = rgba(RARITY[def.rarity].color, hot ? 1 : 0.6);
+      ctx.strokeRect(ix + 0.5, ry + 0.5, 13, 13);
+      drawItemIcon(ctx, item.id, ix + 1, ry + 1, 12, t);
+      if (item.count > 1) drawText(ctx, item.count, ix + 12, ry + 8, Theme.ui, 1, 'right');
+      if (hot) hoverTip = { id: item.id, x: ix + 7, y: ry - 2 };
+      ix += 17;
+      if (ix > px + pw - 20) break;
+    }
+    if (!st.items.length) drawText(ctx, 'NOTHING', px + 62, ry + 3, Theme.uiDim, 1);
+    if (hoverTip) drawTooltip(ctx, hoverTip);
+  }
+
+  const bw = 108;
+  if (button(ctx, 'retry', VIEW_W / 2 - bw - 4, 182, bw, 18, 'RETRY SEED')) {
+    game.seedText = st ? st.seed : game.seedText;
+    game.goClassSelect();
+  }
+  if (button(ctx, 'gnew', VIEW_W / 2 + 4, 182, bw, 18, 'NEW SEED')) {
+    game.seedText = '';
+    game.goClassSelect();
+  }
+  if (button(ctx, 'gmenu', VIEW_W / 2 - 54, 204, 108, 18, 'MAIN MENU')) game.quitToMenu();
+  ctx.globalAlpha = 1;
 }

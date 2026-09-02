@@ -1,11 +1,11 @@
 // Game shell: canvas setup, main loop, run/room/wave state machine.
-import { clamp, lerp, rand, randInt, dist, distToSegment, rgba, sign } from './util.js';
+import { clamp, lerp, rand, randInt, dist, distToSegment, rgba, sign, setSeed, getSeed, randomSeedText } from './util.js';
 import { Theme, applyTheme, resetTheme, DEFAULT_THEME } from './theme.js';
 import {
   Camera, updateFx, drawParticles, drawTexts, drawRings, clearFx, burst, floatText,
   spawnParticle, impactRing, boltPath, strokeBolt, glowDot, pxRect,
 } from './gfx.js';
-import { Input, initInput, inputTick, inputEndFrame } from './input.js';
+import { Input, initInput, inputTick, inputEndFrame, Binds } from './input.js';
 import { Sfx, resumeAudio, setVolume, AudioCfg } from './audio.js';
 import { PostFX, parseShaderPack, DEFAULT_COMPOSITE } from './postfx.js';
 import {
@@ -39,6 +39,10 @@ export class Game {
 
     this.screen = 'menu';
     this.returnScreen = null;
+    this.controlsReturn = null;
+    this.seedText = '';
+    this.runTime = 0;
+    this.runStats = null;
     this.time = 0;
     this.freezeT = 0;
     this.screenShake = true;
@@ -196,6 +200,11 @@ export class Game {
 
   startRun(classId) {
     resumeAudio();
+    // an empty field means "surprise me", but the roll is still recorded so the
+    // death screen can hand the seed back for a rematch
+    this.activeSeed = setSeed(this.seedText.trim() || randomSeedText());
+    this.runTime = 0;
+    this.runStats = null;
     clearFx();
     this.player = new Player(this, classId);
     this.enemies.length = 0;
@@ -234,6 +243,7 @@ export class Game {
     this.player.y = GROUND_Y;
     this.player.vx = this.player.vy = 0;
     this.player.boomerangOut = null;
+    this.player.releaseGrapple(true);
     this.player.resetChains();
     if (index > 1) this.player.healPct(1);
     this.startWave(1);
@@ -268,6 +278,27 @@ export class Game {
   onPlayerDeath() {
     this.screen = 'gameover';
     this.deathT = 0;
+    const inv = this.player ? this.player.inventory : null;
+    const held = [];
+    if (inv) {
+      for (const slot of inv.slots) {
+        if (!slot) continue;
+        const found = held.find((h) => h.id === slot.id);
+        if (found) found.count += slot.count;
+        else held.push({ id: slot.id, count: slot.count });
+      }
+    }
+    this.runStats = {
+      room: this.roomIndex,
+      wave: this.waveIndex,
+      waves: this.wavesInRoom(),
+      kills: this.kills,
+      time: this.runTime,
+      seed: this.activeSeed || getSeed(),
+      classId: this.player ? this.player.classId : 'melee',
+      maxHp: this.player ? this.player.maxHp : 0,
+      items: held,
+    };
   }
 
   nearestEnemy(x, y) {
@@ -395,6 +426,8 @@ export class Game {
   }
 
   handleGlobalKeys() {
+    // a focused text field or a pending rebind owns the keyboard
+    if (Input.captureText) return;
     if (Input.pressed.has('ctrl+m')) {
       this.debugOpen = !this.debugOpen;
       Sfx.ui();
@@ -414,6 +447,7 @@ export class Game {
 
   update(dt) {
     updateWorld(dt);
+    if (this.screen === 'playing' && !this.cutscene.active) this.runTime += dt;
 
     if (this.cutscene.active) {
       if (this.screen !== 'playing' || !this.player || this.player.dead) this.cutscene.finish();
@@ -432,7 +466,7 @@ export class Game {
     const p = this.player;
     if (!p) return;
 
-    if (Input.pressed.has('e') && this.screen === 'playing' && !p.dead) {
+    if (Input.pressed.has(Binds.inventory) && this.screen === 'playing' && !p.dead) {
       this.invOpen = !this.invOpen;
       Sfx.ui();
     }
@@ -539,7 +573,7 @@ export class Game {
     this.roomCleared = true;
     if (this.isBossRoom()) {
       // two offers on the centre platform, one pick
-      const [a, rolled] = rollPerkPair();
+      const [a, rolled] = rollPerkPair(this.player.inventory);
       // the second offer is always the Nukerang the first time it comes up
       const b = this.player.inventory.has('nukerang') ? rolled : 'nukerang';
       const group = `boss-${this.roomIndex}`;

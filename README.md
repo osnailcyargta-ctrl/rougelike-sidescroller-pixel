@@ -43,7 +43,13 @@ The repository root *is* the site. In **Settings → Pages**, choose
 | Scroll wheel / `1`-`4` | Change hotbar slot |
 | `E` | Inventory |
 | `R` | Reload the bow |
+| `Q` | Fire the grappling hook (needs the item) |
 | `Esc` | Pause |
+
+Every key in that table except the mouse, the scroll wheel and `Esc` can be
+**rebound** from Controls in the main menu — click a key, press the new one.
+Assigning a key that is already taken swaps the two, and the mapping is saved
+in `localStorage`.
 
 There is one shortcut the game never mentions: **`Ctrl+M`** opens a debug menu
 with god mode, infinite health, a spawner for every item in the game, a spawner
@@ -80,6 +86,19 @@ Nothing is announced. There are no banners, no wave-clear notifications and no
 Reference information stays available where you go looking for it: the HUD
 carries the wave and enemies-left counters, item tooltips describe their
 effects, and the Controls screen sits in the main menu.
+
+### Seeds
+
+The class-select screen has a **seed** field. Type anything and the run's rooms,
+wave composition, enemy types, spawn offsets and every drop roll replay exactly;
+leave it blank and one is rolled for you. Purely cosmetic randomness (particles,
+timing jitter) runs on its own unseeded stream, so it never desyncs a replay.
+The death screen shows the seed and offers **Retry Seed** next to **New Seed**.
+
+### Run summary
+
+Dying opens a summary panel: class, room and wave reached, kills, run time, max
+HP, the seed, and every item you were carrying (hover one for its tooltip).
 
 ### Boss rooms
 
@@ -137,6 +156,7 @@ a second.
 | Brute | Slow, heavy, occasionally charges | 20 |
 | Lurker | Circles at range, then commits to a long telegraphed lunge | 15 |
 | Spitter | Holds a stand-off and lobs acid on a high arc | 16 |
+| Shardling | Golem wreckage, from room 6. Hovers with its plate toward you, sights a line, then commits to one straight charge it cannot steer. The plate turns **75% of any frontal hit** — open it up from behind or above | 20 |
 
 ### Classes
 
@@ -178,6 +198,7 @@ Perks are items — they work while they simply sit anywhere in the inventory.
 | Wet Slime | Uncommon | Every 2s spits a homing glob that slows the target 30% for 1.5s |
 | Bloodstone | Common | Every 5th hit you land heals 3 HP (+2 per extra stack) |
 | Aegis Shard | Uncommon | +20 absorb shield that soaks damage before your HP; refills 5s after you stop taking hits |
+| Grappling Hook | Rare | `Q` fires a hook at the cursor. It bites terrain, reels you in on a rope you can swing from, and `Q` again lets go. One per run |
 
 Inventory is a 4x4 grid (16 slots); the top row doubles as the hotbar. Non-weapon
 items stack to 10, weapons don't stack. Drag items between slots with the mouse.
