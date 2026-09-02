@@ -1,23 +1,23 @@
 // Game shell: canvas setup, main loop, run/room/wave state machine.
-import { clamp, lerp, rand, randInt, dist, distToSegment, rgba, sign, setSeed, getSeed, randomSeedText } from './util.js';
+import { clamp, lerp, rand, randInt, dist, distToSegment, rgba, sign, setSeed, getSeed, randomSeedText, TAU } from './util.js';
 import { Theme, applyTheme, resetTheme, DEFAULT_THEME } from './theme.js';
 import {
   Camera, updateFx, drawParticles, drawTexts, drawRings, clearFx, burst, floatText,
-  spawnParticle, impactRing, boltPath, strokeBolt, glowDot, pxRect,
+  spawnParticle, impactRing, boltPath, strokeBolt, glowDot, pxRect, screenFlash, drawFlash,
 } from './gfx.js';
 import { Input, initInput, inputTick, inputEndFrame, Binds } from './input.js';
 import { Sfx, resumeAudio, setVolume, AudioCfg } from './audio.js';
 import { PostFX, parseShaderPack, DEFAULT_COMPOSITE } from './postfx.js';
 import {
   VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, DROP_POINT, PERK, WAVES, PLAYER as PCFG,
-  BOSS_ROOM_INTERVAL, NUKERANG, FINAL_ROOM, SHARDGUN,
+  BOSS_ROOM_INTERVAL, NUKERANG, FINAL_ROOM, SHARDGUN, ORIGAMI,
 } from './config.js';
 import { Player, Enemy, Projectile, SHARD_TINT } from './entities.js';
 import { makeBoss } from './boss.js';
 import { Cutscene } from './cutscene.js';
 import { drawBackground, drawArena, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal } from './world.js';
 import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
-import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, panel, button } from './ui.js';
+import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, panel, button } from './ui.js';
 import { drawText, drawTextShadow } from './font.js';
 import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, drawControls, drawVictory } from './screens.js';
 
@@ -69,6 +69,7 @@ export class Game {
     this.debugOpen = false;
     this.debug = { god: false, infHealth: false };
     this.timeStopT = 0;      // Alphads' held breath
+    this.fold = null;        // the origami fold wheel, open only while paused
     this.victoryT = 0;
     this.hint = null;
     this.hintT = 0;
@@ -248,6 +249,11 @@ export class Game {
     this.player.releaseGrapple(true);
     this.player.resetChains();
     if (index > 1) this.player.healPct(1);
+    // the Origamist restocks between rooms
+    if (index > 1 && this.player.classId === 'origamist') {
+      this.player.inventory.add('paper', ORIGAMI.roomPaper);
+      floatText(this.player.x, this.player.cy - 20, `+${ORIGAMI.roomPaper} PAPER`, '#efeade', { life: 1.2 });
+    }
     this.startWave(1);
   }
 
@@ -267,8 +273,9 @@ export class Game {
     Sfx.wave();
   }
 
-  onEnemyKilled() {
+  onEnemyKilled(enemy) {
     this.kills++;
+    if (enemy && !enemy.def.boss) this.rollPaperDrop(enemy);
   }
 
   // Called by a boss the moment its pool empties.
@@ -380,6 +387,7 @@ export class Game {
     Camera.add(6);
     Camera.punch(1.3);
     this.hitstop(0.045);
+    screenFlash(0.18, '#c8b4ff', 0.14);
     impactRing(x, y, { color: '#ffffff', r0: 2, r1: 42, life: 0.3, width: 3 });
     impactRing(x, y, { color: SHARD_TINT, r0: 2, r1: 66, life: 0.45, width: 2 });
     burst(x, y, 26, {
@@ -392,13 +400,152 @@ export class Game {
     });
   }
 
+  // --- origami -----------------------------------------------------------
+
+  // Attacking with paper stops the world and asks which fold you want. Only
+  // folds you own the tutor book for are on the wheel.
+  openFoldWheel() {
+    const p = this.player;
+    if (!p || this.fold) return;
+    const known = p.inventory.knownFolds();
+    if (!known.length) return;
+    const options = known.map((id) => {
+      const cfg = ORIGAMI.forms[id];
+      return { id, name: cfg.name, cost: cfg.cost };
+    });
+    this.fold = { options, sel: 0, t: 0, aim: p.aim };
+    Sfx.ui();
+  }
+
+  // Nothing moves while it is open: mouse angle picks the slice, left click or
+  // a number key commits, right click or Escape backs out.
+  updateFoldWheel(dt) {
+    const f = this.fold;
+    f.t += dt;
+    const p = this.player;
+    const n = f.options.length;
+    // both in world space, which is what Input.mouse already is
+    const dx = Input.mouse.x - p.x, dy = Input.mouse.y - (p.cy - 42);
+    if (Math.hypot(dx, dy) > 9) {
+      // slice 0 sits at the top and they run clockwise
+      let a = Math.atan2(dy, dx) + Math.PI / 2;
+      a = ((a % TAU) + TAU) % TAU;
+      const sel = Math.floor((a + Math.PI / n) / (TAU / n)) % n;
+      if (sel !== f.sel) { f.sel = sel; Sfx.ui(); }
+    }
+    for (let i = 0; i < n && i < 9; i++) {
+      if (Input.pressed.has(String(i + 1))) { f.sel = i; this.chooseFold(f.options[i].id); return; }
+    }
+    if (Input.pressed.has('Escape') || Input.mouseDown.right) { this.closeFoldWheel(); return; }
+    if (f.t > 0.12 && Input.mouseDown.left) this.chooseFold(f.options[f.sel].id);
+  }
+
+  closeFoldWheel() {
+    if (!this.fold) return;
+    this.fold = null;
+    Sfx.ui();
+  }
+
+  // Commit to a fold: spend the sheets and throw it.
+  chooseFold(id) {
+    const p = this.player;
+    const cfg = ORIGAMI.forms[id];
+    const aim = this.fold ? this.fold.aim : p.aim;
+    this.fold = null;
+    if (!cfg || !p) return;
+    if (!p.inventory.remove('paper', cfg.cost)) {
+      Sfx.ui();
+      floatText(p.x, p.cy - 14, 'NO PAPER', Theme.uiDim, { life: 0.7 });
+      return;
+    }
+    p.recomputeStats();
+    p.attackCd = ORIGAMI.cooldown;
+    p.swing = { t: 0, angle: aim, kind: 'throw' };
+    const ox = p.x + Math.cos(aim) * 9, oy = p.cy + Math.sin(aim) * 9;
+    this.projectiles.push(new Projectile({
+      x: ox, y: oy,
+      vx: Math.cos(aim) * cfg.speed, vy: Math.sin(aim) * cfg.speed,
+      damage: cfg.damage, kind: 'origami', fold: id, team: 'player',
+      life: id === 'missile' ? 6 : 14, game: this,
+    }));
+    Sfx.swing();
+    Camera.add(id === 'missile' ? 3 : 1.4);
+    // a puff of creased paper leaving the hand
+    burst(ox, oy, id === 'missile' ? 14 : 8, {
+      color: '#efeade', color2: id === 'missile' ? '#ff8a5c' : '#ffffff',
+      kind: 'streak', speedMin: 60, speedMax: 200, lifeMin: 0.08, lifeMax: 0.24,
+      gravity: 0, angle: aim, spread: 0.6, drag: 0.85,
+    });
+    impactRing(ox, oy, { color: '#efeade', r0: 1, r1: 18, life: 0.2, width: 1.2 });
+  }
+
+  // The missile going off: five blocks of paper fire.
+  paperBlast(x, y, damage) {
+    const cfg = ORIGAMI.forms.missile;
+    const r = cfg.blastRadius;
+    for (const e of this.enemies) {
+      if (e.dead || e.spawnT > 0 || e.untargetable) continue;
+      const d = dist(e.cx, e.cy, x, y);
+      if (d > r + e.radius) continue;
+      // full damage at the core, tapering to two thirds at the rim
+      const k = 1 - 0.34 * clamp(d / r, 0, 1);
+      e.damage(Math.max(1, Math.round(damage * k)), {
+        color: '#ff8a5c', crit: d < r * 0.4, knockback: 150, fromX: x, shake: 0,
+      });
+    }
+    Sfx.slam();
+    Camera.add(13);
+    Camera.punch(2.4);
+    this.hitstop(0.07);
+    screenFlash(0.34, '#ffd0a0', 0.2);
+    impactRing(x, y, { color: '#ffffff', r0: 4, r1: r * 1.1, life: 0.34, width: 4 });
+    impactRing(x, y, { color: '#ffe9a8', r0: 3, r1: r * 1.5, life: 0.5, width: 2.5 });
+    impactRing(x, y, { color: '#ff8a5c', r0: 2, r1: r * 1.9, life: 0.7, width: 2 });
+    burst(x, y, 40, {
+      color: '#ffe9a8', color2: '#ff8a5c', speedMin: 50, speedMax: 320,
+      lifeMin: 0.2, lifeMax: 0.8, sizeMax: 3, gravity: 210, drag: 0.9,
+    });
+    burst(x, y, 16, {
+      color: '#efeade', speedMin: 30, speedMax: 200, lifeMin: 0.4, lifeMax: 1.3,
+      sizeMax: 2, gravity: 300, drag: 0.92,          // shredded paper
+    });
+    burst(x, y, 14, {
+      color: '#3a3550', kind: 'smoke', speedMin: 20, speedMax: 110,
+      lifeMin: 0.5, lifeMax: 1.4, sizeMin: 2, sizeMax: 5, gravity: -50, drag: 0.9, glow: false,
+    });
+    burst(x, y, 14, {
+      color: '#ffffff', color2: '#ffe9a8', kind: 'streak', speedMin: 180, speedMax: 420,
+      lifeMin: 0.07, lifeMax: 0.2, gravity: 0, drag: 0.8,
+    });
+  }
+
+  // Paper the Origamist tears off a body. It flies to the hand on its own.
+  rollPaperDrop(enemy) {
+    const p = this.player;
+    if (!p || p.classId !== 'origamist') return;
+    if (Math.random() >= ORIGAMI.dropChance) return;
+    const n = randInt(ORIGAMI.dropMin, ORIGAMI.dropMax);
+    p.inventory.add('paper', n);
+    floatText(enemy.cx, enemy.cy - 10, `+${n} PAPER`, '#efeade', { life: 0.9 });
+    Sfx.pickup();
+    for (let i = 0; i < n * 4; i++) {
+      const a = rand(0, Math.PI * 2);
+      spawnParticle({
+        x: enemy.cx, y: enemy.cy, vx: Math.cos(a) * rand(40, 150), vy: Math.sin(a) * rand(40, 150) - 40,
+        life: rand(0.3, 0.8), size: randInt(1, 2), color: '#efeade',
+        gravity: 220, drag: 0.9, kind: 'shrink',
+      });
+    }
+    impactRing(enemy.cx, enemy.cy, { color: '#efeade', r0: 2, r1: 30, life: 0.3, width: 1.5 });
+  }
+
   // A regular enemy leaving a weapon behind: it drops where the body broke and
   // falls to whatever is under it, ready to be picked up.
   rollEnemyDrop(enemy) {
     const id = enemy.def.dropId;
     if (!id || !ITEMS[id]) return;
     if (this.player && this.player.inventory.has(id)) return;   // one is enough
-    if (Math.random() >= (SHARDGUN.dropChance ?? 0.1)) return;
+    if (Math.random() >= (enemy.def.dropChance ?? 0.1)) return;
     const pk = new Pickup(id, enemy.cx, enemy.cy, null, {
       falling: true, vx: rand(-40, 40), vy: rand(-150, -70),
     });
@@ -441,7 +588,7 @@ export class Game {
     Sfx.slam();
     Camera.add(big ? 11 : 3.5);
     Camera.punch(big ? 2.4 : 0.8);
-    if (big) this.hitstop(0.07);
+    if (big) { this.hitstop(0.07); screenFlash(0.26, '#ffc08a', 0.18); }
     impactRing(x, y, { color: '#ffffff', r0: 3, r1: radius * (big ? 1.5 : 1.2), life: big ? 0.38 : 0.24, width: big ? 3 : 2 });
     impactRing(x, y, { color: col, r0: 2, r1: radius * (big ? 2.1 : 1.5), life: big ? 0.5 : 0.32, width: big ? 2.5 : 1.5 });
     burst(x, y, big ? 34 : 14, {
@@ -580,6 +727,13 @@ export class Game {
     const p = this.player;
     if (!p) return;
 
+    // The fold wheel holds the whole world still until you pick one.
+    if (this.fold) {
+      if (p.dead || this.screen !== 'playing') { this.fold = null; return; }
+      this.updateFoldWheel(dt);
+      return;
+    }
+
     if (Input.pressed.has(Binds.inventory) && this.screen === 'playing' && !p.dead) {
       this.invOpen = !this.invOpen;
       Sfx.ui();
@@ -704,7 +858,11 @@ export class Game {
     if (this.roomIndex >= FINAL_ROOM) { this.finishRun(); return; }
     if (this.isBossRoom()) {
       // two offers on the centre platform, one pick
-      const [a, rolled] = rollPerkPair(this.player.inventory);
+      const [rolledA, rolled] = rollPerkPair(this.player.inventory);
+      // Big Dude keeps the Paper Missile tutor in the first slot, once
+      const wantsBook = this.boss && this.boss.def.id === 'bigdude' &&
+        !this.player.inventory.has('bookmissile');
+      const a = wantsBook ? 'bookmissile' : rolledA;
       // the second offer is always the Nukerang the first time it comes up
       const b = this.player.inventory.has('nukerang') ? rolled : 'nukerang';
       const group = `boss-${this.roomIndex}`;
@@ -824,8 +982,10 @@ export class Game {
     }
     ctx.restore();
 
+    drawFlash(ctx, VIEW_W, VIEW_H);
     if (!this.cutscene.active && this.screen !== 'victory') drawHUD(ctx, this);
     this.cutscene.draw(ctx);
+    if (this.fold) drawFoldWheel(ctx, this);
     if (this.invOpen) drawInventory(ctx, this);
     else if (UI.tooltip) drawTooltip(ctx, UI.tooltip);
 

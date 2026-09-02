@@ -3,7 +3,7 @@
 // test, status effect and perk works on them unchanged.
 import { clamp, lerp, rand, randInt, choice, dist, distToSegment, sign, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
-import { Camera, burst, floatText, spawnParticle, impactRing, limb, pxRect, glowDot, boltPath, strokeBolt } from './gfx.js';
+import { Camera, burst, floatText, spawnParticle, impactRing, limb, pxRect, glowDot, boltPath, strokeBolt, screenFlash } from './gfx.js';
 import { Sfx } from './audio.js';
 import { VIEW_W, VIEW_H, GRAVITY, GROUND_Y, BOSS_TYPES, ROOM_SCALING, BOSS_ROOM_INTERVAL, FINAL_ROOM } from './config.js';
 import { Enemy, Projectile } from './entities.js';
@@ -400,6 +400,46 @@ export class GolemBoss {
     Camera.add(3);
   }
 
+  // It never just stands there. Between orders it paces to keep its stand-off
+  // and pops off the floor in short hops, so the silhouette is always moving.
+  updateRestless(dt) {
+    const cfg = this.def.restless;
+    const b = this.body;
+    const p = this.game.player;
+    if (this.slamming || !p || p.dead) {
+      b.vx = lerp(b.vx, 0, 1 - Math.pow(0.002, dt));
+      return;
+    }
+    // the stand-off it wants breathes in and out, so it is never parked
+    this.pace = (this.pace ?? rand(0, TAU)) + dt * 0.85;
+    const standOff = cfg.standOff + Math.sin(this.pace) * 40 + Math.sin(this.pace * 0.37) * 16;
+    const gap = p.x - b.x;
+    const away = Math.abs(gap) - standOff;
+    // walk in when it is too far, back off when the player crowds it
+    const want = clamp(away * 2.4, -cfg.speed, cfg.speed) * sign(gap || 1);
+    b.vx = lerp(b.vx, want, 1 - Math.pow(0.004, dt));
+    b.facing = sign(gap) || b.facing;
+
+    this.hopT = (this.hopT ?? rand(cfg.hopEvery[0], cfg.hopEvery[1])) - dt;
+    if (this.hopT <= 0 && b.onGround) {
+      this.hopT = rand(cfg.hopEvery[0], cfg.hopEvery[1]);
+      b.vy = -cfg.hopVel;
+      b.onGround = false;
+      Sfx.ui();
+      Camera.add(2.5);
+      // dust kicked out from under it
+      burst(b.x, b.y, 14, {
+        color: Theme.groundEdge, color2: Theme.enemyBrute, speedMin: 30, speedMax: 130,
+        lifeMin: 0.2, lifeMax: 0.5, sizeMax: 2, gravity: 320, angle: -Math.PI / 2, spread: 1.5,
+      });
+      burst(b.x, b.y, 6, {
+        color: Theme.groundEdge, kind: 'smoke', speedMin: 14, speedMax: 60,
+        lifeMin: 0.3, lifeMax: 0.8, sizeMin: 2, sizeMax: 4, gravity: -20, glow: false,
+      });
+      impactRing(b.x, b.y, { color: Theme.groundEdge, r0: 4, r1: 34, life: 0.3, width: 1.5, squash: 0.3 });
+    }
+  }
+
   updateBodyPhysics(dt) {
     const b = this.body;
     b.vy += GRAVITY * dt;
@@ -413,6 +453,15 @@ export class GolemBoss {
       b.vy = 0;
       b.onGround = true;
       if (this.slamming && wasAir) this.landSlam();
+      else if (wasAir) {
+        // even a small hop lands with weight
+        Camera.add(3);
+        burst(b.x, b.y, 12, {
+          color: Theme.groundEdge, speedMin: 25, speedMax: 120, lifeMin: 0.15, lifeMax: 0.45,
+          sizeMax: 2, gravity: 360, angle: -Math.PI / 2, spread: 1.6,
+        });
+        impactRing(b.x, b.y, { color: Theme.groundEdge, r0: 5, r1: 44, life: 0.26, width: 2, squash: 0.28 });
+      }
     } else {
       b.onGround = false;
     }
@@ -425,6 +474,7 @@ export class GolemBoss {
     Sfx.slam();
     Camera.add(13);
     this.game.hitstop(0.08);
+    screenFlash(0.22, '#ffd0a0', 0.18);
     this.game.shockwaves.push({ x: b.x, y: b.y, t: 0, r: cfg.radius });
     burst(b.x, b.y, 40, {
       color: Theme.uiAccent, color2: Theme.enemyBrute, speedMin: 60, speedMax: 260,
@@ -478,7 +528,7 @@ export class GolemBoss {
       }
       if (this.dashT <= 0) this.body.vx = 0;
     } else {
-      this.body.vx = lerp(this.body.vx, 0, 1 - Math.pow(0.002, dt));
+      this.updateRestless(dt);
     }
     this.updateBodyPhysics(dt);
     if (this.detach) this.updateDetach(dt);

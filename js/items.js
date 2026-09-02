@@ -31,6 +31,29 @@ export const ITEMS = {
     desc: ['Thrown melee weapon. 5 block flight,', 'returns to your hand.',
            'Blasts for 14 on contact; every 3rd', 'blast detonates for 28.'],
   },
+  twindagger: {
+    id: 'twindagger', name: 'Firey Twin Dagger', rarity: 'rare', stack: 1, weapon: 'melee',
+    fiery: true,
+    desc: ['Melee. 2 block reach, 5 damage,', 'one strike every 0.3s.',
+           'Burns on every hit, no perk needed.', 'Every 15th hit throws you',
+           'forward in a burning dash (+5).'],
+  },
+  // --- Origamist ---------------------------------------------------------
+  paper: {
+    id: 'paper', name: 'Paper', rarity: 'common', stack: 100, weapon: 'paper',
+    desc: ['Ammunition and weapon both.', 'Attacking opens the fold wheel;',
+           'each fold you know costs its own', 'number of sheets.'],
+  },
+  bookairplane: {
+    id: 'bookairplane', name: 'Paper Plane Tutor', rarity: 'uncommon', stack: 1, book: 'airplane',
+    desc: ['Teaches the PAPER PLANE fold.', '1 sheet. Glides forever, sinking',
+           'slowly, and kicks off walls.', '15 damage.'],
+  },
+  bookmissile: {
+    id: 'bookmissile', name: 'Paper Missile Tutor', rarity: 'rare', stack: 1, book: 'missile',
+    desc: ['Teaches the PAPER MISSILE fold.', '2 sheets. Starts slow, builds',
+           'speed, detonates on contact for', '20 over 5 blocks.'],
+  },
   shardgun: {
     id: 'shardgun', name: 'Shardgun', rarity: 'rare', stack: 1, weapon: 'shardgun',
     desc: ['Ranged weapon. 1 shell, 1.5s reload.', 'Fires 5 shards over 5 blocks; they',
@@ -73,7 +96,8 @@ export const DROP_POOL = [
   'graplinghook',
 ];
 // Things you only ever need one of.
-const UNIQUE = new Set(['graplinghook', 'nukerang', 'shardgun']);
+const UNIQUE = new Set(['graplinghook', 'nukerang', 'shardgun', 'twindagger',
+  'bookairplane', 'bookmissile']);
 const PERK_WEIGHTS = {
   lifecrystal: 3, fireyblade: 3, bloodstone: 3,
   lightningarrow: 2, wetslime: 2, aegis: 2,
@@ -145,6 +169,32 @@ export class Inventory {
     return count;
   }
 
+  // Spend from a stack, newest slots first. Returns true only if the whole
+  // amount was there to spend.
+  remove(id, count = 1) {
+    if (this.countOf(id) < count) return false;
+    for (let i = INV_SIZE - 1; i >= 0 && count > 0; i--) {
+      const s = this.slots[i];
+      if (!s || s.id !== id) continue;
+      const take = Math.min(s.count, count);
+      s.count -= take;
+      count -= take;
+      if (s.count <= 0) this.slots[i] = null;
+    }
+    return true;
+  }
+
+  // Every fold the player has a tutor book for, in a stable order.
+  knownFolds() {
+    const found = [];
+    for (const s of this.slots) {
+      if (!s) continue;
+      const book = ITEMS[s.id]?.book;
+      if (book && !found.includes(book)) found.push(book);
+    }
+    return found;
+  }
+
   countOf(id) {
     let n = 0;
     for (const s of this.slots) if (s && s.id === id) n += s.count;
@@ -214,6 +264,51 @@ export function drawItemIcon(ctx, id, x, y, s = 12, t = 0) {
       P(7, 1, 1, 10, Theme.steelDark);
       P(4, 5, 6, 1, Theme.steel);
       break;
+    case 'twindagger': {
+      // two short blades crossed, both alight
+      for (const side of [-1, 1]) {
+        const ox = side < 0 ? 0 : 6;
+        const a = side < 0 ? 1 : -1;
+        P(ox + 1, side < 0 ? 8 : 2, 2, 2, '#7a4a2a');
+        for (let i = 0; i < 4; i++) {
+          P(ox + 1 + i * 0.9, (side < 0 ? 7 : 3) - a * i * 1.5, 2, 2, Theme.steel);
+        }
+        const fl = Math.sin(t * 9 + side) * 0.6;
+        P(ox + 4 + fl, (side < 0 ? 2 : 8) + fl, 2, 2, Theme.fire);
+        P(ox + 4 + fl, (side < 0 ? 2 : 8) + fl, 1, 1, Theme.fireHot ?? '#ffe9a8');
+      }
+      break;
+    }
+    case 'paper': {
+      // a folded sheet with a soft crease shadow
+      const lift = Math.round(Math.sin(t * 2.5) * 0.6);
+      P(2, 2 + lift, 8, 9, '#efeade');
+      P(2, 2 + lift, 8, 1, '#ffffff');
+      P(2, 10 + lift, 8, 1, '#b9b2a2');
+      P(6, 2 + lift, 1, 9, '#d7d0c0');
+      P(3, 4 + lift, 4, 1, '#b9b2a2');
+      P(3, 6 + lift, 3, 1, '#b9b2a2');
+      break;
+    }
+    case 'bookairplane':
+    case 'bookmissile': {
+      const accent = id === 'bookmissile' ? '#ff8a5c' : '#8cc8ff';
+      P(1, 2, 9, 9, '#5a4632');
+      P(1, 2, 9, 1, '#7a6044');
+      P(2, 3, 7, 7, '#efeade');
+      P(9, 2, 1, 9, '#3a2c1e');
+      const fl = Math.round(Math.sin(t * 3) * 0.5);
+      if (id === 'bookairplane') {
+        P(3, 5 + fl, 5, 1, accent);
+        P(4, 6 + fl, 3, 1, accent);
+        P(5, 4 + fl, 1, 3, accent);
+      } else {
+        P(4, 4 + fl, 2, 5, accent);
+        P(3, 8 + fl, 4, 1, '#ffd76a');
+        P(4, 3 + fl, 2, 1, '#ffffff');
+      }
+      break;
+    }
     case 'shardgun': {
       // a stubby barrel with three violet shards fanning out of the muzzle
       P(1, 6, 6, 3, Theme.steelDark);

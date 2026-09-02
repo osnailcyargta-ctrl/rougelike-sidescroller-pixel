@@ -11,6 +11,8 @@ import { AudioCfg, setVolume, Sfx } from './audio.js';
 import { randomSeedText } from './util.js';
 import { Input, Binds, BIND_ORDER, BIND_LABELS, bindLabel, setBind, resetBinds } from './input.js';
 
+const CLASS_LABEL = { melee: 'MELEE', ranger: 'RANGER', origamist: 'ORIGAMIST' };
+
 function titleGlyphs(ctx, t) {
   const title = 'AETHER';
   const sub = 'DESCENT';
@@ -214,11 +216,18 @@ export function drawClassSelect(ctx, game, t) {
       id: 'ranger', name: 'RANGER', item: 'bow', color: Theme.platformGlow,
       lines: ['HUNTER BOW', '10 BLOCK RANGE  -  5 DMG', '10 AMMO  -  2S RELOAD'],
     },
+    {
+      id: 'origamist', name: 'ORIGAMIST', item: 'paper', color: '#efeade',
+      lines: ['30 PAPER  -  PLANE TUTOR', 'ATTACK OPENS THE FOLD WHEEL',
+              'KILLS AND ROOMS RESTOCK YOU'],
+    },
   ];
-  const cw = 168, ch = 126;
+  const cw = 140, ch = 126;
+  const gap = 10;
+  const totalW = cards.length * cw + (cards.length - 1) * gap;
   for (let i = 0; i < cards.length; i++) {
     const c = cards[i];
-    const x = VIEW_W / 2 - cw - 8 + i * (cw + 16);
+    const x = Math.round((VIEW_W - totalW) / 2) + i * (cw + gap);
     const y = 50;
     const hot = UI.hovered === 'class' + c.id;
     panel(ctx, x, y, cw, ch, { accent: c.color, alpha: hot ? 0.95 : 0.8 });
@@ -233,7 +242,7 @@ export function drawClassSelect(ctx, game, t) {
     for (let k = 0; k < c.lines.length; k++) {
       drawText(ctx, c.lines[k], x + cw / 2, y + 90 + k * 10, Theme.ui, 1, 'center');
     }
-    if (button(ctx, 'class' + c.id, x + 24, y + ch + 6, cw - 48, 18, 'SELECT')) {
+    if (button(ctx, 'class' + c.id, x + 18, y + ch + 6, cw - 36, 18, 'SELECT')) {
       game.startRun(c.id);
     }
   }
@@ -275,7 +284,7 @@ export function drawGameOver(ctx, game, t) {
     const mins = Math.floor(st.time / 60);
     const secs = Math.floor(st.time % 60);
     const rows = [
-      ['CLASS', st.classId === 'melee' ? 'MELEE' : 'RANGER'],
+      ['CLASS', CLASS_LABEL[st.classId] ?? 'MELEE'],
       ['REACHED', `ROOM ${st.room}  WAVE ${st.wave}/${st.waves}`],
       ['KILLS', String(st.kills)],
       ['TIME', `${mins}:${String(secs).padStart(2, '0')}`],
@@ -376,7 +385,7 @@ export function drawVictory(ctx, game, t) {
     const mins = Math.floor(st.time / 60);
     const secs = Math.floor(st.time % 60);
     const rows = [
-      ['CLASS', st.classId === 'melee' ? 'MELEE' : 'RANGER'],
+      ['CLASS', CLASS_LABEL[st.classId] ?? 'MELEE'],
       ['CLEARED', `${FINAL_ROOM} ROOMS`],
       ['KILLS', String(st.kills)],
       ['TIME', `${mins}:${String(secs).padStart(2, '0')}`],

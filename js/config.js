@@ -84,6 +84,35 @@ export const BOW = {
 
 // Shardgun: one shell, five shards, and a second act. The shards stop dead at
 // their range, hang there, then re-form as splinters that chase the cursor.
+// Firey Twin Dagger: tiny range, tiny damage, absurd cadence. Every 15th
+// connect throws the player forward in a burning dash.
+export const TWINDAGGER = {
+  range: 2 * BLOCK, damage: 5, cooldown: 0.3, arc: 1.0,
+  dashEvery: 15, dashDamage: 5, dashSpeed: 430, dashTime: 0.16,
+  dropChance: 0.01,
+};
+
+// Origamist: paper is ammunition, and every fold is a different weapon.
+export const ORIGAMI = {
+  startPaper: 30,
+  roomPaper: 10,             // handed over on entering a new room
+  dropChance: 0.10,          // per kill, while playing the Origamist
+  dropMin: 1, dropMax: 4,
+  cooldown: 0.34,
+  forms: {
+    airplane: {
+      id: 'airplane', name: 'PAPER PLANE', book: 'bookairplane', cost: 1,
+      damage: 15, speed: 132, drop: 26,     // drop = downward drift, px/s^2
+      bounces: 3, bounceKick: 46,
+    },
+    missile: {
+      id: 'missile', name: 'PAPER MISSILE', book: 'bookmissile', cost: 2,
+      damage: 20, speed: 70, maxSpeed: 520, accel: 620,
+      blastRadius: 5 * BLOCK, blastDamage: 20,
+    },
+  },
+};
+
 export const SHARDGUN = {
   range: 5 * BLOCK, damage: 20, ammo: 1, reload: 1.5, cooldown: 0.45,
   pellets: 5, speed: 400, spread: 0.30,
@@ -138,12 +167,22 @@ export const ENEMY_TYPES = {
     id: 'lurker', name: 'Lurker', hp: 80, speed: 44, damage: 15, w: 13, h: 15,
     attackCooldown: 1.6, attackRange: 96, knockback: 140,
     windUp: 0.5, lungeSpeed: 330, lungeTime: 0.3, standOff: 74,
+    dropId: 'twindagger', dropChance: 0.01,
   },
   // Artillery: holds its ground and lobs acid over platforms.
   spitter: {
     id: 'spitter', name: 'Spitter', hp: 80, speed: 26, damage: 16, w: 16, h: 16,
     attackCooldown: 2.2, attackRange: 210, knockback: 90,
     standOff: 120, projectileSpeed: 190, windUp: 0.45,
+  },
+  // Post-golem support. It never touches you: it hangs behind the pack and
+  // pours speed into whatever is closest to you.
+  wisp: {
+    id: 'wisp', name: 'Wisp', hp: 30, speed: 96, damage: 0, w: 11, h: 11,
+    attackCooldown: 99, attackRange: 0, flying: true, ai: 'wisp',
+    noContact: true,
+    auraRange: 84, auraSpeed: 0.20, auraMax: 3,   // +20% speed to up to 3 allies
+    orbit: 96,                                    // how far behind the pack it hangs
   },
   // Golem wreckage that reassembled itself. Its front plate turns most of a
   // frontal hit, so it has to be opened up from behind or above.
@@ -152,7 +191,7 @@ export const ENEMY_TYPES = {
     attackCooldown: 2.0, attackRange: 150, flying: true, ai: 'shardling',
     standOff: 92, windUp: 0.55, chargeSpeed: 395, chargeTime: 0.34,
     frontGuard: 0.25,          // fraction of damage that gets through the plate
-    dropId: 'shardgun',        // 10% chance, at the spot where it broke
+    dropId: 'shardgun', dropChance: 0.10,   // at the spot where it broke
   },
   // The ones Alphads calls up. Same AI, same sprite, different bookkeeping:
   // only these count against the summon cap, and they leave nothing behind.
@@ -191,7 +230,7 @@ export const ENEMY_TYPES = {
 export const BOSS_TYPES = {
   golem: {
     id: 'golem', name: 'Aether Golem', short: 'Golem', kind: 'lasers',
-    hp: 600, phase2Hp: 280,
+    hp: 990, phase2Hp: 462,          // +65% over its original 600 pool
     bodyW: 48, bodyH: 60, headW: 32, headH: 27,
     contactDamage: 18,
     smallLaser: { count: 4, interval: 0.2, speed: 250, damage: 12, windUp: 0.45 },
@@ -200,6 +239,8 @@ export const BOSS_TYPES = {
     dash: { speed: 290, time: 0.55, damage: 24, windUp: 0.45 },
     headSpeed: 88, headHover: 74,
     attackDelay: 3.0,   // pause between one attack ending and the next starting
+    // It paces and hops the whole fight instead of standing there between orders.
+    restless: { speed: 46, standOff: 96, hopVel: 250, hopEvery: [0.9, 1.9] },
   },
   // The last thing in the vault. It never lands, and it never stops.
   alphads: {

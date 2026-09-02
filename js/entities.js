@@ -5,11 +5,11 @@ import {
 import { Theme } from './theme.js';
 import {
   Camera, burst, floatText, spawnParticle, impactRing, dropShadow, ribbon,
-  makeChain, stepChain, limb, pxRect, glowDot, boltPath, strokeBolt, drawBoomerang,
+  makeChain, stepChain, limb, pxRect, glowDot, boltPath, strokeBolt, drawBoomerang, screenFlash,
 } from './gfx.js';
 import { Sfx } from './audio.js';
 import {
-  VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, SHARDGUN, NUKERANG, GRAPPLE,
+  VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, SHARDGUN, TWINDAGGER, ORIGAMI, NUKERANG, GRAPPLE,
   ENEMY_TYPES, PERK, ROOM_SCALING, roomScaleSteps,
 } from './config.js';
 import { ITEMS, Inventory } from './items.js';
@@ -89,6 +89,7 @@ export const ENEMY_TINT = {
   get lurker() { return '#ff7a3c'; },
   get shardling() { return '#a98cff'; },
   get aetherShardling() { return '#a98cff'; },
+  get wisp() { return '#7bf0d8'; },
   get spitter() { return '#a8e04a'; },
   get golemBody() { return Theme.enemyBrute; },
   get golemHead() { return Theme.lightning; },
@@ -317,7 +318,10 @@ export class Enemy {
     if (this.dead) return;
 
     const p = this.game.player;
-    const slow = this.st.slowFactor;
+    // a Wisp's aura decays the instant it stops being fed
+    this.auraT = Math.max(0, (this.auraT ?? 0) - dt);
+    if (this.auraT <= 0) this.auraSpeed = 0;
+    const slow = this.st.slowFactor * (1 + (this.auraSpeed ?? 0));
     this.attackTimer -= dt;
     this.stateT += dt;
 
@@ -373,6 +377,7 @@ export class Enemy {
 
   updateFlyer(dt, p, slow) {
     if (this.ai === 'shardling') return this.updateShardling(dt, p, slow);
+    if (this.ai === 'wisp') return this.updateWisp(dt, p, slow);
     this.hover += dt * 3;
     const target = p && !p.dead ? p : null;
     if (target) {
@@ -389,6 +394,56 @@ export class Enemy {
     }
     moveAndCollide(this, dt, { ignorePlatforms: true });
     this.y = clamp(this.y, 30, GROUND_Y - 6);
+  }
+
+  // Wisp: never attacks. It hangs off the far side of the pack from you and
+  // pours speed into the allies nearest to you, so the room gets faster the
+  // longer you leave it alive.
+  updateWisp(dt, p, slow) {
+    const d = this.def;
+    this.hover += dt * 3.4;
+    this.auraLinks = [];
+
+    // find the allies closest to the player, and hide behind the pack
+    let anchorX = null, anchorY = null;
+    const buffed = [];
+    for (const e of this.game.enemies) {
+      if (e === this || e.dead || e.spawnT > 0 || e.def.ai === 'wisp') continue;
+      const gap = dist(e.cx, e.cy, this.cx, this.cy);
+      if (gap < d.auraRange) buffed.push({ e, gap });
+      if (anchorX === null && p) { anchorX = e.x; anchorY = e.y; }
+    }
+    buffed.sort((a, b) => a.gap - b.gap);
+    for (let i = 0; i < Math.min(d.auraMax, buffed.length); i++) {
+      const e = buffed[i].e;
+      e.auraSpeed = d.auraSpeed;
+      e.auraT = 0.2;                        // refreshed every frame it is in range
+      this.auraLinks.push(e);
+    }
+
+    // position: opposite the player, at orbit distance from the pack
+    const target = p && !p.dead ? p : null;
+    if (target) {
+      const px = anchorX ?? target.x;
+      const py = anchorY ?? target.y;
+      const away = sign(px - target.x) || 1;
+      const wantX = clamp(px + away * d.orbit * 0.55, 22, VIEW_W - 22);
+      const wantY = clamp(py - 54 + Math.sin(this.hover) * 9, 26, GROUND_Y - 20);
+      this.vx = lerp(this.vx, clamp((wantX - this.x) * 2.4, -d.speed, d.speed) * slow, 1 - Math.pow(0.004, dt));
+      this.vy = lerp(this.vy, clamp((wantY - this.y) * 2.4, -d.speed, d.speed) * slow, 1 - Math.pow(0.004, dt));
+      this.facing = sign(target.x - this.x) || this.facing;
+    }
+    moveAndCollide(this, dt, { ignorePlatforms: true });
+    this.y = clamp(this.y, 24, GROUND_Y - 6);
+
+    if (Math.random() < dt * 26) {
+      const a = rand(0, TAU);
+      spawnParticle({
+        x: this.cx + Math.cos(a) * 7, y: this.cy + Math.sin(a) * 7,
+        vx: Math.cos(a) * 22, vy: Math.sin(a) * 22 - 10, life: rand(0.3, 0.8),
+        size: 1, color: ENEMY_TINT.wisp, gravity: -14, drag: 0.96, kind: 'shrink',
+      });
+    }
   }
 
   // Shardling: drifts at stand-off with its plate toward you, winds up, then
@@ -663,6 +718,7 @@ export class Enemy {
     else if (this.type === 'lurker') this.drawLurker(ctx, t, flash);
     else if (this.type === 'spitter') this.drawSpitter(ctx, t, flash);
     else if (this.ai === 'shardling') this.drawShardling(ctx, t, flash);
+    else if (this.ai === 'wisp') this.drawWisp(ctx, t, flash);
     else this.drawStinger(ctx, t, flash);
     ctx.restore();
 
@@ -854,6 +910,58 @@ export class Enemy {
     }
   }
 
+  // A lantern of cold light with a slow rotating shell and a tether to every
+  // ally it is feeding.
+  drawWisp(ctx, t, flash) {
+    const c = flash ? '#ffffff' : ENEMY_TINT.wisp;
+    const x = this.cx, y = this.cy;
+    const pulse = 0.6 + 0.4 * Math.sin(t * 4);
+
+    // tethers first, under the body
+    if (this.auraLinks && this.auraLinks.length) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (const e of this.auraLinks) {
+        if (!e || e.dead) continue;
+        const g = ctx.createLinearGradient(x, y, e.cx, e.cy);
+        g.addColorStop(0, rgba(ENEMY_TINT.wisp, 0.55 * pulse));
+        g.addColorStop(1, rgba(ENEMY_TINT.wisp, 0.06));
+        ctx.strokeStyle = g;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 3]);
+        ctx.lineDashOffset = -t * 22;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(e.cx, e.cy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // a bead running down the tether
+        const k = (t * 0.8 + e.uid * 0.13) % 1;
+        pxRect(ctx, lerp(x, e.cx, k) - 1, lerp(y, e.cy, k) - 1, 2, 2, rgba('#ffffff', 0.7));
+      }
+      ctx.restore();
+    }
+
+    glowDot(ctx, x, y, 22 + pulse * 10, c, 0.4);
+    // rotating shell
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 3; i++) {
+      const a = t * (1.4 + i * 0.5) + i * 2.1;
+      const r = 7 + i;
+      ctx.strokeStyle = rgba(c, 0.35 - i * 0.07);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(x, y, r, r * 0.42, a, 0, TAU);
+      ctx.stroke();
+    }
+    ctx.restore();
+    // core
+    pxRect(ctx, x - 3, y - 3, 6, 6, c);
+    pxRect(ctx, x - 2, y - 2, 4, 4, '#ffffff');
+    pxRect(ctx, x - 1, y - 5 - pulse, 2, 2, rgba('#ffffff', 0.8));
+  }
+
   drawStinger(ctx, t, flash) {
     const c = flash ? '#ffffff' : Theme.enemyStinger;
     const d = flash ? '#ffffff' : Theme.enemyDark;
@@ -885,6 +993,8 @@ export class Projectile {
       spent: false, stuck: false, stuckT: 0, spin: 0,
       phase: 'out', owner: null, hitLog: null, wobble: 0,
       keepTop: false,        // arrow rain arcs above the screen and falls back
+      fold: null,            // origami: which fold this sheet became
+      bounces: 0, flutter: 0,
       shardPhase: null,      // shardgun: 'fly' -> 'hover' -> 'splinter' / 'fragment'
       hoverT: 0, baseDamage: 0, splinterAim: null,
     }, o);
@@ -895,6 +1005,7 @@ export class Projectile {
     this.t += dt;
     if (this.kind === 'nukerang') { this.updateNukerang(dt); return; }
     if (this.kind === 'shard') { this.updateShard(dt); return; }
+    if (this.kind === 'origami') { this.updateOrigami(dt); return; }
     if (this.t >= this.life) { this.dead = true; return; }
     if (this.homing && this.target && !this.target.dead) {
       const a = Math.atan2(this.target.cy - this.y, this.target.cx - this.x);
@@ -1028,6 +1139,98 @@ export class Projectile {
     if (this.x < -40 || this.x > VIEW_W + 40 || this.y < -40 || this.y > GROUND_Y + 20) {
       this.dead = true;
     }
+  }
+
+  // Folded paper. The plane glides and kicks off walls; the missile builds
+  // speed until it hits something and goes off.
+  updateOrigami(dt) {
+    const cfg = ORIGAMI.forms[this.fold];
+    this.flutter += dt * (this.fold === 'missile' ? 26 : 9);
+    if (this.t >= this.life) { this.expire(); return; }
+
+    if (this.fold === 'missile') {
+      const sp = Math.hypot(this.vx, this.vy) || 1;
+      const want = Math.min(cfg.maxSpeed, sp + cfg.accel * dt);
+      this.vx = (this.vx / sp) * want;
+      this.vy = (this.vy / sp) * want;
+      // thicker exhaust the faster it goes
+      const heat = clamp((want - cfg.speed) / (cfg.maxSpeed - cfg.speed), 0, 1);
+      if (Math.random() < dt * (30 + heat * 90)) {
+        spawnParticle({
+          x: this.x - (this.vx / want) * 5, y: this.y - (this.vy / want) * 5,
+          vx: -this.vx * 0.14 + rand(-20, 20), vy: -this.vy * 0.14 + rand(-20, 20),
+          life: rand(0.15, 0.5), size: randInt(1, 2),
+          color: Math.random() < 0.4 ? '#ffe9a8' : '#ff8a5c', gravity: -30, drag: 0.9,
+          kind: Math.random() < 0.4 ? 'streak' : 'shrink',
+        });
+      }
+      if (Math.random() < dt * 22) {
+        spawnParticle({
+          x: this.x, y: this.y, vx: rand(-14, 14), vy: rand(-14, 4), life: rand(0.4, 1.0),
+          size: randInt(1, 3), color: '#3a3550', gravity: -22, drag: 0.92,
+          kind: 'smoke', glow: false,
+        });
+      }
+    } else {
+      // the plane sinks, and its nose follows the sink
+      this.vy += cfg.drop * dt;
+      if (Math.random() < dt * 14) {
+        spawnParticle({
+          x: this.x, y: this.y, vx: rand(-10, 10), vy: rand(-6, 10), life: rand(0.2, 0.5),
+          size: 1, color: '#efeade', gravity: 12, drag: 0.96, kind: 'shrink',
+        });
+      }
+    }
+
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    this.angle = Math.atan2(this.vy, this.vx);
+    this.pushTrail();
+
+    // walls: the plane kicks off them, the missile detonates on them
+    const left = 3, right = VIEW_W - 3;
+    if (this.x < left || this.x > right) {
+      if (this.fold === 'missile') { this.detonate(); return; }
+      this.x = clamp(this.x, left, right);
+      this.vx = -this.vx;
+      this.vy -= ORIGAMI.forms.airplane.bounceKick;    // a little lift off the kick
+      this.bounces++;
+      Sfx.ui();
+      impactRing(this.x, this.y, { color: '#efeade', r0: 2, r1: 22, life: 0.25, width: 1.5 });
+      burst(this.x, this.y, 10, {
+        color: '#efeade', color2: '#ffffff', speedMin: 40, speedMax: 150,
+        lifeMin: 0.12, lifeMax: 0.35, gravity: 90, drag: 0.88, kind: 'streak',
+      });
+      if (this.bounces > cfg.bounces) { this.expire(); return; }
+    }
+
+    // ground and platforms end a plane, and set a missile off
+    const surface = surfaceBelow(this.x, this.y);
+    if (this.y >= surface || this.y > GROUND_Y) {
+      this.y = Math.min(this.y, surface);
+      if (this.fold === 'missile') this.detonate();
+      else this.crumple();
+      return;
+    }
+    if (this.y < -30) { this.dead = true; }
+  }
+
+  // A plane that runs out of sky: it crumples and falls apart.
+  crumple() {
+    if (this.dead) return;
+    this.dead = true;
+    Sfx.ui();
+    burst(this.x, this.y, 14, {
+      color: '#efeade', color2: '#b9b2a2', speedMin: 20, speedMax: 120,
+      lifeMin: 0.3, lifeMax: 0.9, sizeMax: 2, gravity: 320, drag: 0.9,
+    });
+    impactRing(this.x, this.y, { color: '#efeade', r0: 1, r1: 18, life: 0.24, width: 1.2, squash: 0.4 });
+  }
+
+  detonate() {
+    if (this.dead) return;
+    this.dead = true;
+    if (this.game) this.game.paperBlast(this.x, this.y, this.damage);
   }
 
   pushTrail() {
@@ -1194,6 +1397,7 @@ export class Projectile {
       this.vy += Math.sin(a) * 40;
       return;
     }
+    if (this.kind === 'origami' && this.fold === 'missile') { this.detonate(); return; }
     this.dead = true;
     if (this.team === 'player') {
       if (this.kind === 'slime') {
@@ -1231,6 +1435,44 @@ export class Projectile {
       pxRect(ctx, -7, -2, 14, 4, rgba(Theme.lightning, 0.35));
       pxRect(ctx, -6, -1, 12, 2, Theme.lightning);
       pxRect(ctx, -2, -1, 6, 2, '#ffffff');
+    } else if (this.kind === 'origami') {
+      const plane = this.fold === 'airplane';
+      // trail
+      for (let i = 0; i < this.trail.length; i++) {
+        const k = i / this.trail.length;
+        pxRect(ctx, this.trail[i][0] - 1, this.trail[i][1] - 1, 2, 2,
+               rgba(plane ? '#efeade' : '#ff8a5c', k * 0.4 * Theme.trail));
+      }
+      if (!plane) {
+        glowDot(ctx, this.x, this.y, 16, '#ff8a5c', 0.45);
+        glowDot(ctx, this.x, this.y, 7, '#ffe9a8', 0.6);
+      } else {
+        glowDot(ctx, this.x, this.y, 9, '#ffffff', 0.16);
+      }
+      ctx.translate(Math.round(this.x), Math.round(this.y));
+      // planes bank as they glide; missiles just shudder
+      ctx.rotate(this.angle + (plane ? Math.sin(this.flutter) * 0.10 : Math.sin(this.flutter) * 0.05));
+      if (plane) {
+        // a dart seen from the side: two folded wings and a keel
+        ctx.fillStyle = '#efeade';
+        ctx.beginPath();
+        ctx.moveTo(7, 0); ctx.lineTo(-6, -4); ctx.lineTo(-3, 0); ctx.lineTo(-6, 4);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#c9c2b2';
+        ctx.beginPath();
+        ctx.moveTo(7, 0); ctx.lineTo(-6, 4); ctx.lineTo(-3, 0);
+        ctx.closePath(); ctx.fill();
+        pxRect(ctx, -3, -1, 10, 1, '#ffffff');
+      } else {
+        pxRect(ctx, -5, -2, 11, 4, '#efeade');
+        pxRect(ctx, -5, -2, 11, 1, '#ffffff');
+        pxRect(ctx, 5, -1, 3, 2, '#ff8a5c');
+        pxRect(ctx, -6, -4, 3, 3, '#d7d0c0');
+        pxRect(ctx, -6, 1, 3, 3, '#d7d0c0');
+        ctx.globalCompositeOperation = 'lighter';
+        pxRect(ctx, -12, -1, 7, 2, rgba('#ff8a5c', 0.7));
+        pxRect(ctx, -9, -1, 4, 2, rgba('#ffe9a8', 0.9));
+      }
     } else if (this.kind === 'shard') {
       const frag = this.shardPhase === 'fragment';
       const hover = this.shardPhase === 'hover';
@@ -1352,6 +1594,8 @@ export class Player {
     this.ammo = BOW.ammo;
     this.reloadT = 0;
     this.lastGunId = null;
+    this.daggerHits = 0;
+    this.emberDash = 0;
     this.slimeT = PERK.slimeInterval;
     this.chainCd = 0;
     this.shield = 0;
@@ -1378,7 +1622,13 @@ export class Player {
     this.landSquash = 0;
     this.hurtFlash = 0;
     this.inventory = new Inventory();
-    this.inventory.add(classId === 'melee' ? 'sword' : 'bow', 1);
+    if (classId === 'origamist') {
+      // paper is the weapon; the book is the manual it is folded from
+      this.inventory.add('paper', ORIGAMI.startPaper);
+      this.inventory.add('bookairplane', 1);
+    } else {
+      this.inventory.add(classId === 'melee' ? 'sword' : 'bow', 1);
+    }
     this.recomputeStats();
     this.hp = this.maxHp;
   }
@@ -1533,6 +1783,19 @@ export class Player {
     if (c) {
       if (c.keys.has(Binds.left)) move -= 1;
       if (c.keys.has(Binds.right)) move += 1;
+    }
+    if (this.emberDash > 0) {
+      // the dagger dash burns as it goes, and scorches what it passes
+      this.emberDash -= dt;
+      if (Math.random() < dt * 140) {
+        spawnParticle({
+          x: this.x + rand(-6, 6), y: this.cy + rand(-9, 9),
+          vx: rand(-40, 40) - this.dashDir * 60, vy: rand(-70, -10),
+          life: rand(0.2, 0.6), size: randInt(1, 2),
+          color: Math.random() < 0.5 ? Theme.fireHot : Theme.fire,
+          gravity: -90, drag: 0.92, kind: Math.random() < 0.5 ? 'streak' : 'shrink',
+        });
+      }
     }
     if (this.dashT > 0) {
       this.dashT -= dt;
@@ -2079,8 +2342,18 @@ export class Player {
       return;
     }
     if (weapon.weapon === 'melee') {
-      this.attackCd = SWORD.cooldown;
-      this.doSwing(SWORD.range, SWORD.damage, SWORD.arc);
+      if (weapon.id === 'twindagger') {
+        this.attackCd = TWINDAGGER.cooldown;
+        this.daggerAlt = !this.daggerAlt;
+        this.doSwing(TWINDAGGER.range, TWINDAGGER.damage, TWINDAGGER.arc,
+                     { fiery: true, countHits: true });
+      } else {
+        this.attackCd = SWORD.cooldown;
+        this.doSwing(SWORD.range, SWORD.damage, SWORD.arc);
+      }
+    } else if (weapon.weapon === 'paper') {
+      // paper never fires directly: it opens the fold wheel and waits
+      this.game.openFoldWheel();
     } else if (weapon.weapon === 'bow') {
       if (this.reloadT > 0) return;
       if (this.ammo <= 0) { this.startReload(); return; }
@@ -2148,11 +2421,13 @@ export class Player {
     if (this.ammo <= 0) this.startReload();
   }
 
-  doSwing(range, damage, arc) {
+  doSwing(range, damage, arc, opts = {}) {
     const a = this.aim;
     this.swing = { t: 0, angle: a, kind: 'melee', range, arc };
     Sfx.swing();
-    const fiery = this.inventory.has('fireyblade');
+    // some blades carry the burn themselves and never miss the roll
+    const alwaysFiery = !!opts.fiery;
+    const fiery = alwaysFiery || this.inventory.has('fireyblade');
     let hits = 0;
     for (const e of this.game.enemies) {
       if (e.dead || e.spawnT > 0 || e.untargetable) continue;
@@ -2162,7 +2437,7 @@ export class Player {
       if (Math.abs(shortAngle(a, ang)) > arc) continue;
       hits++;
       this.registerHit();
-      const burned = fiery && Math.random() < PERK.burnChance;
+      const burned = fiery && (alwaysFiery || Math.random() < PERK.burnChance);
       e.damage(damage, {
         knockback: 130, fromX: this.x, angle: ang, spread: 0.8,
         color: burned ? Theme.fire : '#ffffff', shake: 3,
@@ -2175,6 +2450,43 @@ export class Player {
     if (hits > 0) {
       this.game.hitstop(0.045);
       Camera.add(3);
+      if (opts.countHits) this.onDaggerHits(hits);
+    }
+    return hits;
+  }
+
+  // Firey Twin Dagger: fifteen connects and it throws you forward, burning.
+  onDaggerHits(n) {
+    this.daggerHits = (this.daggerHits ?? 0) + n;
+    if (this.daggerHits < TWINDAGGER.dashEvery) return;
+    this.daggerHits -= TWINDAGGER.dashEvery;
+    const a = this.aim;
+    const dir = Math.cos(a) >= 0 ? 1 : -1;
+    this.facing = dir;
+    this.vx = Math.cos(a) * TWINDAGGER.dashSpeed;
+    this.vy = Math.min(this.vy, Math.sin(a) * TWINDAGGER.dashSpeed * 0.45);
+    this.dashT = Math.max(this.dashT, TWINDAGGER.dashTime);
+    this.invuln = Math.max(this.invuln, TWINDAGGER.dashTime);
+    this.emberDash = 0.34;
+    Sfx.dash();
+    Camera.add(8);
+    Camera.punch(1.6);
+    this.game.hitstop(0.05);
+    screenFlash(0.22, '#ffb060', 0.16);
+    impactRing(this.x, this.cy, { color: Theme.fireHot, r0: 3, r1: 54, life: 0.36, width: 3 });
+    impactRing(this.x, this.cy, { color: Theme.fire, r0: 2, r1: 86, life: 0.5, width: 2 });
+    burst(this.x, this.cy, 30, {
+      color: Theme.fireHot, color2: Theme.fire, kind: 'streak', speedMin: 120, speedMax: 380,
+      lifeMin: 0.08, lifeMax: 0.26, gravity: 0, angle: a + Math.PI, spread: 0.8, drag: 0.84,
+    });
+    // and it carves everything it passes through
+    for (const e of this.game.enemies) {
+      if (e.dead || e.spawnT > 0 || e.untargetable) continue;
+      if (dist(this.x, this.cy, e.cx, e.cy) > TWINDAGGER.range + e.radius + 18) continue;
+      e.damage(TWINDAGGER.dashDamage, {
+        knockback: 90, fromX: this.x, angle: a, spread: 0.9, color: Theme.fire, shake: 2, crit: true,
+      });
+      if (!e.dead) e.applyBurn();
     }
   }
 
@@ -2429,6 +2741,48 @@ export class Player {
       limb(ctx, x, shoulderY, a, 7, 3, Theme.skin);
       return;
     }
+    if (w.weapon === 'paper') {
+      // a sheet held ready, creasing between the fingers
+      const a = this.aim;
+      const th = sw && sw.kind === 'throw' ? clamp(1 - sw.t / 0.22, 0, 1) : 0;
+      const reach = 7 + th * 4;
+      const hx = x + Math.cos(a) * reach, hy = shoulderY + Math.sin(a) * reach;
+      limb(ctx, x, shoulderY, a, reach, 3, Theme.skin);
+      ctx.save();
+      ctx.translate(Math.round(hx), Math.round(hy));
+      ctx.rotate(a + Math.sin(this.anim * 3) * 0.12 - th * 0.6);
+      pxRect(ctx, -1, -4, 6, 8, '#efeade');
+      pxRect(ctx, -1, -4, 6, 1, '#ffffff');
+      pxRect(ctx, 2, -4, 1, 8, '#c9c2b2');
+      if (th > 0) glowDot(ctx, 4, 0, 10 * th, '#ffffff', 0.4 * th);
+      ctx.restore();
+      return;
+    }
+
+    if (w.id === 'twindagger') {
+      // two short blades, both alight, alternating on the swing
+      const a = this.aim;
+      const p0 = sw && sw.kind === 'melee' ? clamp(sw.t / TWINDAGGER.cooldown, 0, 1) : 1;
+      const swingA = a + (1 - p0) * (this.daggerAlt ? 1 : -1) * 0.9;
+      for (const [ang, len, lead] of [[swingA, 10, true], [a - (swingA - a) * 0.6, 8, false]]) {
+        const gx = x + Math.cos(ang) * 6, gy = shoulderY + Math.sin(ang) * 6;
+        limb(ctx, x, shoulderY, ang, 6, 3, Theme.skin);
+        limb(ctx, gx, gy, ang, 3, 3, '#7a4a2a');
+        limb(ctx, gx + Math.cos(ang) * 3, gy + Math.sin(ang) * 3, ang, len, 2, Theme.steel, 1.4);
+        const tx = gx + Math.cos(ang) * (3 + len), ty = gy + Math.sin(ang) * (3 + len);
+        glowDot(ctx, tx, ty, lead ? 11 : 8, Theme.fire, 0.5);
+        glowDot(ctx, tx, ty, 4, Theme.fireHot, 0.7);
+        if (Math.random() < 0.4) {
+          spawnParticle({
+            x: tx, y: ty, vx: rand(-16, 16), vy: rand(-40, -8), life: rand(0.15, 0.45),
+            size: 1, color: Math.random() < 0.5 ? Theme.fireHot : Theme.fire,
+            gravity: -60, drag: 0.94, kind: 'shrink',
+          });
+        }
+      }
+      return;
+    }
+
     if (w.weapon === 'shardgun') {
       const a = this.aim;
       const kick = sw && sw.kind === 'bow' ? clamp(1 - sw.t / 0.22, 0, 1) : 0;

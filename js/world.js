@@ -453,6 +453,7 @@ export function buildWave(roomIndex, waveIndex) {
   if (roomIndex >= 3) pool.push('lurker');
   if (roomIndex >= 4) pool.push('spitter');
   if (roomIndex >= 6) pool.push('shardling');   // golem wreckage, post room 5
+  if (roomIndex >= 6) pool.push('wisp');        // and its lamplighter
   const base = 3 + Math.floor((roomIndex - 1) / 2);
   const early = EARLY_WAVE_COUNTS[roomIndex];
   const count = early ? early[waveIndex - 1] : clamp(base + (waveIndex === 2 ? 2 : 0), 3, 9);
@@ -464,6 +465,10 @@ export function buildWave(roomIndex, waveIndex) {
   for (let i = 0; i < count; i++) {
     let type = i === 0 && roomIndex === 1 && waveIndex === 1 ? 'grunt' : schoice(pool);
     if (roomIndex >= 2 && waveIndex === 2 && i === count - 1) type = 'brute';
+    // a Wisp with nothing to feed is just a free kill, so never lead with one
+    if (type === 'wisp' && (i === 0 || list.filter((e) => e.type === 'wisp').length >= 1)) {
+      type = schoice(pool.filter((id) => id !== 'wisp'));
+    }
     const p = spawns[i % spawns.length];
     list.push({ type, x: p.x + srand(-14, 14), y: p.y, delay: i * 0.45 });
   }

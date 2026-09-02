@@ -3,7 +3,7 @@
 import { clamp, lerp, rand, randInt, choice, dist, distToSegment, shortAngle, sign, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
 import {
-  Camera, burst, floatText, spawnParticle, impactRing, limb, pxRect, glowDot, ribbon,
+  Camera, burst, floatText, spawnParticle, impactRing, limb, pxRect, glowDot, ribbon, screenFlash,
 } from './gfx.js';
 import { Sfx } from './audio.js';
 import { VIEW_W, VIEW_H, GROUND_Y, BLOCK, BOSS_TYPES, ROOM_SCALING, ENEMY_TYPES } from './config.js';
@@ -143,6 +143,7 @@ export class AlphadsBoss {
     this.game.endTimeStop();
     Camera.add(18);
     this.game.hitstop(0.26);
+    screenFlash(0.8, '#ffffff', 0.6);
     Sfx.die();
     burst(this.x, this.y, 60, {
       color: TINT.wing, color2: TINT.gold, speedMin: 40, speedMax: 300,
@@ -329,6 +330,7 @@ export class AlphadsBoss {
     Camera.add(13);
     Camera.punch(1.8);
     this.game.hitstop(0.05);
+    screenFlash(0.30, '#ffe9a8', 0.22);
     // the whole sky lights up as the volley leaves
     impactRing(o.x, o.y, { color: '#ffffff', r0: 4, r1: 150, life: 0.45, width: 4 });
     impactRing(o.x, o.y, { color: TINT.gold, r0: 4, r1: 240, life: 0.75, width: 2.5 });
@@ -423,6 +425,7 @@ export class AlphadsBoss {
       Camera.add(16);
       Camera.punch(3.2);
       this.game.hitstop(0.12);
+      screenFlash(0.55, '#ffffff', 0.28);
       this.sweep = 0;                       // the clock hand that sweeps the room
       // three rings leaving the god, then the whole room stops
       impactRing(this.x, this.y, { color: '#ffffff', r0: 8, r1: 300, life: 0.7, width: 5 });
@@ -554,6 +557,7 @@ export class AlphadsBoss {
     Camera.add(11);
     Camera.punch(2.0);
     this.game.hitstop(0.05);
+    screenFlash(0.34, '#fff6d8', 0.2);
     impactRing(b.ox, b.oy, { color: '#ffffff', r0: 3, r1: 120, life: 0.35, width: 4 });
     impactRing(b.ox, b.oy, { color: TINT.gold, r0: 3, r1: 190, life: 0.6, width: 2.5 });
     burst(b.ox, b.oy, 24, {

@@ -108,7 +108,11 @@ two, and holds its drop back for it. Wave 3 spawns a boss in the centre of the
 arena. When it dies, **two perks** appear on the centre platform and you may
 take **one** — the moment you claim one the other greys out for good.
 
-**Aether Golem** (600 HP, +40% per boss room). Two phases sharing one pool:
+**Aether Golem** (990 HP, +40% per boss room). It never stands still: between
+orders it paces in and out of a stand-off that breathes with it, and pops off
+the floor in short hops that kick up dust and land with weight.
+
+Two phases sharing one pool:
 
 It is a large target — a 48x60 body with a 32x27 head — and it waits **3
 seconds between attacks**, so its openings are readable.
@@ -116,7 +120,7 @@ seconds between attacks**, so its openings are readable.
 * *Phase 1* — head fused to the body. Loops: four small lasers 0.2s apart → one
   heavy beam that tracks your position with a 0.3s delay for 2s → a high jump
   into a ground slam.
-* *Phase 2* (at 280 HP) — the head tears free over a second and a half: it
+* *Phase 2* (at 462 HP) — the head tears free over a second and a half: it
   strains and sinks in the socket, snaps loose in a burst of arcs, then climbs
   with an eased overshoot while a bolt still tethers it to the body. From then
   on it never parks — it sweeps, bobs and banks continuously, stalking you
@@ -187,6 +191,7 @@ column of light. Any key skips after half a second.
 | Brute | Slow, heavy, occasionally charges | 20 |
 | Lurker | Circles at range, then commits to a long telegraphed lunge | 15 |
 | Spitter | Holds a stand-off and lobs acid on a high arc | 16 |
+| Wisp | Post-golem, from room 6. **It never attacks you.** It hangs behind the pack on the far side and feeds **+20% speed to the three allies nearest you**, tethered by a visible thread. 30 HP — kill it first or the whole room gets faster | 0 |
 | Shardling | Golem wreckage, from room 6. Hovers with its plate toward you, sights a line, then commits to one straight charge it cannot steer. The plate turns **75% of any frontal hit** — open it up from behind or above | 10 |
 
 ### Classes
@@ -195,6 +200,7 @@ column of light. Any key skips after half a second.
 | --- | --- | --- |
 | Melee | Iron Sword | 3-block reach, 10 damage, 0.45s swing |
 | Ranger | Hunter Bow | 10-block range, 5 damage, 10 ammo, 2s reload, 0.4s between shots |
+| Origamist | 30 Paper + Paper Plane Tutor | Paper is the ammunition; folds are the weapons |
 
 At the end of its 10 blocks an arrow does not blink out: it loses its drive with
 a small puff, hitches upward, then tumbles down under gravity and plants itself
@@ -203,6 +209,29 @@ damage, so the bow's reach stays exactly 10 blocks.
 
 Player HP is 100. Regular enemies have 80 HP and deal 10–20 damage depending on
 type (Ghoul 12, Stinger 10 ranged, Brute 20).
+
+### Origamist
+
+The Origamist starts with **30 sheets of paper** and the **Paper Plane Tutor**.
+Paper is both weapon and ammunition, stacking to 100.
+
+Attacking with paper selected does not fire anything: **the world stops** and a
+fold wheel opens over your head. Every fold you own the tutor book for is a
+slice on it — move the mouse to pick, left click or press its number to commit,
+right click or Escape to back out. Committing spends that fold's sheets and
+throws it; nothing in the room moves until you decide.
+
+| Fold | Book | Sheets | Behaviour |
+| --- | --- | --- | --- |
+| Paper Plane | starting kit | 1 | Glides forever, sinking slowly as it goes. **15 damage.** It kicks off side walls (up to 3 times, gaining a little lift each time) and only dies when it meets the ground or a platform, where it crumples |
+| Paper Missile | Big Dude's first offer | 2 | Leaves the hand slow and keeps building speed to a scream. Detonates on anything it touches for **20 over 5 blocks**, tapering to two thirds at the rim |
+
+Paper comes back to you two ways: every enemy you kill has a **10% chance to
+shed 1–4 sheets**, collected automatically with no need to pick them up, and
+**every new room hands you 10 more** on arrival.
+
+The **Paper Missile Tutor** is held in the first slot of Big Dude's drop pair,
+once — the same rule the Nukerang follows on the other side.
 
 ### Nukerang
 
@@ -230,6 +259,7 @@ Perks are items — they work while they simply sit anywhere in the inventory.
 | Bloodstone | Common | Every 5th hit you land heals 3 HP (+2 per extra stack) |
 | Aegis Shard | Uncommon | +20 absorb shield that soaks damage before your HP; refills 5s after you stop taking hits |
 | Shardgun | Rare | Ranged. **1 shell, 1.5s reload, 20 damage.** Each shot throws 5 shards over 5 blocks; they stop dead at that range, hang there **0.87s**, then re-form as splinters that streak at your **cursor** for **50%** damage with no range limit. Two splinters that meet burst into **8 fragments** at **75%** of base — so where you point when they let go is where the room detonates. Drops from a **Shardling, 10% of the time**, falling from where it broke. One per run |
+| Firey Twin Dagger | Rare | Melee. **2-block reach, 5 damage, one strike every 0.3s** — the fastest weapon in the game. It carries **Fiery Blade built in and never rolls for it**: every connect burns. Every **15th hit** throws you forward in a burning dash that carves everything it passes for **+5** and leaves you briefly untouchable. Drops from a **Lurker, 1% of the time**. One per run |
 | Grappling Hook | Rare | `Q` fires a hook at the cursor. It bites terrain, reels you in on a rope you can swing from, and `Q` again lets go. Past its 11-block reach the hook **falls under gravity and keeps biting** on the way down, so a lobbed shot still catches. One per run |
 
 Inventory is a 4x4 grid (16 slots); the top row doubles as the hotbar. Non-weapon

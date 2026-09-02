@@ -3,7 +3,7 @@
 import { clamp, lerp, rand, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
 import { drawText, drawTextShadow, textWidth } from './font.js';
-import { pxRect, glowDot } from './gfx.js';
+import { pxRect, glowDot, Camera } from './gfx.js';
 import { VIEW_W, VIEW_H, BOW, SHARDGUN, PLAYER, ENEMY_TYPES, BOSS_TYPES } from './config.js';
 import { ENEMY_TINT } from './entities.js';
 import { ITEMS, RARITY, INV_COLS, INV_ROWS, INV_SIZE, HOTBAR_SIZE, drawItemIcon } from './items.js';
@@ -128,7 +128,9 @@ export function drawHUD(ctx, game) {
   panel(ctx, 6, 6, bw + 10, 22, { alpha: 0.55 });
   // name what is in your hand, not the class you picked at the start
   const held = p.inventory.selectedWeapon();
-  drawText(ctx, held ? held.name.toUpperCase() : 'UNARMED', 11, 9, Theme.uiDim, 1);
+  // long weapon names have to give way to the HP readout on the right
+  const heldName = (held ? held.name.toUpperCase() : 'UNARMED').slice(0, 17);
+  drawText(ctx, heldName, 11, 9, Theme.uiDim, 1);
   const hpFrac = clamp(p.hp / p.maxHp, 0, 1);
   pxRect(ctx, 11, 18, bw, 5, Theme.hpBack);
   const grad = ctx.createLinearGradient(11, 0, 11 + bw, 0);
@@ -222,6 +224,15 @@ function drawHotbar(ctx, game) {
   }
   // ammo / reload for the bow
   const w = p.inventory.selectedWeapon();
+  if (w && w.weapon === 'paper') {
+    const ax = x0 + total + 8;
+    const have = p.inventory.countOf('paper');
+    drawTextShadow(ctx, String(have), ax, y + 4, have > 0 ? '#efeade' : Theme.hp, 2);
+    const lift = Math.sin(UI.t * 2.5) * 0.6;
+    pxRect(ctx, ax + 22, y + 3 + lift, 7, 9, '#efeade');
+    pxRect(ctx, ax + 22, y + 3 + lift, 7, 1, '#ffffff');
+    pxRect(ctx, ax + 25, y + 3 + lift, 1, 9, '#c9c2b2');
+  }
   const gun = w && (w.weapon === 'bow' ? BOW : w.weapon === 'shardgun' ? SHARDGUN : null);
   if (gun) {
     const ax = x0 + total + 8;
@@ -240,6 +251,89 @@ function drawHotbar(ctx, game) {
         pxRect(ctx, ax + (i % 5) * 5, y + 3 + Math.floor(i / 5) * 7, 2, 5, i < p.ammo ? Theme.steel : rgba(Theme.uiDim, 0.35));
       }
     }
+  }
+}
+
+// The fold wheel: a ring of the folds you know, hanging over the player while
+// the world holds its breath.
+export function drawFoldWheel(ctx, game) {
+  const f = game.fold;
+  const p = game.player;
+  if (!f || !p) return;
+  const t = UI.t;
+  const pop = clamp(f.t * 7, 0, 1);
+  const ease = 1 - Math.pow(1 - pop, 3);
+  // the wheel is drawn in screen space, so it stays put while the camera drifts
+  const scr = Camera.project(p.x, p.cy - 42);
+  const cx = Math.round(scr.x), cy = Math.round(clamp(scr.y, 46, VIEW_H - 60));
+  const R = 30 * ease;
+  const n = f.options.length;
+
+  // the world dims and everything but the wheel falls back
+  ctx.save();
+  ctx.fillStyle = rgba('#05060c', 0.42 * ease);
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+  ctx.globalCompositeOperation = 'lighter';
+  glowDot(ctx, cx, cy, 56 * ease, '#efeade', 0.16 * ease);
+  // a slowly turning paper ring
+  for (let i = 0; i < 3; i++) {
+    ctx.strokeStyle = rgba('#efeade', (0.22 - i * 0.06) * ease);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, R + i * 5 + Math.sin(t * 2 + i) * 1.5, (R + i * 5) * 0.96, t * (0.3 + i * 0.2), 0, TAU);
+    ctx.stroke();
+  }
+  // creases radiating out between the slices
+  for (let i = 0; i < n; i++) {
+    const a = -Math.PI / 2 + ((i + 0.5) / n) * TAU;
+    ctx.strokeStyle = rgba('#efeade', 0.18 * ease);
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * 10, cy + Math.sin(a) * 10);
+    ctx.lineTo(cx + Math.cos(a) * (R + 14), cy + Math.sin(a) * (R + 14));
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  const have = p.inventory.countOf('paper');
+  for (let i = 0; i < n; i++) {
+    const o = f.options[i];
+    const a = -Math.PI / 2 + (i / n) * TAU;
+    const sel = i === f.sel;
+    const rr = R + (sel ? 5 : 0);
+    const ox = cx + Math.cos(a) * rr;
+    const oy = cy + Math.sin(a) * rr;
+    const afford = have >= o.cost;
+    const col = !afford ? Theme.uiDim : sel ? '#ffe9a8' : '#efeade';
+    if (sel) glowDot(ctx, ox, oy, 22, col, 0.45);
+    ctx.save();
+    ctx.globalAlpha = ease * (afford ? 1 : 0.5);
+    ctx.fillStyle = rgba('#000000', 0.6);
+    ctx.fillRect(ox - 9, oy - 9, 18, 18);
+    ctx.strokeStyle = rgba(col, sel ? 1 : 0.6);
+    ctx.strokeRect(ox - 8.5, oy - 8.5, 17, 17);
+    ctx.save();
+    ctx.translate(ox, oy);
+    const sc = sel ? 1.25 + Math.sin(t * 6) * 0.06 : 1;
+    ctx.scale(sc, sc);
+    drawItemIcon(ctx, o.id === 'missile' ? 'bookmissile' : 'bookairplane', -6, -6, 12, t);
+    ctx.restore();
+    // cost, and the number key that picks it
+    drawText(ctx, String(o.cost), ox + 8, oy + 4, afford ? col : Theme.hp, 1, 'right');
+    drawText(ctx, String(i + 1), ox - 8, oy - 8, rgba(Theme.uiDim, 0.9), 1);
+    ctx.restore();
+  }
+
+  // the name of what is under the cursor, and what you are spending
+  const cur = f.options[f.sel];
+  if (cur) {
+    ctx.save();
+    ctx.globalAlpha = ease;
+    drawTextShadow(ctx, cur.name, cx, cy - R - 26, '#ffe9a8', 1, 'center');
+    const afford = have >= cur.cost;
+    drawText(ctx, `${cur.cost} / ${have} SHEETS`, cx, cy + R + 20,
+             afford ? Theme.ui : Theme.hp, 1, 'center');
+    ctx.restore();
   }
 }
 

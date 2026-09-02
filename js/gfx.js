@@ -45,6 +45,14 @@ export const Camera = {
       y: (y - this.oy - this.cy) / z + this.cy,
     };
   },
+  // world -> screen, the exact inverse of unproject
+  project(x, y) {
+    const z = this.zoom;
+    return {
+      x: (x - this.cx) * z + this.cx + this.ox,
+      y: (y - this.cy) * z + this.cy + this.oy,
+    };
+  },
   setCinematic(zoom, cx, cy) { this.cine = { zoom, cx, cy }; },
   clearCinematic() { this.cine = null; this.cx = 240; this.cy = 135; },
   reset() { this.shake = 0; this.ox = this.oy = 0; this.zoom = 1; this.zoomVel = 0; this.cine = null; },
@@ -107,6 +115,7 @@ export function floatText(x, y, text, color, opts = {}) {
 }
 
 export function updateFx(dt) {
+  updateFlash(dt);
   for (let i = rings.length - 1; i >= 0; i--) {
     rings[i].t += dt;
     if (rings[i].t >= rings[i].life) rings.splice(i, 1);
@@ -132,7 +141,42 @@ export function updateFx(dt) {
   }
 }
 
-export function clearFx() { particles.length = 0; texts.length = 0; rings.length = 0; }
+// A brief full-screen wash, additive, for the handful of moments that deserve
+// to bleach the frame. Colours accumulate; the alpha decays on its own curve.
+export const Flash = { a: 0, r: 1, g: 1, b: 1, life: 0.001, t: 0 };
+
+export function screenFlash(alpha, color = '#ffffff', life = 0.18) {
+  const c = String(color).replace('#', '');
+  const r = parseInt(c.slice(0, 2), 16) / 255;
+  const g = parseInt(c.slice(2, 4), 16) / 255;
+  const b = parseInt(c.slice(4, 6), 16) / 255;
+  if (alpha < Flash.a * (1 - Flash.t / Flash.life)) return;   // never step on a bigger one
+  Flash.a = alpha;
+  Flash.r = r; Flash.g = g; Flash.b = b;
+  Flash.life = Math.max(0.02, life);
+  Flash.t = 0;
+}
+
+export function updateFlash(dt) {
+  if (Flash.a <= 0) return;
+  Flash.t += dt;
+  if (Flash.t >= Flash.life) { Flash.a = 0; Flash.t = 0; }
+}
+
+export function drawFlash(ctx, w, h) {
+  if (Flash.a <= 0) return;
+  const k = 1 - Flash.t / Flash.life;
+  const a = Flash.a * k * k;
+  if (a <= 0.002) return;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const R = Math.round(Flash.r * 255), G = Math.round(Flash.g * 255), B = Math.round(Flash.b * 255);
+  ctx.fillStyle = `rgba(${R},${G},${B},${a})`;
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+}
+
+export function clearFx() { particles.length = 0; texts.length = 0; rings.length = 0; Flash.a = 0; Flash.t = 0; }
 
 export function drawRings(ctx) {
   ctx.save();
