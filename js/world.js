@@ -63,10 +63,14 @@ function buildTowers(roomIndex) {
   towerRoom = roomIndex;
 }
 
-export function updateWorld(dt) {
+// `frozen` holds the platforms still while the game is paused - an inventory,
+// the fold wheel, the forge, the pause menu. Ambience keeps drifting, because
+// nothing rides on it.
+export function updateWorld(dt, frozen = false) {
   // drifting platforms: record dx so riders can be carried with them
   for (const p of PLATFORMS) {
     if (!p.drift) continue;
+    if (frozen) { p.dx = 0; continue; }
     const d = p.drift;
     const before = p.x;
     p.x += d.speed * d.dir * dt;
@@ -465,40 +469,100 @@ export class Anvil {
     this.y = platform.y;
     this.t = 0;
     this.spark = 0;
+    this.near = 0;                 // eased: is the player close enough to use it
   }
-  update(dt) {
+
+  update(dt, player) {
     this.t += dt;
     // ride the platform exactly, however it drifts
     this.x = this.platform.x + this.platform.w / 2;
     this.y = this.platform.y;
+    const inReach = player && !player.dead &&
+      Math.hypot(player.x - this.x, player.cy - (this.y - 8)) < ANVIL.reach;
+    this.near += ((inReach ? 1 : 0) - this.near) * Math.min(1, dt * 8);
+
+    // it is always working: embers off the hot face, and sparks when struck
+    if (Math.random() < dt * 26) {
+      spawnParticle({
+        x: this.x + rand(-9, 9), y: this.y - 15,
+        vx: rand(-12, 12), vy: rand(-34, -10), life: rand(0.5, 1.4),
+        size: 1, color: Math.random() < 0.35 ? '#fff0a0' : '#ff8a3c',
+        gravity: -18, drag: 0.97, kind: 'shrink',
+      });
+    }
     this.spark -= dt;
     if (this.spark <= 0) {
-      this.spark = rand(0.5, 1.8);
-      for (let i = 0; i < 3; i++) {
+      this.spark = rand(0.7, 2.0);
+      for (let i = 0; i < 8; i++) {
         spawnParticle({
-          x: this.x + rand(-6, 6), y: this.y - 12, vx: rand(-40, 40), vy: rand(-70, -20),
-          life: rand(0.3, 0.7), size: 1, color: i ? '#ffb43c' : '#fff0a0',
-          gravity: 260, drag: 0.92, kind: 'streak',
+          x: this.x + rand(-7, 7), y: this.y - 16,
+          vx: rand(-90, 90), vy: rand(-130, -40), life: rand(0.25, 0.6),
+          size: 1, color: i % 3 === 0 ? '#ffffff' : '#ffb43c',
+          gravity: 420, drag: 0.92, kind: 'streak',
         });
       }
     }
   }
+
   draw(ctx) {
     const bob = Math.sin(this.t * 1.6) * 0.6;
-    const y = this.y - 14 + bob;
-    glowDot(ctx, this.x, y + 8, 20, '#ffb43c', 0.14 + 0.05 * Math.sin(this.t * 3));
-    // the block: a wide face on a narrow waist on a base
-    pxRect(ctx, this.x - 10, y, 20, 5, '#6b7484');
-    pxRect(ctx, this.x - 10, y, 20, 1, '#aeb8c9');
-    pxRect(ctx, this.x - 4, y + 5, 8, 4, '#535b69');
-    pxRect(ctx, this.x - 8, y + 9, 16, 4, '#4a5262');
-    pxRect(ctx, this.x - 8, y + 12, 16, 1, '#2c3140');
-    // the horn
-    pxRect(ctx, this.x - 14, y + 1, 4, 3, '#6b7484');
-    pxRect(ctx, this.x - 14, y + 1, 4, 1, '#aeb8c9');
-    // heat still in the face
-    const heat = 0.35 + 0.25 * Math.sin(this.t * 2.4);
-    pxRect(ctx, this.x - 8, y + 1, 16, 1, rgba('#ffb43c', heat));
+    const y = Math.round(this.y - 20 + bob);
+    const x = Math.round(this.x);
+    const pulse = 0.6 + 0.4 * Math.sin(this.t * 2.6);
+
+    // the light it throws: a column above and a pool on the platform
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const col = ctx.createLinearGradient(0, y - 26, 0, this.y + 4);
+    col.addColorStop(0, rgba('#ff8a3c', 0));
+    col.addColorStop(1, rgba('#ff8a3c', 0.20 + pulse * 0.08));
+    ctx.fillStyle = col;
+    ctx.fillRect(x - 20, y - 26, 40, 34);
+    ctx.restore();
+    glowDot(ctx, x, y + 12, 34 + pulse * 6, '#ff8a3c', 0.26);
+    glowDot(ctx, x, y + 6, 16, '#fff0a0', 0.22 * pulse);
+
+    // the block. Wide face, waist, splayed base, and a horn on the left
+    pxRect(ctx, x - 15, y + 15, 30, 3, rgba('#000000', 0.45));        // contact shadow
+    pxRect(ctx, x - 11, y + 12, 22, 5, '#3d4452');                     // base
+    pxRect(ctx, x - 11, y + 12, 22, 1, '#5b6473');
+    pxRect(ctx, x - 5, y + 6, 10, 6, '#525a69');                       // waist
+    pxRect(ctx, x - 14, y, 28, 7, '#6b7484');                          // face
+    pxRect(ctx, x - 14, y, 28, 2, '#aeb8c9');                          // top light
+    pxRect(ctx, x - 14, y + 6, 28, 1, '#2c3140');
+    // horn
+    pxRect(ctx, x - 20, y + 1, 6, 4, '#6b7484');
+    pxRect(ctx, x - 20, y + 1, 6, 1, '#aeb8c9');
+    pxRect(ctx, x - 21, y + 2, 1, 2, '#8d97a8');
+    // the heat still in the metal, and a hammer resting on it
+    pxRect(ctx, x - 12, y + 1, 24, 1, rgba('#ffb43c', 0.4 + pulse * 0.4));
+    pxRect(ctx, x + 2, y - 4, 8, 4, '#5b6473');
+    pxRect(ctx, x + 2, y - 4, 8, 1, '#aeb8c9');
+    pxRect(ctx, x - 4, y - 3, 7, 2, '#7a4a2a');
+
+    // an ingot glowing on the face
+    const hot = 0.5 + 0.5 * Math.sin(this.t * 4);
+    pxRect(ctx, x - 10, y - 1, 7, 2, '#ff8a3c');
+    pxRect(ctx, x - 9, y - 1, 5, 1, rgba('#fff0a0', hot));
+
+    // in reach: a ring and a prompt-free chevron, so it reads as usable
+    if (this.near > 0.02) {
+      ctx.save();
+      ctx.globalAlpha = this.near;
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = rgba('#ffb43c', 0.5 + 0.4 * Math.sin(this.t * 7));
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(x, y + 8, 24, 16, 0, 0, TAU);
+      ctx.stroke();
+      const cy = y - 12 - Math.sin(this.t * 5) * 1.5;
+      ctx.fillStyle = rgba('#ffd76a', 0.9);
+      ctx.beginPath();
+      ctx.moveTo(x, cy + 4); ctx.lineTo(x - 4, cy - 2); ctx.lineTo(x + 4, cy - 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
   }
 }
 

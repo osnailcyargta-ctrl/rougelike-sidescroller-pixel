@@ -60,6 +60,16 @@ export function groundLevelAt(x) {
 }
 
 // Nearest surface at or below y - where an entity's shadow belongs.
+// The drifting platform a point is standing on or lodged in, or null. Anything
+// that wants to be carried asks for this once and keeps the reference.
+export function platformAt(x, y, tol = 2) {
+  for (const p of PLATFORMS) {
+    if (!p.drift) continue;
+    if (x >= p.x - tol && x <= p.x + p.w + tol && y >= p.y - tol && y <= p.y + p.h + tol) return p;
+  }
+  return null;
+}
+
 export function surfaceBelow(x, y) {
   let best = GROUND_Y;
   for (const p of PLATFORMS) {
@@ -1090,7 +1100,7 @@ export class Projectile {
       x: 0, y: 0, vx: 0, vy: 0, damage: 5, team: 'player', kind: 'arrow',
       life: 2, t: 0, dead: false, traveled: 0, maxDist: Infinity, gravity: 0,
       mark: false, slow: false, homing: 0, target: null, trail: [],
-      spent: false, stuck: false, stuckT: 0, spin: 0,
+      spent: false, stuck: false, stuckT: 0, stuckTo: null, spin: 0,
       phase: 'out', owner: null, hitLog: null, wobble: 0,
       keepTop: false,        // arrow rain arcs above the screen and falls back
       fold: null,            // origami: which fold this sheet became
@@ -1136,6 +1146,8 @@ export class Projectile {
       if (this.y >= surface) {
         this.y = surface;
         this.stuck = true;
+        // remember what it landed in, so a drifting platform carries it
+        this.stuckTo = platformAt(this.x, this.y);
         this.vx = this.vy = 0;
         this.trail.length = 0;
         burst(this.x, this.y, 5, {
@@ -2148,6 +2160,8 @@ export class Player {
           g.x = bite.x;
           g.y = bite.y;
           g.state = 'attached';
+          // if it bit a drifting platform, the anchor travels with it
+          g.anchor = platformAt(g.x, g.y, 3);
           g.len = Math.max(GRAPPLE.minLength, dist(this.x, this.cy, g.x, g.y));
           Sfx.hit();
           Camera.add(2);

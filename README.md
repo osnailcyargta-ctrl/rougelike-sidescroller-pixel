@@ -308,7 +308,9 @@ receive (a hit always leaves at least 1), and carries a buff. Wearing all three
 pieces of one set adds a set bonus on top.
 
 Every **second room** puts an **anvil on the drifting platform** — it rides the
-platform as it slides. Right-click it to open the forge. Nothing there is
+platform as it slides, throwing light and embers so you can spot it from the
+floor, and it rings and lifts a chevron once you are standing close enough to
+use it. Right-click it to open the forge. Nothing there is
 timed; the world stops while it is open.
 
 | Recipe | Cost | Effect |

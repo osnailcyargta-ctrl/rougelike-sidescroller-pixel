@@ -11,7 +11,7 @@ import { PostFX, parseShaderPack, DEFAULT_COMPOSITE } from './postfx.js';
 import {
   VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, DROP_POINT, PERK, WAVES, PLAYER as PCFG,
   BOSS_ROOM_INTERVAL, NUKERANG, FINAL_ROOM, SHARDGUN, TWINDAGGER, SWORD, BOW, ORIGAMI,
-  ARMOR, PAPER_SHIELD, ANVIL,
+  ARMOR, PAPER_SHIELD, ANVIL, GRAPPLE,
 } from './config.js';
 import { Player, Enemy, Projectile, SHARD_TINT, INK, doodleShape, doodleLine } from './entities.js';
 import { makeBoss } from './boss.js';
@@ -939,11 +939,11 @@ export class Game {
     try {
       this.handleGlobalKeys();
       if (this.debugOpen) {
-        updateWorld(dt);
+        updateWorld(dt, true);
       } else if (this.screen === 'playing' || this.screen === 'gameover') {
         this.update(gdt);
       } else {
-        updateWorld(dt);
+        updateWorld(dt, true);
       }
 
       updateFx(this.screen === 'playing' || this.screen === 'gameover' ? gdt : dt);
@@ -982,8 +982,14 @@ export class Game {
     }
   }
 
+  // Anything that stops the world: a menu, a popup, the god's held breath.
+  get worldFrozen() {
+    return this.screen !== 'playing' || this.invOpen || !!this.fold || !!this.forge
+      || this.debugOpen || this.timeStopT > 0;
+  }
+
   update(dt) {
-    updateWorld(dt);
+    updateWorld(dt, this.worldFrozen);
     if (this.screen === 'playing' && !this.cutscene.active) this.runTime += dt;
 
     if (this.cutscene.active) {
@@ -1091,7 +1097,7 @@ export class Game {
 
     if (!frozen) this.updatePaperShields(dt);
     for (const pk of this.pickups) pk.update(dt);
-    if (this.anvil) this.anvil.update(dt);
+    if (this.anvil) this.anvil.update(dt, this.player);
     if (this.portal) this.portal.update(dt);
 
     for (let i = this.shockwaves.length - 1; i >= 0; i--) {
@@ -1105,12 +1111,23 @@ export class Game {
     }
   }
 
-  // Anything standing on a drifting platform moves with it.
+  // Anything riding a drifting platform moves with it: bodies standing on top,
+  // arrows lodged in it, and a grappling hook biting into it.
   carryRiders() {
     for (const e of [this.player, ...this.enemies]) {
       if (!e || e.dead) continue;
       const p = e.platform;
       if (p && p.dx) e.x = clamp(e.x + p.dx, e.w / 2, VIEW_W - e.w / 2);
+    }
+    for (const pr of this.projectiles) {
+      if (pr.dead || !pr.stuck || !pr.stuckTo || !pr.stuckTo.dx) continue;
+      pr.x += pr.stuckTo.dx;
+    }
+    const g = this.player?.grapple;
+    if (g && g.state === 'attached' && g.anchor && g.anchor.dx) {
+      g.x += g.anchor.dx;
+      // the rope has to keep up, or the swing snaps against a stale length
+      g.len = Math.max(GRAPPLE.minLength, dist(this.player.x, this.player.cy, g.x, g.y));
     }
   }
 
