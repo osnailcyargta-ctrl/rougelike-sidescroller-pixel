@@ -19,6 +19,7 @@ export const UI = {
   tooltip: null,
   t: 0,
   dt: 0,
+  dbgScroll: { items: 0, mobs: 0 },
   fps: 0,
   tab: 'indicator',        // which settings tab is showing
 };
@@ -687,44 +688,90 @@ const DEBUG_ITEMS = Object.keys(ITEMS);
 const DEBUG_MOBS = Object.keys(ENEMY_TYPES).filter((k) => !ENEMY_TYPES[k].boss);
 const DEBUG_BOSSES = Object.keys(BOSS_TYPES);
 
+// Three rows of anything, and a wheel to see the rest. The lists grow every
+// time something is added to the game, so the panel is sized to a fixed number
+// of rows rather than to the content - nothing ever spills out of the card.
+const DEBUG_ROWS = 3;
+
+// Scroll a grid under the cursor and draw its bar. Returns the first row to
+// draw, so the caller just offsets by it.
+function gridScroll(key, gx, gy, gw, gh, rows, visible) {
+  const max = Math.max(0, rows - visible);
+  if (max === 0) { UI.dbgScroll[key] = 0; return 0; }
+  const over = inside(gx, gy, gw, gh);
+  if (over && Input.wheel !== 0) {
+    UI.dbgScroll[key] = clamp((UI.dbgScroll[key] ?? 0) + Math.sign(Input.wheel), 0, max);
+    Sfx.ui();
+  }
+  return clamp(UI.dbgScroll[key] ?? 0, 0, max);
+}
+
+function scrollBar(ctx, x, y, h, rows, visible, off) {
+  const max = Math.max(0, rows - visible);
+  if (max === 0) return;
+  pxRect(ctx, x, y, 2, h, rgba('#000000', 0.6));
+  const knob = Math.max(6, Math.round(h * (visible / rows)));
+  const ky = Math.round(y + (h - knob) * (off / max));
+  pxRect(ctx, x, ky, 2, knob, Theme.uiAccent);
+  // little arrows so it is obvious there is more
+  if (off > 0) pxRect(ctx, x - 1, y - 3, 4, 1, rgba(Theme.uiAccent, 0.8));
+  if (off < max) pxRect(ctx, x - 1, y + h + 2, 4, 1, rgba(Theme.uiAccent, 0.8));
+}
+
 export function drawDebugMenu(ctx, game) {
   ctx.fillStyle = rgba('#000000', 0.55);
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
 
-  const w = 268, h = 226;
+  // six wider columns: bigger targets, and the list actually scrolls
+  const cell = 28, gap = 3, cols = 6;
+  const bw2 = 54, bh2 = 14, bgap = 3, bcols = 4;
+  const itemsH = DEBUG_ROWS * (cell + gap) - gap;
+  const mobsH = DEBUG_ROWS * (bh2 + bgap) - bgap;
+
+  const w = 268;
+  const h = 60 + itemsH + 26 + mobsH + 24;
   const x = Math.round((VIEW_W - w) / 2);
   const y = Math.round((VIEW_H - h) / 2);
   panel(ctx, x, y, w, h, { accent: '#8ce88c' });
-  drawTextShadow(ctx, 'DEBUG', x + w / 2, y + 7, '#8ce88c', 2, 'center');
+  drawTextShadow(ctx, 'DEBUG', x + w / 2, y + 6, '#8ce88c', 2, 'center');
 
   const d = game.debug;
-  if (button(ctx, 'dbg-god', x + 12, y + 30, 116, 16, `GOD MODE: ${d.god ? 'ON' : 'OFF'}`, { selected: d.god })) {
+  if (button(ctx, 'dbg-god', x + 12, y + 24, 116, 15, `GOD MODE: ${d.god ? 'ON' : 'OFF'}`, { selected: d.god })) {
     d.god = !d.god;
   }
-  if (button(ctx, 'dbg-inf', x + 140, y + 30, 116, 16, `INF HEALTH: ${d.infHealth ? 'ON' : 'OFF'}`, { selected: d.infHealth })) {
+  if (button(ctx, 'dbg-inf', x + 140, y + 24, 116, 15, `INF HEALTH: ${d.infHealth ? 'ON' : 'OFF'}`, { selected: d.infHealth })) {
     d.infHealth = !d.infHealth;
   }
 
   const live = !!game.player && game.screen !== 'menu' && game.screen !== 'classSelect';
-  drawText(ctx, 'SPAWN ITEM', x + 12, y + 54, live ? Theme.uiAccent : Theme.uiDim, 1);
-  if (!live) drawText(ctx, '(START A RUN FIRST)', x + 88, y + 54, Theme.uiDim, 1);
 
-  const cell = 26, gap = 4, cols = 8;
-  const rows = Math.ceil(DEBUG_ITEMS.length / cols);
-  const gx = x + 12, gy = y + 66;
+  // --- items, three rows at a time
+  const itemRows = Math.ceil(DEBUG_ITEMS.length / cols);
+  const gx = x + 12, gy = y + 54;
+  const gw = cols * (cell + gap) - gap;
+  drawText(ctx, 'SPAWN ITEM', gx, y + 44, live ? Theme.uiAccent : Theme.uiDim, 1);
+  if (!live) drawText(ctx, '(START A RUN FIRST)', gx + 76, y + 44, Theme.uiDim, 1);
+  const iOff = gridScroll('items', gx, gy, gw + 10, itemsH, itemRows, DEBUG_ROWS);
+  scrollBar(ctx, gx + gw + 7, gy, itemsH, itemRows, DEBUG_ROWS, iOff);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(gx - 1, gy - 1, gw + 2, itemsH + 2);
+  ctx.clip();
   for (let i = 0; i < DEBUG_ITEMS.length; i++) {
+    const row = Math.floor(i / cols) - iOff;
+    if (row < 0 || row >= DEBUG_ROWS) continue;
     const id = DEBUG_ITEMS[i];
     const cx = gx + (i % cols) * (cell + gap);
-    const cy = gy + Math.floor(i / cols) * (cell + gap);
-    const hot = live && Input.mouse.x >= cx && Input.mouse.x < cx + cell &&
-      Input.mouse.y >= cy && Input.mouse.y < cy + cell;
+    const cy = gy + row * (cell + gap);
+    const hot = live && inside(cx, cy, cell, cell);
     ctx.fillStyle = rgba('#000000', hot ? 0.25 : 0.5);
     ctx.fillRect(cx, cy, cell, cell);
     ctx.strokeStyle = hot ? Theme.uiAccent : rgba(Theme.uiDim, live ? 0.8 : 0.35);
     ctx.strokeRect(cx + 0.5, cy + 0.5, cell - 1, cell - 1);
     ctx.save();
     if (!live) ctx.globalAlpha = 0.35;
-    drawItemIcon(ctx, id, cx + (cell - 14) / 2, cy + (cell - 14) / 2, 14, UI.t);
+    drawItemIcon(ctx, id, cx + (cell - 18) / 2, cy + (cell - 18) / 2, 18, UI.t);
     ctx.restore();
     if (hot) {
       // parked under the panel so it never covers the buttons
@@ -736,22 +783,41 @@ export function drawDebugMenu(ctx, game) {
       }
     }
   }
+  ctx.restore();
 
-  const rowsBottom = gy + rows * (cell + gap);
-  drawText(ctx, 'CLICK AN ICON TO ADD ONE', x + 12, rowsBottom + 2, Theme.uiDim, 1);
-
-  // --- mobs and bosses, four to a row
-  drawText(ctx, 'SPAWN MOB', x + 12, rowsBottom + 16, live ? Theme.uiAccent : Theme.uiDim, 1);
+  // --- mobs and bosses, same treatment
+  // two enemies can share a display name (the room's Shardling and the one
+  // Alphads summons), so fall back to the id when the label is ambiguous
+  const nameCount = {};
+  for (const id of DEBUG_MOBS) {
+    const n = ENEMY_TYPES[id].name.toUpperCase();
+    nameCount[n] = (nameCount[n] ?? 0) + 1;
+  }
   const entries = [
-    ...DEBUG_MOBS.map((id) => ({ id, boss: false, label: ENEMY_TYPES[id].name.toUpperCase() })),
+    ...DEBUG_MOBS.map((id) => {
+      const n = ENEMY_TYPES[id].name.toUpperCase();
+      return { id, boss: false, label: nameCount[n] > 1 ? id.toUpperCase().slice(0, 9) : n };
+    }),
     ...DEBUG_BOSSES.map((id) => ({ id, boss: true, label: (BOSS_TYPES[id].short ?? BOSS_TYPES[id].name).toUpperCase() })),
   ];
-  const bw2 = 58, bh2 = 15, bgap = 3, bcols = 4;
-  const by0 = rowsBottom + 28;
+  const mobRows = Math.ceil(entries.length / bcols);
+  const by0 = gy + itemsH + 20;
+  const mw = bcols * (bw2 + bgap) - bgap;
+  drawText(ctx, 'SPAWN MOB', gx, by0 - 10, live ? Theme.uiAccent : Theme.uiDim, 1);
+  drawText(ctx, 'WHEEL TO SCROLL', x + w - 12, by0 - 10, rgba(Theme.uiDim, 0.9), 1, 'right');
+  const mOff = gridScroll('mobs', gx, by0, mw + 10, mobsH, mobRows, DEBUG_ROWS);
+  scrollBar(ctx, gx + mw + 7, by0, mobsH, mobRows, DEBUG_ROWS, mOff);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(gx - 1, by0 - 1, mw + 2, mobsH + 2);
+  ctx.clip();
   for (let i = 0; i < entries.length; i++) {
+    const row = Math.floor(i / bcols) - mOff;
+    if (row < 0 || row >= DEBUG_ROWS) continue;
     const e = entries[i];
-    const bx = x + 12 + (i % bcols) * (bw2 + bgap);
-    const by = by0 + Math.floor(i / bcols) * (bh2 + bgap);
+    const bx = gx + (i % bcols) * (bw2 + bgap);
+    const by = by0 + row * (bh2 + bgap);
     const tint = e.boss ? Theme.uiAccent : (ENEMY_TINT[e.id] ?? Theme.ui);
     if (button(ctx, 'dbg-mob-' + e.id, bx, by, bw2, bh2, e.label, { disabled: !live, accent: tint })) {
       if (e.boss) game.debugSpawnBoss(e.id);
@@ -759,18 +825,20 @@ export function drawDebugMenu(ctx, game) {
     }
     if (live) pxRect(ctx, bx + 1, by + 1, 2, bh2 - 2, tint);
   }
-  const mobsBottom = by0 + Math.ceil(entries.length / bcols) * (bh2 + bgap);
+  ctx.restore();
 
-  if (live && button(ctx, 'dbg-heal', x + 12, mobsBottom + 4, 78, 16, 'FULL HEAL')) {
+  // --- the row of actions, always inside the panel
+  const ay = y + h - 20;
+  if (live && button(ctx, 'dbg-heal', x + 12, ay, 74, 15, 'FULL HEAL')) {
     game.player.hp = game.player.maxHp;
     game.player.shield = game.player.shieldMax;
   }
-  if (live && button(ctx, 'dbg-kill', x + 96, mobsBottom + 4, 78, 16, 'KILL WAVE')) {
+  if (live && button(ctx, 'dbg-kill', x + 92, ay, 74, 15, 'KILL WAVE')) {
     game.pendingSpawns.length = 0;
     for (const e of [...game.enemies]) if (!e.dead) e.kill();
   }
-  if (button(ctx, 'dbg-close', x + w - 84, mobsBottom + 4, 72, 16, 'CLOSE')) game.debugOpen = false;
+  if (button(ctx, 'dbg-close', x + w - 84, ay, 72, 15, 'CLOSE')) game.debugOpen = false;
 
-  drawTextShadow(ctx, 'CTRL+M', x + w - 8, y + 7, Theme.uiDim, 1, 'right');
+  drawTextShadow(ctx, 'CTRL+M', x + w - 8, y + 6, Theme.uiDim, 1, 'right');
   if (UI.tooltip) drawTooltip(ctx, UI.tooltip);
 }
