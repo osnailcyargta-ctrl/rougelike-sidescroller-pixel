@@ -242,7 +242,7 @@ column of light. Any key skips after half a second.
 | --- | --- | --- |
 | Melee | Iron Sword | 3-block reach, 10 damage, 0.45s swing |
 | Ranger | Hunter Bow | 10-block range, 5 damage, 10 ammo, 2s reload, 0.4s between shots |
-| Origamist | 30 Paper + Paper Plane Tutor | Paper is the ammunition; folds are the weapons |
+| Origamist | 100 Paper + Paper Plane Tutor | **50 HP.** Paper is the ammunition; folds are the weapons |
 
 At the end of its 10 blocks an arrow does not blink out: it loses its drive with
 a small puff, hitches upward, then tumbles down under gravity and plants itself
@@ -254,8 +254,14 @@ type (Ghoul 12, Stinger 10 ranged, Brute 20).
 
 ### Origamist
 
-The Origamist starts with **100 sheets of paper** and the **Paper Plane Tutor**.
-Paper is both weapon and ammunition, stacking to 100 per slot.
+The Origamist has **50 HP** — half of everyone else — and starts with **100
+sheets of paper** and the **Paper Plane Tutor**. Paper is both weapon and
+ammunition, and you can carry **250 sheets at most**; anything past that is
+simply never handed over.
+
+Everything the Origamist throws is drawn in **two colours only, ink and paper**,
+with shaky hand-drawn outlines that re-jitter about twelve times a second, so it
+reads as a doodle moving rather than a sprite sliding.
 
 Attacking with paper selected does not fire anything: **the world stops** and a
 fold carousel opens over your head. Every fold you own the tutor book for is a
@@ -266,12 +272,14 @@ spends that fold's sheets; nothing in the room moves until you decide.
 
 | Fold | Book | Sheets | Behaviour |
 | --- | --- | --- | --- |
-| Paper Plane | starting kit | 1 | Glides forever, sinking slowly as it goes. **30 damage.** It kicks off side walls (up to 3 times, gaining a little lift each time) and only dies when it meets the ground or a platform, where it crumples |
-| Paper Missile | Big Dude's first offer | 2 | Leaves the hand slow and keeps building speed to a scream. Detonates on anything it touches for **40 over 5 blocks**, tapering to two thirds at the rim |
+| Paper Plane | starting kit | 1 | 0.45s between throws. Glides forever, sinking slowly as it goes. **30 damage.** It kicks off side walls (up to 3 times, gaining a little lift each time) and only dies when it meets the ground or a platform, where it crumples |
+| Paper Missile | Big Dude's first offer | 2 | 0.9s between throws. Leaves the hand slow and keeps building speed to a scream. Detonates on anything it touches for **40 over 5 blocks**, tapering to two thirds at the rim |
 
 Paper comes back to you two ways: every enemy you kill has a **10% chance to
 shed 1–4 sheets**, collected automatically with no need to pick them up, and
-**every new room hands you 50 more** on arrival, plus **20 for every wave you clear**.
+**every new room hands you 50 more** on arrival, plus **20 for every wave you
+clear** — all of it capped at 250. Folds have their own cooldown and the wheel
+will not open while one is running, whichever class is holding the paper.
 
 The **Paper Missile Tutor** is held in the first slot of Big Dude's drop pair,
 once. Playing as the Origamist it also replaces the Nukerang in the *second*
@@ -310,6 +318,28 @@ Perks are items — they work while they simply sit anywhere in the inventory.
 
 Inventory is a 4x4 grid (16 slots); the top row doubles as the hotbar. Non-weapon
 items stack to 10, weapons don't stack. Drag items between slots with the mouse.
+
+## Settings
+
+**Settings** is three tabs, and everything in it is written to `localStorage`
+the moment you change it — options, sliders and the loaded shader pack all come
+back on the next boot.
+
+**Indicators** are readouts and nothing else; none of them change the fight.
+FPS, weapon range ring, enemy HP numbers, boss HP numbers, damage numbers,
+enemy HP bars, the wave counter, the aim reticle, the attack cooldown ring over
+your head, and the boss enrage timer.
+
+**Visuals** are sliders: bloom, scanlines, vignette, chromatic split,
+saturation, film grain, halation, screen shake, flash strength, particle
+density, trails, light shafts, animation speed and volume. The shader loader
+lives here too, with a palette strip showing what the active pack has done to
+the colours, and a DEFAULTS button that puts every slider back.
+
+**Controls** is the key rebinder.
+
+A shader pack sets the *baseline* the visual sliders ride on, so loading a pack
+and then tuning bloom does what you would expect rather than fighting it.
 
 ## Shader packs
 

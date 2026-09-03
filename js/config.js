@@ -82,8 +82,6 @@ export const BOW = {
   range: 10 * BLOCK, damage: 5, ammo: 10, reload: 2.0, cooldown: 0.4, speed: 340,
 };
 
-// Shardgun: one shell, five shards, and a second act. The shards stop dead at
-// their range, hang there, then re-form as splinters that chase the cursor.
 // Firey Twin Dagger: tiny range, tiny damage, absurd cadence. Every 15th
 // connect throws the player forward in a burning dash.
 export const TWINDAGGER = {
@@ -94,26 +92,32 @@ export const TWINDAGGER = {
 
 // Origamist: paper is ammunition, and every fold is a different weapon.
 export const ORIGAMI = {
+  maxHp: 50,                 // the Origamist is made of paper too
   startPaper: 100,
   roomPaper: 50,             // handed over on entering a new room
   wavePaper: 20,             // and after every wave you clear
+  maxPaper: 250,             // anything past this is simply never handed over
   dropChance: 0.10,          // per kill, while playing the Origamist
   dropMin: 1, dropMax: 4,
-  cooldown: 0.34,
+  cooldown: 0.55,            // between folds, whoever is throwing them
   forms: {
     airplane: {
       id: 'airplane', name: 'PAPER PLANE', book: 'bookairplane', cost: 1,
+      cooldown: 0.45,
       damage: 30, speed: 132, drop: 26,     // drop = downward drift, px/s^2
       bounces: 3, bounceKick: 46,
     },
     missile: {
       id: 'missile', name: 'PAPER MISSILE', book: 'bookmissile', cost: 2,
+      cooldown: 0.9,
       damage: 40, speed: 70, maxSpeed: 520, accel: 620,
       blastRadius: 5 * BLOCK, blastDamage: 40,
     },
   },
 };
 
+// Shardgun: one shell, five shards, and a second act. The shards stop dead at
+// their range, hang there, then re-form as splinters that chase the cursor.
 export const SHARDGUN = {
   range: 5 * BLOCK, damage: 20, ammo: 1, reload: 1.5, cooldown: 0.45,
   pellets: 5, speed: 400, spread: 0.30,

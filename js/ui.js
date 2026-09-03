@@ -6,6 +6,7 @@ import { drawText, drawTextShadow, textWidth } from './font.js';
 import { pxRect, glowDot, Camera } from './gfx.js';
 import { VIEW_W, VIEW_H, BOW, SHARDGUN, PLAYER, ENEMY_TYPES, BOSS_TYPES } from './config.js';
 import { ENEMY_TINT } from './entities.js';
+import { Options } from './settings.js';
 import { ITEMS, RARITY, INV_COLS, INV_ROWS, INV_SIZE, HOTBAR_SIZE, drawItemIcon } from './items.js';
 import { Input, Binds, BIND_ORDER, BIND_LABELS, bindLabel } from './input.js';
 import { Sfx } from './audio.js';
@@ -17,9 +18,15 @@ export const UI = {
   drag: null,          // { from, item }
   tooltip: null,
   t: 0,
+  dt: 0,
+  fps: 0,
+  tab: 'indicator',        // which settings tab is showing
 };
 
 export function uiBeginFrame(dt) {
+  // a smoothed frame rate, so the readout does not flicker every frame
+  if (dt > 0) UI.fps = UI.fps ? lerp(UI.fps, 1 / dt, 0.08) : 1 / dt;
+  UI.dt = dt;
   UI.t += dt;
   UI.hovered = null;
   UI.tooltip = null;
@@ -46,28 +53,96 @@ export function panel(ctx, x, y, w, h, opts = {}) {
   pxRect(ctx, x + w - 3, y + h - 1, 3, 1, c); pxRect(ctx, x + w - 1, y + h - 3, 1, 3, c);
 }
 
+// Hover state is eased per button rather than snapped, so the whole front end
+// feels sprung instead of binary. The eased value lives in a map keyed by id.
+const HOVER = new Map();
+
+function hoverAmount(id, hot, dt) {
+  const cur = HOVER.get(id) ?? 0;
+  const next = cur + ((hot ? 1 : 0) - cur) * Math.min(1, dt * 16);
+  HOVER.set(id, next);
+  if (HOVER.size > 400) HOVER.clear();
+  return next;
+}
+
 export function button(ctx, id, x, y, w, h, label, opts = {}) {
   const hot = inside(x, y, w, h) && !opts.disabled;
   if (hot) UI.hovered = id;
   const sel = opts.selected;
-  const bg = opts.disabled ? rgba('#000000', 0.4)
-    : hot ? rgba(Theme.uiAccent, 0.22)
+  const k = hoverAmount(id, hot, UI.dt);
+  // the whole button leans out toward the cursor as it lights up
+  const grow = k * 1.5;
+  const bx = Math.round(x - grow), by = Math.round(y - grow * 0.5);
+  const bw = Math.round(w + grow * 2), bh = Math.round(h + grow);
+
+  if (k > 0.02) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    glowDot(ctx, x + w / 2, y + h / 2, w * 0.55, Theme.uiAccent, 0.10 * k);
+    ctx.restore();
+  }
+  const base = opts.disabled ? rgba('#000000', 0.4)
     : sel ? rgba(Theme.platformGlow, 0.16) : rgba('#000000', 0.45);
-  ctx.fillStyle = bg;
-  ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
-  ctx.strokeStyle = opts.disabled ? rgba(Theme.uiDim, 0.4)
-    : hot ? Theme.uiAccent : sel ? Theme.platformGlow : rgba(Theme.uiDim, 0.8);
-  ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.round(w) - 1, Math.round(h) - 1);
-  const col = opts.disabled ? Theme.uiDim : hot ? Theme.uiAccent : Theme.ui;
+  ctx.fillStyle = base;
+  ctx.fillRect(bx, by, bw, bh);
+  if (k > 0.02) {
+    ctx.fillStyle = rgba(Theme.uiAccent, 0.22 * k);
+    ctx.fillRect(bx, by, bw, bh);
+  }
+  const edge = opts.disabled ? rgba(Theme.uiDim, 0.4)
+    : sel ? Theme.platformGlow : rgba(Theme.uiDim, 0.8);
+  ctx.strokeStyle = k > 0.02 ? mixRgba(edge, Theme.uiAccent, k) : edge;
+  ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+  // corner ticks that grow in with the hover
+  if (k > 0.02) {
+    const c = Math.round(3 + k * 3);
+    ctx.strokeStyle = rgba(Theme.uiAccent, k);
+    ctx.beginPath();
+    for (const [sx, sy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+      const px = bx + (sx ? bw : 0) + 0.5, py = by + (sy ? bh : 0) + 0.5;
+      ctx.moveTo(px + (sx ? -c : c), py);
+      ctx.lineTo(px, py);
+      ctx.lineTo(px, py + (sy ? -c : c));
+    }
+    ctx.stroke();
+  }
+  const col = opts.disabled ? Theme.uiDim : k > 0.35 ? Theme.uiAccent : Theme.ui;
   drawText(ctx, label, x + w / 2, y + (h - 7) / 2, col, opts.scale ?? 1, 'center');
-  if (hot) {
-    const p = Math.round(Math.sin(UI.t * 8) * 1);
-    drawText(ctx, '>', x + 4 + p, y + (h - 7) / 2, Theme.uiAccent, 1);
-    drawText(ctx, '<', x + w - 9 - p, y + (h - 7) / 2, Theme.uiAccent, 1);
+  if (k > 0.05) {
+    const p = Math.sin(UI.t * 8) * 1;
+    const slide = (1 - k) * 6;
+    ctx.save();
+    ctx.globalAlpha = k;
+    drawText(ctx, '>', x + 4 + p - slide, y + (h - 7) / 2, Theme.uiAccent, 1);
+    drawText(ctx, '<', x + w - 9 - p + slide, y + (h - 7) / 2, Theme.uiAccent, 1);
+    ctx.restore();
   }
   const clicked = hot && Input.mouseDown.left;
   if (clicked) Sfx.ui();
   return clicked;
+}
+
+// Blend two css colours for the eased border tint.
+function mixRgba(a, b, t) {
+  const pa = parseHex(a), pb = parseHex(b);
+  if (!pa || !pb) return t > 0.5 ? b : a;
+  const r = Math.round(lerp(pa[0], pb[0], t));
+  const g = Math.round(lerp(pa[1], pb[1], t));
+  const bl = Math.round(lerp(pa[2], pb[2], t));
+  const al = lerp(pa[3], pb[3], t);
+  return `rgba(${r},${g},${bl},${al})`;
+}
+
+function parseHex(c) {
+  if (typeof c !== 'string') return null;
+  if (c[0] === '#' && c.length >= 7) {
+    const n = parseInt(c.slice(1, 7), 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255, 1];
+  }
+  const m = /rgba?\(([^)]+)\)/.exec(c);
+  if (!m) return null;
+  const parts = m[1].split(',').map(Number);
+  return [parts[0], parts[1], parts[2], parts.length > 3 ? parts[3] : 1];
 }
 
 export function slider(ctx, id, x, y, w, value, opts = {}) {
@@ -153,12 +228,18 @@ export function drawHUD(ctx, game) {
   }
 
   // run status: where you are, which wave, how many are left
-  const label = game.roomCleared ? 'CLEARED' : `WAVE ${game.waveIndex}/${game.wavesInRoom()}`;
   drawTextShadow(ctx, `ROOM ${game.roomIndex}`, VIEW_W - 7, 8, Theme.ui, 1, 'right');
-  drawTextShadow(ctx, label, VIEW_W - 7, 18, game.roomCleared ? Theme.uiAccent : Theme.uiDim, 1, 'right');
-  if (!game.roomCleared) {
-    const alive = game.enemies.filter((e) => !e.dead).length + game.pendingSpawns.length;
-    drawTextShadow(ctx, `LEFT ${alive}`, VIEW_W - 7, 28, Theme.uiDim, 1, 'right');
+  if (Options.showWaveCounter) {
+    const label = game.roomCleared ? 'CLEARED' : `WAVE ${game.waveIndex}/${game.wavesInRoom()}`;
+    drawTextShadow(ctx, label, VIEW_W - 7, 18, game.roomCleared ? Theme.uiAccent : Theme.uiDim, 1, 'right');
+    if (!game.roomCleared) {
+      const alive = game.enemies.filter((e) => !e.dead).length + game.pendingSpawns.length;
+      drawTextShadow(ctx, `LEFT ${alive}`, VIEW_W - 7, 28, Theme.uiDim, 1, 'right');
+    }
+  }
+  if (Options.showFps) {
+    drawTextShadow(ctx, `${Math.round(UI.fps)} FPS`, 4, VIEW_H - 10,
+                   UI.fps < 45 ? Theme.hp : Theme.uiDim, 1);
   }
 
   drawHotbar(ctx, game);
@@ -189,8 +270,21 @@ function drawBossBar(ctx, game) {
   ctx.strokeStyle = rgba(Theme.uiDim, 0.9);
   ctx.strokeRect(x - 0.5, y - 0.5, w + 1, 7);
   if (boss.phase2At > 0) drawTextShadow(ctx, `PHASE ${boss.phase}`, x + w + 6, y, Theme.uiDim, 1);
+  if (Options.showBossHpNum) {
+    drawTextShadow(ctx, `${Math.ceil(Math.max(0, boss.hp))}/${boss.maxHp}`,
+                   x - 6, y, Theme.ui, 1, 'right');
+  }
   // some bosses carry a title under the bar
   if (boss.title) drawTextShadow(ctx, boss.title, VIEW_W / 2, y + 9, rgba(Theme.uiDim, 0.95), 1, 'center');
+  // a boss on a clock shows how much of it is left
+  if (Options.showBossTimer && boss.def?.crushAfter && !boss.crushArmed) {
+    const left = Math.max(0, boss.def.crushAfter - (boss.fightT ?? 0));
+    const mins = Math.floor(left / 60);
+    const secs = Math.floor(left % 60);
+    const hot = left < 30;
+    drawTextShadow(ctx, `${mins}:${String(secs).padStart(2, '0')}`,
+                   x + w + 6, y, hot ? Theme.hp : Theme.uiDim, 1);
+  }
 }
 
 function slotBox(ctx, x, y, s, selected, item, t) {
@@ -229,11 +323,11 @@ function drawHotbar(ctx, game) {
     const have = p.inventory.countOf('paper');
     const lift = Math.sin(UI.t * 2.5) * 0.6;
     // sheet first, count after it, so a three-digit stack never collides
-    pxRect(ctx, ax, y + 3 + lift, 7, 9, '#efeade');
-    pxRect(ctx, ax, y + 3 + lift, 7, 1, '#ffffff');
-    pxRect(ctx, ax + 3, y + 3 + lift, 1, 9, '#c9c2b2');
-    pxRect(ctx, ax + 1, y + 5 + lift, 2, 1, '#b9b2a2');
-    drawTextShadow(ctx, String(have), ax + 11, y + 4, have > 0 ? '#efeade' : Theme.hp, 2);
+    pxRect(ctx, ax - 1, y + 2 + lift, 9, 11, '#141018');
+    pxRect(ctx, ax, y + 3 + lift, 7, 9, '#f4f0e6');
+    pxRect(ctx, ax + 1, y + 5 + lift, 4, 1, '#141018');
+    pxRect(ctx, ax + 1, y + 7 + lift, 3, 1, '#3a3340');
+    drawTextShadow(ctx, String(have), ax + 12, y + 4, have > 0 ? '#f4f0e6' : Theme.hp, 2);
   }
   const gun = w && (w.weapon === 'bow' ? BOW : w.weapon === 'shardgun' ? SHARDGUN : null);
   if (gun) {
@@ -281,11 +375,12 @@ export function drawFoldWheel(ctx, game) {
 
   // --- the paper mandala behind it
   ctx.globalCompositeOperation = 'lighter';
-  glowDot(ctx, cx, cy, 66 * ease, '#efeade', 0.14 * ease);
-  glowDot(ctx, cx, cy, 26 * ease, '#ffe9a8', 0.10 * ease + f.spin * 0.14);
+  glowDot(ctx, cx, cy, 66 * ease, '#f4f0e6', 0.10 * ease);
+  glowDot(ctx, cx, cy, 26 * ease, '#f4f0e6', 0.08 * ease + f.spin * 0.10);
   for (let i = 0; i < 3; i++) {
-    const rr = R + i * 6 + Math.sin(t * 2 + i) * 1.5;
-    ctx.strokeStyle = rgba('#efeade', (0.24 - i * 0.06) * ease);
+    // guard the radius: on the first frame the ring is still at zero size
+    const rr = Math.max(0.5, R + i * 6 + Math.sin(t * 2 + i) * 1.5);
+    ctx.strokeStyle = rgba('#f4f0e6', (0.24 - i * 0.06) * ease);
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.ellipse(cx, cy, rr, rr * 0.97, f.rot * (0.35 + i * 0.25) + t * 0.12, 0, TAU);
@@ -294,7 +389,7 @@ export function drawFoldWheel(ctx, game) {
   // creases sweeping round with the ring, brighter the faster it is turning
   for (let i = 0; i < n * 2; i++) {
     const a = -Math.PI / 2 + (i / (n * 2)) * TAU + f.rot;
-    ctx.strokeStyle = rgba('#efeade', (0.10 + f.spin * 0.22) * ease);
+    ctx.strokeStyle = rgba('#f4f0e6', (0.10 + f.spin * 0.22) * ease);
     ctx.beginPath();
     ctx.moveTo(cx + Math.cos(a) * 11, cy + Math.sin(a) * 11);
     ctx.lineTo(cx + Math.cos(a) * (R + 15), cy + Math.sin(a) * (R + 15));
@@ -307,7 +402,7 @@ export function drawFoldWheel(ctx, game) {
       ctx.strokeStyle = rgba('#ffffff', f.spin * 0.3 * ease);
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.arc(cx, cy, rr, f.rot + i, f.rot + i + 0.9 * f.spin);
+      ctx.arc(cx, cy, Math.max(0.5, rr), f.rot + i, f.rot + i + 0.9 * f.spin);
       ctx.stroke();
     }
   }
@@ -325,7 +420,7 @@ export function drawFoldWheel(ctx, game) {
     const oy = cy + Math.sin(a) * rr * 0.9;
     const afford = have >= o.cost;
     const sel = i === f.sel;
-    const col = !afford ? Theme.uiDim : sel ? '#ffe9a8' : '#efeade';
+    const col = !afford ? Theme.uiDim : sel ? '#f4f0e6' : '#cdc7b8';
     const sc = (0.72 + near * 0.5) * ease;
 
     ctx.save();
@@ -356,7 +451,7 @@ export function drawFoldWheel(ctx, game) {
   // --- the pointer notch, over the cards so it always reads
   ctx.save();
   ctx.globalAlpha = ease;
-  ctx.fillStyle = rgba('#ffe9a8', 0.75 + 0.25 * Math.sin(t * 5));
+  ctx.fillStyle = rgba('#f4f0e6', 0.75 + 0.25 * Math.sin(t * 5));
   ctx.beginPath();
   ctx.moveTo(cx, cy - R - 6);
   ctx.lineTo(cx - 4, cy - R - 13);
@@ -370,7 +465,7 @@ export function drawFoldWheel(ctx, game) {
   if (cur) {
     ctx.save();
     ctx.globalAlpha = ease;
-    drawTextShadow(ctx, cur.name, cx, cy - R - 25, '#ffe9a8', 1, 'center');
+    drawTextShadow(ctx, cur.name, cx, cy - R - 25, '#f4f0e6', 1, 'center');
     const afford = have >= cur.cost;
     drawText(ctx, `${cur.cost} / ${have} SHEETS`, cx, cy + R + 18,
              afford ? Theme.ui : Theme.hp, 1, 'center');

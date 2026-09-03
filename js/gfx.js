@@ -2,6 +2,7 @@
 // pixel-drawing helpers used by every entity.
 import { clamp, lerp, rand, randInt, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
+import { Options } from './settings.js';
 
 export const Camera = {
   x: 0, y: 0, shake: 0, shakeT: 0, ox: 0, oy: 0,
@@ -11,7 +12,7 @@ export const Camera = {
   // gets, so the frame stays readable through a busy fight.
   shakeScale: 0.42,
   shakeMax: 7.5,
-  add(amount) { this.shake = Math.min(this.shakeMax, this.shake + amount * this.shakeScale); },
+  add(amount) { this.shake = Math.min(this.shakeMax, this.shake + amount * (Options.shake ?? this.shakeScale)); },
   // A short inward kick on impact, sprung back to 1.
   punch(amount) { this.zoomVel += amount * 0.75; },
   update(dt) {
@@ -94,7 +95,9 @@ export function spawnParticle(p) {
 }
 
 export function burst(x, y, n, opts = {}) {
-  for (let i = 0; i < n; i++) {
+  // the density slider scales every burst in the game from one place
+  const count = Math.max(1, Math.round(n * (Options.particles ?? 1)));
+  for (let i = 0; i < count; i++) {
     const a = opts.angle !== undefined ? opts.angle + rand(-(opts.spread ?? Math.PI), opts.spread ?? Math.PI) : rand(0, TAU);
     const sp = rand(opts.speedMin ?? 20, opts.speedMax ?? 120);
     spawnParticle({
@@ -153,6 +156,8 @@ export function updateFx(dt) {
 export const Flash = { a: 0, r: 1, g: 1, b: 1, life: 0.001, t: 0 };
 
 export function screenFlash(alpha, color = '#ffffff', life = 0.18) {
+  alpha *= Options.flash ?? 1;
+  if (alpha <= 0.001) return;
   const c = String(color).replace('#', '');
   const r = parseInt(c.slice(0, 2), 16) / 255;
   const g = parseInt(c.slice(2, 4), 16) / 255;

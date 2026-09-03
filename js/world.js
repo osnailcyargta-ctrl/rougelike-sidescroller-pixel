@@ -5,6 +5,7 @@ import { pxRect, glowDot, spawnParticle, burst, linGrad } from './gfx.js';
 import { VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER, BLOCK, WAVES } from './config.js';
 import { ITEMS, RARITY, drawItemIcon } from './items.js';
 import { Sfx } from './audio.js';
+import { Options } from './settings.js';
 
 // --- background ----------------------------------------------------------
 
@@ -202,6 +203,8 @@ for (let i = 0; i < 5; i++) {
 }
 
 export function drawLightShafts(ctx, t) {
+  const amt = Options.shafts ?? 1;
+  if (amt <= 0.001) return;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   for (const sh of SHAFTS) {
@@ -209,8 +212,8 @@ export function drawLightShafts(ctx, t) {
     const x = sh.x + drift;
     const breathe = 0.65 + 0.35 * Math.sin(t * 0.31 + sh.phase);
     const g = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
-    g.addColorStop(0, rgba(Theme.platformGlow, sh.a * breathe));
-    g.addColorStop(0.65, rgba(Theme.platformGlow, sh.a * breathe * 0.35));
+    g.addColorStop(0, rgba(Theme.platformGlow, sh.a * breathe * amt));
+    g.addColorStop(0.65, rgba(Theme.platformGlow, sh.a * breathe * 0.35 * amt));
     g.addColorStop(1, rgba(Theme.platformGlow, 0));
     ctx.fillStyle = g;
     const spread = sh.w * 1.9;
@@ -227,7 +230,7 @@ export function drawLightShafts(ctx, t) {
       const k = ((t * sh.speed * 0.02 + i / dustN + sh.phase) % 1);
       const dy = k * GROUND_Y;
       const dx = x + sh.lean * dy + Math.sin(t * 0.7 + i * 2 + sh.phase) * sh.w * 0.35;
-      pxRect(ctx, dx, dy, 1, 1, rgba('#ffffff', (1 - k) * 0.20 * breathe));
+      pxRect(ctx, dx, dy, 1, 1, rgba('#ffffff', (1 - k) * 0.20 * breathe * amt));
     }
   }
   ctx.restore();

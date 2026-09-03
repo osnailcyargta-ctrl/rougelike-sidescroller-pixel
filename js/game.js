@@ -10,29 +10,21 @@ import { Sfx, resumeAudio, setVolume, AudioCfg } from './audio.js';
 import { PostFX, parseShaderPack, DEFAULT_COMPOSITE } from './postfx.js';
 import {
   VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, DROP_POINT, PERK, WAVES, PLAYER as PCFG,
-  BOSS_ROOM_INTERVAL, NUKERANG, FINAL_ROOM, SHARDGUN, ORIGAMI,
+  BOSS_ROOM_INTERVAL, NUKERANG, FINAL_ROOM, SHARDGUN, TWINDAGGER, SWORD, BOW, ORIGAMI,
 } from './config.js';
-import { Player, Enemy, Projectile, SHARD_TINT } from './entities.js';
+import { Player, Enemy, Projectile, SHARD_TINT, INK } from './entities.js';
 import { makeBoss } from './boss.js';
 import { Cutscene } from './cutscene.js';
 import { drawBackground, drawArena, drawLightShafts, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal } from './world.js';
 import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
 import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, panel, button } from './ui.js';
 import { drawText, drawTextShadow } from './font.js';
+import { Options, loadOptions, saveOptions, applyVisualOptions, captureShaderBase, saveShader, loadShader } from './settings.js';
 import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, drawControls, drawVictory } from './screens.js';
 
 // Health restored to the player after every cleared wave; clearing a room and
 // stepping through the gate restores the rest.
 const WAVE_HEAL = 0.25;
-
-// A hot pinprick of light, used where something ignites.
-function glowFlashAt(x, y) {
-  impactRing(x, y, { color: '#ffe9a8', r0: 1, r1: 20, life: 0.18, width: 2 });
-  burst(x, y, 6, {
-    color: '#ffe9a8', color2: '#ffffff', speedMin: 20, speedMax: 90,
-    lifeMin: 0.08, lifeMax: 0.2, gravity: 0, kind: 'shrink',
-  });
-}
 
 export class Game {
   static get WAVE_HEAL() { return WAVE_HEAL; }
@@ -83,10 +75,19 @@ export class Game {
     this.hint = null;
     this.hintT = 0;
 
+    // saved settings first, so the very first frame already looks right
+    loadOptions();
+    applyVisualOptions();
+    setVolume(Options.volume);
+
     this.resize();
     addEventListener('resize', () => this.resize());
     initInput({ canvas: this.display, toWorld: (sx, sy) => this.toWorld(sx, sy) });
     this.setupShaderInput(root);
+
+    // and the shader pack the player was last using
+    const saved = loadShader();
+    if (saved) this.applyShaderPack(saved.text, saved.name, { silent: true, store: false });
 
     this.last = performance.now();
     this.loop = this.loop.bind(this);
@@ -139,10 +140,13 @@ export class Game {
 
   requestShaderUpload() { this.fileInput.click(); }
 
-  applyShaderPack(text, fallbackName) {
+  applyShaderPack(text, fallbackName, opts = {}) {
     try {
       const pack = parseShaderPack(text);
       applyTheme(pack.theme);
+      // the pack sets the baseline the visual sliders ride on
+      captureShaderBase();
+      applyVisualOptions();
       if (pack.glsl && /gl_FragColor/.test(pack.glsl)) {
         const err = this.postfx.setComposite(pack.glsl);
         if (err) {
@@ -157,7 +161,8 @@ export class Game {
       }
       this.shaderName = (pack.name || fallbackName || 'CUSTOM').toUpperCase();
       this.shaderError = null;
-      this.toast(`SHADER LOADED: ${this.shaderName}`);
+      if (opts.store !== false) saveShader(this.shaderName, text);
+      if (!opts.silent) this.toast(`SHADER LOADED: ${this.shaderName}`);
     } catch (err) {
       this.shaderError = String(err.message || err).slice(0, 60);
     }
@@ -165,9 +170,12 @@ export class Game {
 
   resetShader() {
     resetTheme();
+    captureShaderBase();
+    applyVisualOptions();
     this.postfx.resetComposite();
     this.shaderName = null;
     this.shaderError = null;
+    saveShader(null, null);
     this.toast('SHADER RESET');
   }
 
@@ -260,8 +268,8 @@ export class Game {
     if (index > 1) this.player.healPct(1);
     // the Origamist restocks between rooms
     if (index > 1 && this.player.classId === 'origamist') {
-      this.player.inventory.add('paper', ORIGAMI.roomPaper);
-      floatText(this.player.x, this.player.cy - 20, `+${ORIGAMI.roomPaper} PAPER`, '#efeade', { life: 1.2 });
+      const got = this.givePaper(ORIGAMI.roomPaper);
+      if (got > 0) floatText(this.player.x, this.player.cy - 20, `+${got} PAPER`, '#efeade', { life: 1.2 });
     }
     this.startWave(1);
   }
@@ -416,6 +424,8 @@ export class Game {
   openFoldWheel() {
     const p = this.player;
     if (!p || this.fold) return;
+    if (p.attackCd > 0) return;              // folds have their own cadence
+    if (p.attackCd > 0) return;              // folds have their own cadence
     const known = p.inventory.knownFolds();
     if (!known.length) return;
     const options = known.map((id) => {
@@ -479,7 +489,7 @@ export class Game {
       return;
     }
     p.recomputeStats();
-    p.attackCd = ORIGAMI.cooldown;
+    p.attackCd = cfg.cooldown ?? ORIGAMI.cooldown;
     p.swing = { t: 0, angle: aim, kind: 'throw' };
     const ox = p.x + Math.cos(aim) * 9, oy = p.cy + Math.sin(aim) * 9;
     this.projectiles.push(new Projectile({
@@ -493,28 +503,27 @@ export class Game {
     Camera.punch(id === 'missile' ? 0.7 : 0.3);
     // the fold itself unfurling: a flat ring along the throw, plus creases
     impactRing(ox, oy, {
-      color: '#ffffff', r0: 1, r1: 26, life: 0.22, width: 1.6,
+      color: INK.paper, r0: 1, r1: 26, life: 0.2, width: 1.6,
       squash: 0.35, rotate: aim,
     });
     impactRing(ox, oy, {
-      color: '#efeade', r0: 2, r1: 44, life: 0.34, width: 1.2,
+      color: INK.ink, r0: 2, r1: 44, life: 0.34, width: 1.2,
       squash: 0.28, rotate: aim,
     });
     burst(ox, oy, id === 'missile' ? 20 : 12, {
-      color: '#efeade', color2: id === 'missile' ? '#ff8a5c' : '#ffffff',
+      color: INK.ink, color2: INK.paper,
       kind: 'streak', speedMin: 70, speedMax: 250, lifeMin: 0.07, lifeMax: 0.22,
-      gravity: 0, angle: aim, spread: 0.55, drag: 0.84,
+      gravity: 0, angle: aim, spread: 0.55, drag: 0.84, glow: false,
     });
     // scraps of the sheet spinning off the hand
     burst(ox, oy, id === 'missile' ? 10 : 6, {
-      color: '#efeade', color2: '#c9c2b2', speedMin: 30, speedMax: 130,
+      color: INK.paper, color2: INK.paperShade, speedMin: 30, speedMax: 130,
       lifeMin: 0.3, lifeMax: 0.8, sizeMin: 1, sizeMax: 2, gravity: 260, drag: 0.9,
-      angle: aim, spread: 1.5,
+      angle: aim, spread: 1.5, glow: false,
     });
     if (id === 'missile') {
-      glowFlashAt(ox, oy);
       burst(ox, oy, 8, {
-        color: '#3a3550', kind: 'smoke', speedMin: 16, speedMax: 70,
+        color: INK.inkSoft, kind: 'smoke', speedMin: 16, speedMax: 70,
         lifeMin: 0.3, lifeMax: 0.8, sizeMin: 1, sizeMax: 3, gravity: -30,
         angle: aim + Math.PI, spread: 0.8, glow: false,
       });
@@ -533,33 +542,45 @@ export class Game {
       // full damage at the core, tapering to two thirds at the rim
       const k = 1 - 0.34 * clamp(d / r, 0, 1);
       e.damage(Math.max(1, Math.round(damage * k)), {
-        color: '#ff8a5c', crit: d < r * 0.4, knockback: 150, fromX: x, shake: 0,
+        color: INK.ink, crit: d < r * 0.4, knockback: 150, fromX: x, shake: 0,
       });
     }
     Sfx.slam();
     Camera.add(13);
     Camera.punch(2.4);
     this.hitstop(0.07);
-    screenFlash(0.34, '#ffd0a0', 0.2);
-    impactRing(x, y, { color: '#ffffff', r0: 4, r1: r * 1.1, life: 0.34, width: 4 });
-    impactRing(x, y, { color: '#ffe9a8', r0: 3, r1: r * 1.5, life: 0.5, width: 2.5 });
-    impactRing(x, y, { color: '#ff8a5c', r0: 2, r1: r * 1.9, life: 0.7, width: 2 });
-    burst(x, y, 40, {
-      color: '#ffe9a8', color2: '#ff8a5c', speedMin: 50, speedMax: 320,
-      lifeMin: 0.2, lifeMax: 0.8, sizeMax: 3, gravity: 210, drag: 0.9,
+    screenFlash(0.30, '#ffffff', 0.18);
+    // an ink splat over a burst of shredded paper
+    impactRing(x, y, { color: INK.paper, r0: 4, r1: r * 1.1, life: 0.3, width: 4 });
+    impactRing(x, y, { color: INK.ink, r0: 3, r1: r * 1.5, life: 0.5, width: 3 });
+    impactRing(x, y, { color: INK.ink, r0: 2, r1: r * 1.9, life: 0.75, width: 1.5 });
+    burst(x, y, 38, {
+      color: INK.ink, color2: INK.inkSoft, speedMin: 50, speedMax: 330,
+      lifeMin: 0.2, lifeMax: 0.9, sizeMax: 3, gravity: 210, drag: 0.9, glow: false,
     });
-    burst(x, y, 16, {
-      color: '#efeade', speedMin: 30, speedMax: 200, lifeMin: 0.4, lifeMax: 1.3,
-      sizeMax: 2, gravity: 300, drag: 0.92,          // shredded paper
+    burst(x, y, 26, {
+      color: INK.paper, color2: INK.paperShade, speedMin: 30, speedMax: 210,
+      lifeMin: 0.4, lifeMax: 1.4, sizeMax: 2, gravity: 300, drag: 0.92, glow: false,
     });
-    burst(x, y, 14, {
-      color: '#3a3550', kind: 'smoke', speedMin: 20, speedMax: 110,
+    burst(x, y, 12, {
+      color: INK.inkSoft, kind: 'smoke', speedMin: 20, speedMax: 110,
       lifeMin: 0.5, lifeMax: 1.4, sizeMin: 2, sizeMax: 5, gravity: -50, drag: 0.9, glow: false,
     });
-    burst(x, y, 14, {
-      color: '#ffffff', color2: '#ffe9a8', kind: 'streak', speedMin: 180, speedMax: 420,
-      lifeMin: 0.07, lifeMax: 0.2, gravity: 0, drag: 0.8,
+    burst(x, y, 16, {
+      color: INK.ink, kind: 'streak', speedMin: 180, speedMax: 440,
+      lifeMin: 0.07, lifeMax: 0.22, gravity: 0, drag: 0.8, glow: false,
     });
+  }
+
+  // Hand over paper, never past the carry limit. Returns what was actually
+  // given, so the float text does not promise sheets that never arrived.
+  givePaper(n) {
+    const inv = this.player?.inventory;
+    if (!inv) return 0;
+    const room = Math.max(0, ORIGAMI.maxPaper - inv.countOf('paper'));
+    const give = Math.min(n, room);
+    if (give > 0) inv.add('paper', give);
+    return give;
   }
 
   // Paper the Origamist tears off a body. It flies to the hand on its own.
@@ -567,8 +588,8 @@ export class Game {
     const p = this.player;
     if (!p || p.classId !== 'origamist') return;
     if (Math.random() >= ORIGAMI.dropChance) return;
-    const n = randInt(ORIGAMI.dropMin, ORIGAMI.dropMax);
-    p.inventory.add('paper', n);
+    const n = this.givePaper(randInt(ORIGAMI.dropMin, ORIGAMI.dropMax));
+    if (n <= 0) return;
     floatText(enemy.cx, enemy.cy - 10, `+${n} PAPER`, '#efeade', { life: 0.9 });
     Sfx.pickup();
     for (let i = 0; i < n * 4; i++) {
@@ -700,6 +721,8 @@ export class Game {
       gdt = dt * 0.08;
     }
     this.postfx.slowmo = lerp(this.postfx.slowmo, this.freezeT > 0 ? 1 : 0, 1 - Math.pow(0.001, dt));
+    this.postfx.grain = Options.grain;
+    this.postfx.halation = Options.halation;
     // the world drains of colour while the god holds it still
     this.postfx.timeStop = lerp(this.postfx.timeStop, this.timeStopT > 0 ? 1 : 0, 1 - Math.pow(1e-6, dt));
 
@@ -887,8 +910,8 @@ export class Game {
         this.waveCooldown = WAVES.interWaveDelay;
         this.player.healPct(WAVE_HEAL);
         if (this.player.classId === 'origamist') {
-          this.player.inventory.add('paper', ORIGAMI.wavePaper);
-          floatText(this.player.x, this.player.cy - 20, `+${ORIGAMI.wavePaper} PAPER`, '#efeade', { life: 1.1 });
+          const got = this.givePaper(ORIGAMI.wavePaper);
+          if (got > 0) floatText(this.player.x, this.player.cy - 20, `+${got} PAPER`, '#efeade', { life: 1.1 });
         }
       }
       this.waveCooldown -= dt;
@@ -1054,7 +1077,9 @@ export class Game {
     drawTexts(ctx);
     // aim reticle lives inside the camera so it tracks the cursor exactly
     if (this.screen === 'playing' && !this.invOpen && this.player && !this.player.dead) {
-      this.drawReticle(ctx);
+      if (Options.showRange) this.drawRangeRing(ctx);
+      if (Options.showCooldown) this.drawCooldownRing(ctx);
+      if (Options.showReticle) this.drawReticle(ctx);
     }
     ctx.restore();
 
@@ -1070,6 +1095,68 @@ export class Game {
     if (this.screen === 'victory') drawVictory(ctx, this, this.time);
     if (this.debugOpen) drawDebugMenu(ctx, this);
     this.drawToast(ctx);
+  }
+
+  // A faint ring at the reach of whatever you are holding, for players who
+  // want to see exactly where a swing or a shot stops.
+  drawRangeRing(ctx) {
+    const p = this.player;
+    const w = p.inventory.selectedWeapon();
+    let r = SWORD.range * 0.5;
+    if (w) {
+      if (w.id === 'twindagger') r = TWINDAGGER.range;
+      else if (w.weapon === 'melee') r = SWORD.range;
+      else if (w.weapon === 'bow') r = BOW.range;
+      else if (w.weapon === 'shardgun') r = SHARDGUN.range;
+      else if (w.weapon === 'boomerang') r = NUKERANG.range;
+      else if (w.weapon === 'paper') r = 0;
+    }
+    if (r <= 0) return;
+    ctx.save();
+    ctx.strokeStyle = rgba(Theme.uiDim, 0.30);
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 5]);
+    ctx.lineDashOffset = -this.time * 12;
+    ctx.beginPath();
+    ctx.arc(p.x, p.cy, r, 0, TAU);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  // A short arc over the player's head that fills back up as the weapon comes
+  // off cooldown. Reads at a glance without adding a number to the HUD.
+  drawCooldownRing(ctx) {
+    const p = this.player;
+    const w = p.inventory.selectedWeapon();
+    const full = w
+      ? (w.id === 'twindagger' ? TWINDAGGER.cooldown
+        : w.weapon === 'bow' ? BOW.cooldown
+          : w.weapon === 'shardgun' ? SHARDGUN.cooldown
+            : w.weapon === 'paper' ? ORIGAMI.forms.missile.cooldown
+              : w.weapon === 'boomerang' ? NUKERANG.cooldown : SWORD.cooldown)
+      : 0.35;
+    const busy = p.reloadT > 0 ? p.reloadT / ((this.player.gunCfg()?.reload) || 1)
+      : clamp(p.attackCd / full, 0, 1);
+    if (busy <= 0.01) return;
+    const k = 1 - busy;
+    const cx = p.x, cy = p.y - p.h - 9;
+    const r = 7;
+    ctx.save();
+    ctx.lineCap = 'butt';
+    ctx.strokeStyle = rgba('#000000', 0.5);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, Math.PI * 0.85, Math.PI * 0.15, false);
+    ctx.stroke();
+    ctx.strokeStyle = p.reloadT > 0 ? Theme.uiAccent : rgba(Theme.ui, 0.9);
+    ctx.lineWidth = 1.6;
+    const a0 = Math.PI * 0.85;
+    const span = Math.PI * 1.3;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, a0, a0 + span * k, false);
+    ctx.stroke();
+    ctx.restore();
   }
 
   drawReticle(ctx) {

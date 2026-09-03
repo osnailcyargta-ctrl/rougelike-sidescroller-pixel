@@ -52,6 +52,8 @@ uniform float uSaturation;
 uniform float uHit;      // 0..1 damage flash
 uniform float uSlowmo;   // 0..1 slow-motion amount
 uniform float uTimeStop; // 0..1 frozen time: drains the colour out of the world
+uniform float uGrain;    // film grain amount
+uniform float uHalation; // how far bright light bleeds
 
 void main() {
   vec2 uv = vUv;
@@ -78,7 +80,7 @@ void main() {
             + texture2D(uBloom, uv + vec2(-hp.x, -hp.y)).rgb;
   // only the bright end halates, so darks stay dark instead of lifting
   float haloLum = dot(halo * 0.25, vec3(0.299, 0.587, 0.114));
-  col += halo * 0.13 * uBloomStrength * smoothstep(0.10, 0.55, haloLum)
+  col += halo * 0.13 * uBloomStrength * uHalation * smoothstep(0.10, 0.55, haloLum)
        * vec3(1.15, 0.86, 0.62);
 
   // saturation
@@ -93,12 +95,13 @@ void main() {
   // a gentle S-curve for contrast without crushing either end
   col = mix(col, col * col * (3.0 - 2.0 * col), 0.16);
 
-  // slow-motion cools the image down a touch
-  col = mix(col, col * vec3(0.75, 0.88, 1.25), uSlowmo * 0.5);
+  // slow motion pulls the colour out rather than tinting the frame blue
+  float sl = dot(col, vec3(0.299, 0.587, 0.114));
+  col = mix(col, mix(col, vec3(sl), 0.55) * 1.06, uSlowmo * 0.6);
 
   // stopped time: the world goes grey and slightly brighter, like a held frame
   float grey = dot(col, vec3(0.299, 0.587, 0.114));
-  col = mix(col, vec3(grey) * vec3(1.02, 1.0, 1.06) + 0.02, uTimeStop);
+  col = mix(col, vec3(grey) * 1.03 + 0.02, uTimeStop);
 
   // damage flash
   col += vec3(0.55, 0.05, 0.12) * uHit;
@@ -110,7 +113,7 @@ void main() {
 
   // a whisper of grain so flat gradients do not band
   float grain = fract(sin(dot(uv * uResolution + uTime, vec2(12.9898, 78.233))) * 43758.5453);
-  col += (grain - 0.5) * 0.018;
+  col += (grain - 0.5) * 0.018 * uGrain;
 
   // roll off only the highlights, so the darks stay deep
   col = mix(col, col / (col + vec3(0.75)) * 1.32, smoothstep(0.55, 1.15, max(col.r, max(col.g, col.b))));
@@ -172,6 +175,8 @@ export class PostFX {
     this.hit = 0;
     this.slowmo = 0;
     this.timeStop = 0;
+    this.grain = 1;
+    this.halation = 1;
     this.time = 0;
     this.compositeSource = DEFAULT_COMPOSITE;
     try { this.init(); } catch (e) { this.ok = false; this.error = String(e); }
@@ -290,6 +295,8 @@ export class PostFX {
     gl.uniform1f(this.uni(p, 'uHit'), this.hit);
     gl.uniform1f(this.uni(p, 'uSlowmo'), this.slowmo);
     gl.uniform1f(this.uni(p, 'uTimeStop'), this.timeStop);
+    gl.uniform1f(this.uni(p, 'uGrain'), this.grain);
+    gl.uniform1f(this.uni(p, 'uHalation'), this.halation);
     this.drawQuad(p);
     gl.activeTexture(gl.TEXTURE0);
   }

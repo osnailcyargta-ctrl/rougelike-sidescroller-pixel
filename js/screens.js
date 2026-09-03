@@ -6,6 +6,7 @@ import { drawText, drawTextShadow, textWidth } from './font.js';
 import { pxRect, glowDot, spawnParticle } from './gfx.js';
 import { VIEW_W, VIEW_H, FINAL_ROOM } from './config.js';
 import { panel, button, slider, textField, drawTooltip, UI } from './ui.js';
+import { Options, optionsIn, saveOptions, resetOptions, applyVisualOptions } from './settings.js';
 import { drawItemIcon, ITEMS, RARITY } from './items.js';
 import { AudioCfg, setVolume, Sfx } from './audio.js';
 import { randomSeedText } from './util.js';
@@ -28,18 +29,124 @@ function wrapLine(text, maxW, scale = 1) {
   return out;
 }
 
+// The logo. Not just the title typed out: a struck emblem behind it, a beam of
+// light raking across the letters, each glyph carved with its own bevel and
+// dropping its own shadow, and a shard-ring that turns behind the whole thing.
+function drawLogoMark(ctx, cx, cy, t, scale = 1) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(scale, scale);
+
+  // the halo the mark stands in
+  ctx.globalCompositeOperation = 'lighter';
+  glowDot(ctx, 0, 0, 46, Theme.uiAccent, 0.14 + 0.05 * Math.sin(t * 1.6));
+  // three rings of shards, each turning at its own rate
+  const rings = [[34, 0.30, 16], [26, -0.44, 12], [18, 0.62, 8]];
+  for (let r = 0; r < rings.length; r++) {
+    const [rad, spin, n] = rings[r];
+    for (let i = 0; i < n; i++) {
+      const a = t * spin + (i / n) * TAU;
+      const wob = rad + Math.sin(t * 1.4 + i + r) * 1.4;
+      const px = Math.cos(a) * wob;
+      const py = Math.sin(a) * wob * 0.62;
+      const lit = (i + r) % 3 === 0;
+      pxRect(ctx, px - 1, py - 1, lit ? 2 : 1, lit ? 2 : 1,
+             rgba(lit ? '#ffffff' : Theme.uiAccent, 0.25 + 0.35 * Math.sin(t * 3 + i)));
+    }
+  }
+  ctx.globalCompositeOperation = 'source-over';
+
+  // the sigil: a downward chevron inside a diamond - the descent, struck in metal
+  const pulse = 1 + Math.sin(t * 1.9) * 0.03;
+  ctx.save();
+  ctx.scale(pulse, pulse);
+  const dia = (r, col) => {
+    ctx.beginPath();
+    ctx.moveTo(0, -r); ctx.lineTo(r * 0.72, 0); ctx.lineTo(0, r); ctx.lineTo(-r * 0.72, 0);
+    ctx.closePath();
+    ctx.fillStyle = col;
+    ctx.fill();
+  };
+  dia(15, rgba('#000000', 0.75));
+  dia(13, Theme.uiPanel);
+  ctx.strokeStyle = Theme.uiAccent;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(0, -13); ctx.lineTo(9.4, 0); ctx.lineTo(0, 13); ctx.lineTo(-9.4, 0);
+  ctx.closePath();
+  ctx.stroke();
+  // two chevrons pointing down, the brighter one leading
+  for (let i = 0; i < 2; i++) {
+    const oy = -3 + i * 5;
+    const a = i === 0 ? 1 : 0.45;
+    ctx.strokeStyle = rgba(i === 0 ? '#ffffff' : Theme.platformGlow, a);
+    ctx.lineWidth = i === 0 ? 1.6 : 1.2;
+    ctx.beginPath();
+    ctx.moveTo(-5, oy); ctx.lineTo(0, oy + 4); ctx.lineTo(5, oy);
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.restore();
+}
+
 function titleGlyphs(ctx, t) {
   const title = 'AETHER';
   const sub = 'DESCENT';
   const s = 4;
   const w = textWidth(title, s);
+  const x0 = (VIEW_W - w) / 2;
+  const baseY = 58;
+
+  // the sigil sits above the wordmark, never behind it
+  drawLogoMark(ctx, VIEW_W / 2, 27, t, 0.95);
+
+  // a light sweep that travels across the wordmark, in glyph units
+  const sweep = ((t * 0.42) % 1.6) * (title.length + 3) - 1.5;
+
   for (let i = 0; i < title.length; i++) {
-    const ox = (VIEW_W - w) / 2 + i * (6 * s);
-    const oy = 34 + Math.sin(t * 2 + i * 0.5) * 2;
-    drawText(ctx, title[i], ox + 2, oy + 2, rgba('#000000', 0.6), s);
+    const ox = x0 + i * (6 * s);
+    const bob = Math.sin(t * 1.8 + i * 0.55) * 1.6;
+    const oy = baseY + bob;
+    const near = clamp(1 - Math.abs(i - sweep) / 1.4, 0, 1);
+
+    // a long shadow, then the bevel, then the face
+    drawText(ctx, title[i], ox + 3, oy + 4, rgba('#000000', 0.55), s);
+    drawText(ctx, title[i], ox + 1, oy + 2, rgba(Theme.bgFar, 0.9), s);
+    drawText(ctx, title[i], ox, oy + 1, rgba(Theme.uiAccent, 0.55), s);   // bevel
     drawText(ctx, title[i], ox, oy, i % 2 ? Theme.uiAccent : Theme.ui, s);
+    // the sweep lights one glyph at a time
+    if (near > 0.02) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      drawText(ctx, title[i], ox, oy - 1, rgba('#ffffff', near * 0.85), s);
+      glowDot(ctx, ox + 2.5 * s, oy + 3.5 * s, 22 * near, '#ffffff', near * 0.20);
+      ctx.restore();
+    }
   }
-  drawTextShadow(ctx, sub, VIEW_W / 2, 34 + 7 * s + 6, Theme.platformGlow, 2, 'center');
+
+  // rules either side of the subtitle, drawn out from the centre
+  const sy = baseY + 7 * s + 8;
+  const subW = textWidth(sub, 2);
+  const ruleW = 46;
+  for (const dir of [-1, 1]) {
+    const gx = VIEW_W / 2 + dir * (subW / 2 + 8);
+    const g = ctx.createLinearGradient(gx, 0, gx + dir * ruleW, 0);
+    g.addColorStop(0, rgba(Theme.platformGlow, 0.85));
+    g.addColorStop(1, rgba(Theme.platformGlow, 0));
+    ctx.fillStyle = g;
+    ctx.fillRect(Math.min(gx, gx + dir * ruleW), sy + 3, ruleW, 1);
+  }
+  drawTextShadow(ctx, sub, VIEW_W / 2, sy, Theme.platformGlow, 2, 'center');
+
+  // dust lifting off the wordmark
+  if (Math.random() < 0.5) {
+    spawnParticle({
+      x: x0 + rand(0, w), y: baseY + rand(0, 7 * s),
+      vx: rand(-6, 6), vy: rand(-22, -6), life: rand(0.8, 1.8),
+      size: 1, color: Math.random() < 0.4 ? '#ffffff' : Theme.uiAccent,
+      gravity: -6, drag: 0.98, kind: 'shrink',
+    });
+  }
 }
 
 export function drawMenuBackdrop(ctx, t) {
@@ -69,20 +176,139 @@ export function drawMainMenu(ctx, game, t) {
   let y = 148;
   if (button(ctx, 'play', x, y, bw, bh, 'PLAY')) game.goClassSelect();
   y += bh + 6;
-  if (button(ctx, 'settings', x, y, bw, bh, 'SETTINGS')) game.screen = 'settings';
+  if (button(ctx, 'settings', x, y, bw, bh, 'SETTINGS')) { UI.tab = 'indicator'; game.screen = 'settings'; }
   y += bh + 6;
-  if (button(ctx, 'controls', x, y, bw, bh, 'CONTROLS')) game.screen = 'controls';
+  if (button(ctx, 'controls', x, y, bw, bh, 'CONTROLS')) { UI.tab = 'binds'; game.screen = 'settings'; }
   drawTextShadow(ctx, 'A ROGUELIKE SIDESCROLLER', VIEW_W / 2, VIEW_H - 16, Theme.uiDim, 1, 'center');
   if (game.shaderName) {
     drawTextShadow(ctx, `SHADER: ${game.shaderName}`, 6, VIEW_H - 12, Theme.platformGlow, 1);
   }
 }
 
-export function drawControls(ctx, game, t) {
+// One settings screen, three tabs: what the game tells you, how it looks, and
+// what the keys do. Everything here writes straight through to localStorage.
+const TABS = [
+  { id: 'indicator', label: 'INDICATORS' },
+  { id: 'visual', label: 'VISUALS' },
+  { id: 'binds', label: 'CONTROLS' },
+];
+
+export function drawSettings(ctx, game, t) {
   drawMenuBackdrop(ctx, t);
-  panel(ctx, 26, 10, VIEW_W - 52, VIEW_H - 34);
-  drawTextShadow(ctx, 'CONTROLS', VIEW_W / 2, 16, Theme.uiAccent, 2, 'center');
-  drawText(ctx, 'CLICK A KEY TO REBIND IT', VIEW_W / 2, 32, Theme.uiDim, 1, 'center');
+  panel(ctx, 18, 8, VIEW_W - 36, VIEW_H - 30);
+  drawTextShadow(ctx, 'SETTINGS', VIEW_W / 2, 13, Theme.uiAccent, 2, 'center');
+
+  // --- tab strip
+  const tw = 86, ty = 29;
+  const tx0 = Math.round((VIEW_W - (TABS.length * tw + (TABS.length - 1) * 6)) / 2);
+  for (let i = 0; i < TABS.length; i++) {
+    const tab = TABS[i];
+    const x = tx0 + i * (tw + 6);
+    const on = UI.tab === tab.id;
+    if (button(ctx, 'tab' + tab.id, x, ty, tw, 14, tab.label, { selected: on })) {
+      UI.tab = tab.id;
+      UI.rebinding = null;
+    }
+    if (on) pxRect(ctx, x + 6, ty + 15, tw - 12, 1, Theme.uiAccent);
+  }
+
+  if (UI.tab === 'binds') drawBindsTab(ctx, game, t);
+  else if (UI.tab === 'visual') drawVisualTab(ctx, game, t);
+  else drawIndicatorTab(ctx, game, t);
+
+  if (button(ctx, 'back', VIEW_W / 2 - 45, VIEW_H - 20, 90, 15, 'BACK')) {
+    UI.rebinding = null;
+    game.screen = game.returnScreen || 'menu';
+    game.returnScreen = null;
+  }
+}
+
+// Two columns of switches. Nothing here changes the game, only what it is
+// willing to tell you about it.
+function drawIndicatorTab(ctx, game, t) {
+  const defs = optionsIn('indicator');
+  const colW = 194;
+  const x0 = Math.round((VIEW_W - colW * 2 - 10) / 2);
+  const rows = Math.ceil(defs.length / 2);
+  for (let i = 0; i < defs.length; i++) {
+    const d = defs[i];
+    const col = Math.floor(i / rows);
+    const row = i % rows;
+    const x = x0 + col * (colW + 10);
+    const y = 52 + row * 16;
+    const on = !!Options[d.id];
+    drawText(ctx, d.label, x, y + 4, on ? Theme.ui : Theme.uiDim, 1);
+    if (button(ctx, 'opt' + d.id, x + colW - 38, y, 38, 13, on ? 'ON' : 'OFF', { selected: on })) {
+      Options[d.id] = !on;
+      saveOptions();
+      Sfx.ui();
+    }
+  }
+  drawText(ctx, 'READOUTS ONLY - NONE OF THESE CHANGE THE FIGHT',
+           VIEW_W / 2, VIEW_H - 36, rgba(Theme.uiDim, 0.75), 1, 'center');
+}
+
+// Sliders for the look, the shader loader, and a swatch row so a pack's
+// palette is visible without starting a run.
+function drawVisualTab(ctx, game, t) {
+  const defs = optionsIn('visual');
+  const colW = 186;
+  const x0 = 32;
+  const rows = Math.ceil(defs.length / 2);
+  for (let i = 0; i < defs.length; i++) {
+    const d = defs[i];
+    const col = Math.floor(i / rows);
+    const row = i % rows;
+    const x = x0 + col * (colW + 14);
+    const y = 50 + row * 13;
+    drawText(ctx, d.label, x, y + 2, Theme.ui, 1);
+    const max = d.max ?? 1;
+    const cur = clamp((Options[d.id] ?? d.def) / max, 0, 1);
+    const next = slider(ctx, 'vis' + d.id, x + 108, y + 1, 44, cur);
+    if (Math.abs(next - cur) > 0.0005) {
+      Options[d.id] = next * max;
+      saveOptions();
+      applyVisualOptions();
+      if (d.id === 'volume') setVolume(Options.volume);
+    }
+    // percentages for 0..1 dials, multipliers for the ones that go past 1
+    const v = Options[d.id] ?? 0;
+    const readout = max > 1 ? `${v.toFixed(2)}X` : `${Math.round(v * 100)}%`;
+    drawText(ctx, readout, x + colW - 4, y + 2, Theme.uiDim, 1, 'right');
+  }
+
+  const py = 50 + rows * 13 + 4;
+  pxRect(ctx, 32, py, VIEW_W - 64, 1, rgba(Theme.uiDim, 0.4));
+  drawText(ctx, 'SHADER PACK (.SHDR)', 32, py + 5, Theme.platformGlow, 1);
+  if (button(ctx, 'load', 32, py + 15, 70, 14, 'LOAD')) game.requestShaderUpload();
+  if (button(ctx, 'reset', 106, py + 15, 58, 14, 'RESET', { disabled: !game.shaderName })) game.resetShader();
+  if (button(ctx, 'sample', 168, py + 15, 92, 14, 'SAMPLE')) game.downloadSampleShader();
+  if (button(ctx, 'defaults', 264, py + 15, 78, 14, 'DEFAULTS')) {
+    resetOptions();
+    applyVisualOptions();
+    setVolume(Options.volume);
+    Sfx.ui();
+  }
+  const status = game.shaderError ? game.shaderError.slice(0, 40)
+    : game.shaderName ? `ACTIVE: ${game.shaderName}` : 'BUILT-IN SHADER';
+  drawText(ctx, status, 32, py + 33, game.shaderError ? Theme.hp : Theme.ui, 1);
+  if (!game.postfx.ok) drawText(ctx, 'WEBGL OFF - EFFECTS DISABLED', 32, py + 42, Theme.hp, 1);
+  else drawText(ctx, 'SETTINGS AND SHADER SAVE AUTOMATICALLY', 32, py + 42, rgba(Theme.uiDim, 0.75), 1);
+
+  const keys = ['player', 'uiAccent', 'platformGlow', 'enemyGrunt', 'enemyBrute',
+                'fire', 'lightning', 'slime', 'hp', 'ground'];
+  drawText(ctx, 'PALETTE', VIEW_W - 32, py + 21, rgba(Theme.uiDim, 0.9), 1, 'right');
+  for (let i = 0; i < keys.length; i++) {
+    const sx = VIEW_W - 32 - (keys.length - i) * 12;
+    ctx.fillStyle = rgba('#000000', 0.5);
+    ctx.fillRect(sx, py + 29, 10, 10);
+    ctx.fillStyle = Theme[keys[i]];
+    ctx.fillRect(sx + 1, py + 30, 8, 8);
+  }
+}
+
+function drawBindsTab(ctx, game, t) {
+  drawText(ctx, 'CLICK A KEY TO REBIND IT', VIEW_W / 2, 50, Theme.uiDim, 1, 'center');
 
   // a key press while rebinding is consumed here, never by gameplay
   if (UI.rebinding) {
@@ -97,112 +323,45 @@ export function drawControls(ctx, game, t) {
     }
   }
 
-  let y = 46;
+  let y = 64;
   for (const action of BIND_ORDER) {
     const waiting = UI.rebinding === action;
     drawText(ctx, BIND_LABELS[action], 44, y + 4, Theme.ui, 1);
     const label = waiting ? 'PRESS A KEY' : bindLabel(Binds[action]);
-    if (button(ctx, 'bind-' + action, 190, y, waiting ? 92 : 52, 14, label, { selected: waiting })) {
+    if (button(ctx, 'bind-' + action, 178, y, waiting ? 92 : 52, 14, label, { selected: waiting })) {
       UI.rebinding = waiting ? null : action;
     }
-    y += 18;
+    y += 17;
   }
 
-  // the things that are not rebindable, for reference
   const fixed = [
     ['DOUBLE TAP MOVE', 'DASH'],
     ['DOUBLE TAP DROP', 'GROUND SLAM'],
     ['LEFT / RIGHT CLICK', 'ATTACK / INTERACT'],
-    ['SCROLL, 1-4', 'HOTBAR'],
+    ['SCROLL, 1-4', 'HOTBAR / FOLD WHEEL'],
     ['ESC', 'PAUSE'],
   ];
-  const fx = 292;
-  drawText(ctx, 'FIXED', fx, 46, Theme.uiDim, 1);
-  let fy = 60;
+  const fx = 288;
+  drawText(ctx, 'FIXED', fx, 64, Theme.uiDim, 1);
+  let fy = 78;
   for (const [k, v] of fixed) {
     drawText(ctx, k, fx, fy, Theme.uiAccent, 1);
     drawText(ctx, v, fx, fy + 9, Theme.uiDim, 1);
-    fy += 22;
+    fy += 21;
   }
 
-  if (button(ctx, 'binddef', 44, y + 4, 96, 16, 'RESET DEFAULTS')) {
+  if (button(ctx, 'binddef', 44, y + 6, 96, 15, 'RESET DEFAULTS')) {
     resetBinds();
     UI.rebinding = null;
   }
-  if (button(ctx, 'back', VIEW_W - 152, y + 4, 90, 16, 'BACK')) {
-    UI.rebinding = null;
-    game.screen = game.controlsReturn || 'menu';
-    game.controlsReturn = null;
-  }
 }
 
-export function drawSettings(ctx, game, t) {
-  drawMenuBackdrop(ctx, t);
-  panel(ctx, 28, 14, VIEW_W - 56, VIEW_H - 44);
-  drawTextShadow(ctx, 'SETTINGS', VIEW_W / 2, 22, Theme.uiAccent, 2, 'center');
-
-  // --- shader pack
-  drawText(ctx, 'SHADER PACK (.SHDR)', 40, 44, Theme.platformGlow, 1);
-  drawText(ctx, 'REPLACES THE POST PIPELINE AND', 40, 56, Theme.uiDim, 1);
-  drawText(ctx, 'CAN RETHEME EVERY SPRITE COLOR.', 40, 66, Theme.uiDim, 1);
-
-  if (button(ctx, 'load', 40, 78, 96, 18, 'LOAD .SHDR')) game.requestShaderUpload();
-  if (button(ctx, 'reset', 142, 78, 80, 18, 'RESET', { disabled: !game.shaderName })) game.resetShader();
-
-  const status = game.shaderError ? game.shaderError.slice(0, 34)
-    : game.shaderName ? `ACTIVE: ${game.shaderName}` : 'USING BUILT-IN SHADER';
-  drawText(ctx, status, 40, 102, game.shaderError ? Theme.hp : Theme.ui, 1);
-  if (!game.postfx.ok) drawText(ctx, 'WEBGL OFF - EFFECTS DISABLED', 40, 112, Theme.hp, 1);
-
-  // --- sliders
-  drawText(ctx, 'BLOOM', 40, 128, Theme.ui, 1);
-  const nb = slider(ctx, 'bloom', 120, 127, 90, clamp(Theme.bloomStrength / 2, 0, 1));
-  Theme.bloomStrength = nb * 2;
-  drawText(ctx, Math.round(Theme.bloomStrength * 50) + '%', 218, 128, Theme.uiDim, 1);
-
-  drawText(ctx, 'SCANLINE', 40, 144, Theme.ui, 1);
-  Theme.scanline = slider(ctx, 'scan', 120, 143, 90, Theme.scanline);
-  drawText(ctx, Math.round(Theme.scanline * 100) + '%', 218, 144, Theme.uiDim, 1);
-
-  drawText(ctx, 'VOLUME', 40, 160, Theme.ui, 1);
-  const nv = slider(ctx, 'vol', 120, 159, 90, AudioCfg.volume);
-  if (nv !== AudioCfg.volume) setVolume(nv);
-  drawText(ctx, Math.round(AudioCfg.volume * 100) + '%', 218, 160, Theme.uiDim, 1);
-
-  if (button(ctx, 'shake', 40, 174, 100, 16, game.screenShake ? 'SHAKE: ON' : 'SHAKE: OFF')) {
-    game.screenShake = !game.screenShake;
-  }
-  if (button(ctx, 'sample', 146, 174, 116, 16, 'DOWNLOAD SAMPLE')) game.downloadSampleShader();
-  if (button(ctx, 'skeys', 40, 194, 100, 16, 'KEY BINDINGS')) {
-    game.controlsReturn = 'settings';
-    game.screen = 'controls';
-  }
-
-  // --- format help
-  panel(ctx, 274, 40, VIEW_W - 274 - 34, 150, { alpha: 0.5 });
-  const help = [
-    'SHDR FORMAT',
-    '',
-    '/*@THEME',
-    '{ "NAME":"NEON",',
-    '  "PLAYER":"#FF00AA",',
-    '  "BLOOMSTRENGTH":1.6 }',
-    '@*/',
-    'PRECISION MEDIUMP FLOAT;',
-    'VARYING VEC2 VUV;',
-    'UNIFORM SAMPLER2D USCENE;',
-    'UNIFORM SAMPLER2D UBLOOM;',
-    'UNIFORM FLOAT UTIME;',
-    'VOID MAIN() { ... }',
-  ];
-  for (let i = 0; i < help.length; i++) {
-    drawText(ctx, help[i], 280, 46 + i * 10, i === 0 ? Theme.uiAccent : Theme.uiDim, 1);
-  }
-
-  if (button(ctx, 'back', 146, 194, 90, 16, 'BACK')) {
-    game.screen = game.returnScreen || 'menu';
-    game.returnScreen = null;
-  }
+// The old standalone controls screen is now just Settings opened on its tab.
+export function drawControls(ctx, game, t) {
+  UI.tab = 'binds';
+  if (game.controlsReturn) { game.returnScreen = game.controlsReturn; game.controlsReturn = null; }
+  game.screen = 'settings';
+  drawSettings(ctx, game, t);
 }
 
 export function drawClassSelect(ctx, game, t) {

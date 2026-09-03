@@ -14,6 +14,8 @@ import {
 } from './config.js';
 import { ITEMS, Inventory } from './items.js';
 import { Binds, Input } from './input.js';
+import { Options } from './settings.js';
+import { drawText } from './font.js';
 
 // --- shared physics ------------------------------------------------------
 
@@ -81,6 +83,57 @@ export class Status {
 // --- enemies -------------------------------------------------------------
 
 export const SHARD_TINT = '#a98cff';
+
+// Everything the Origamist throws is drawn in two colours only: the sheet and
+// the ink on it. No glow, no gradients - it should look hand-drawn.
+export const INK = {
+  paper: '#f4f0e6',
+  paperShade: '#cdc7b8',
+  ink: '#141018',
+  inkSoft: '#3a3340',
+};
+
+// A wobbling hand-drawn line: the same path, redrawn with a per-frame jitter
+// that snaps to whole steps so it reads as animation cels, not noise.
+export function doodleLine(ctx, pts, color, width, seed = 0, wob = 1) {
+  if (pts.length < 2) return;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (let i = 0; i < pts.length; i++) {
+    const n = Math.sin((i * 12.9898 + seed * 78.233)) * 43758.5453;
+    const jx = ((n - Math.floor(n)) - 0.5) * wob;
+    const m = Math.sin((i * 39.3468 + seed * 11.135)) * 24634.6345;
+    const jy = ((m - Math.floor(m)) - 0.5) * wob;
+    if (i === 0) ctx.moveTo(pts[i][0] + jx, pts[i][1] + jy);
+    else ctx.lineTo(pts[i][0] + jx, pts[i][1] + jy);
+  }
+  ctx.stroke();
+}
+
+// The same, closed and filled with paper before the ink outline goes on.
+export function doodleShape(ctx, pts, fill, stroke, width, seed = 0, wob = 1) {
+  const jitter = pts.map((pt, i) => {
+    const n = Math.sin((i * 12.9898 + seed * 78.233)) * 43758.5453;
+    const m = Math.sin((i * 39.3468 + seed * 11.135)) * 24634.6345;
+    return [pt[0] + ((n - Math.floor(n)) - 0.5) * wob, pt[1] + ((m - Math.floor(m)) - 0.5) * wob];
+  });
+  ctx.beginPath();
+  for (let i = 0; i < jitter.length; i++) {
+    if (i === 0) ctx.moveTo(jitter[i][0], jitter[i][1]);
+    else ctx.lineTo(jitter[i][0], jitter[i][1]);
+  }
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = width;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  }
+}
 
 // What each class considers its own weapons, for the Damage Booster.
 const CLASS_WEAPONS = {
@@ -179,7 +232,10 @@ export class Enemy {
     }
     this.hurtFlash = 0.16;
     const crit = !!opts.crit;
-    floatText(this.cx + rand(-3, 3), this.cy - 8, Math.round(amount), opts.color ?? (crit ? Theme.uiAccent : '#ffffff'), { crit });
+    if (Options.showDamage) {
+      floatText(this.cx + rand(-3, 3), this.cy - 8, Math.round(amount),
+                opts.color ?? (crit ? Theme.uiAccent : '#ffffff'), { crit });
+    }
     burst(this.cx, this.cy, crit ? 12 : 7, {
       color: opts.color ?? Theme.blood, color2: '#ffffff',
       speedMin: 30, speedMax: 150, lifeMin: 0.2, lifeMax: 0.45, sizeMax: 2,
@@ -766,12 +822,18 @@ export class Enemy {
 
   drawHpBar(ctx) {
     if (this.hp >= this.maxHp) return;
+    if (!Options.showEnemyHpBars && !Options.showEnemyHpNum) return;
     const w = Math.max(14, this.w + 4);
     const x = Math.round(this.x - w / 2);
     const y = Math.round(this.y - this.h - 7);
-    pxRect(ctx, x - 1, y - 1, w + 2, 4, '#00000099');
-    pxRect(ctx, x, y, w, 2, Theme.hpBack);
-    pxRect(ctx, x, y, Math.round(w * clamp(this.hp / this.maxHp, 0, 1)), 2, Theme.hp);
+    if (Options.showEnemyHpBars) {
+      pxRect(ctx, x - 1, y - 1, w + 2, 4, '#00000099');
+      pxRect(ctx, x, y, w, 2, Theme.hpBack);
+      pxRect(ctx, x, y, Math.round(w * clamp(this.hp / this.maxHp, 0, 1)), 2, Theme.hp);
+    }
+    if (Options.showEnemyHpNum) {
+      drawText(ctx, `${Math.ceil(this.hp)}`, Math.round(this.x), y - 9, Theme.ui, 1, 'center');
+    }
   }
 
   drawStatusFx(ctx, t) {
@@ -1198,14 +1260,14 @@ export class Projectile {
           x: this.x - (this.vx / want) * 5, y: this.y - (this.vy / want) * 5,
           vx: -this.vx * 0.14 + rand(-20, 20), vy: -this.vy * 0.14 + rand(-20, 20),
           life: rand(0.15, 0.5), size: randInt(1, 2),
-          color: Math.random() < 0.4 ? '#ffe9a8' : '#ff8a5c', gravity: -30, drag: 0.9,
-          kind: Math.random() < 0.4 ? 'streak' : 'shrink',
+          color: Math.random() < 0.5 ? INK.ink : INK.paper, gravity: -30, drag: 0.9,
+          kind: Math.random() < 0.4 ? 'streak' : 'shrink', glow: false,
         });
       }
       if (Math.random() < dt * 22) {
         spawnParticle({
           x: this.x, y: this.y, vx: rand(-14, 14), vy: rand(-14, 4), life: rand(0.4, 1.0),
-          size: randInt(1, 3), color: '#3a3550', gravity: -22, drag: 0.92,
+          size: randInt(1, 3), color: INK.inkSoft, gravity: -22, drag: 0.92,
           kind: 'smoke', glow: false,
         });
       }
@@ -1215,7 +1277,8 @@ export class Projectile {
       if (Math.random() < dt * 14) {
         spawnParticle({
           x: this.x, y: this.y, vx: rand(-10, 10), vy: rand(-6, 10), life: rand(0.2, 0.5),
-          size: 1, color: '#efeade', gravity: 12, drag: 0.96, kind: 'shrink',
+          size: 1, color: Math.random() < 0.3 ? INK.ink : INK.paper,
+          gravity: 12, drag: 0.96, kind: 'shrink', glow: false,
         });
       }
     }
@@ -1234,10 +1297,10 @@ export class Projectile {
       this.vy -= ORIGAMI.forms.airplane.bounceKick;    // a little lift off the kick
       this.bounces++;
       Sfx.ui();
-      impactRing(this.x, this.y, { color: '#efeade', r0: 2, r1: 22, life: 0.25, width: 1.5 });
+      impactRing(this.x, this.y, { color: INK.ink, r0: 2, r1: 22, life: 0.25, width: 1.5 });
       burst(this.x, this.y, 10, {
-        color: '#efeade', color2: '#ffffff', speedMin: 40, speedMax: 150,
-        lifeMin: 0.12, lifeMax: 0.35, gravity: 90, drag: 0.88, kind: 'streak',
+        color: INK.ink, color2: INK.paper, speedMin: 40, speedMax: 150,
+        lifeMin: 0.12, lifeMax: 0.35, gravity: 90, drag: 0.88, kind: 'streak', glow: false,
       });
       if (this.bounces > cfg.bounces) { this.expire(); return; }
     }
@@ -1259,10 +1322,14 @@ export class Projectile {
     this.dead = true;
     Sfx.ui();
     burst(this.x, this.y, 14, {
-      color: '#efeade', color2: '#b9b2a2', speedMin: 20, speedMax: 120,
-      lifeMin: 0.3, lifeMax: 0.9, sizeMax: 2, gravity: 320, drag: 0.9,
+      color: INK.paper, color2: INK.paperShade, speedMin: 20, speedMax: 120,
+      lifeMin: 0.3, lifeMax: 0.9, sizeMax: 2, gravity: 320, drag: 0.9, glow: false,
     });
-    impactRing(this.x, this.y, { color: '#efeade', r0: 1, r1: 18, life: 0.24, width: 1.2, squash: 0.4 });
+    burst(this.x, this.y, 5, {
+      color: INK.ink, speedMin: 15, speedMax: 90, lifeMin: 0.2, lifeMax: 0.6,
+      gravity: 340, drag: 0.9, glow: false,
+    });
+    impactRing(this.x, this.y, { color: INK.ink, r0: 1, r1: 18, life: 0.24, width: 1.2, squash: 0.4 });
   }
 
   detonate() {
@@ -1405,6 +1472,7 @@ export class Projectile {
       impactRing(this.x, this.y, { color: '#ffe9a8', r0: 2, r1: 26, life: 0.28, width: 1.5, squash: 0.35 });
       return;
     }
+    if (this.kind === 'origami') { this.crumple(); return; }
     if (this.kind === 'shard') {
       burst(this.x, this.y, 8, {
         color: SHARD_TINT, color2: '#ffffff', speedMin: 30, speedMax: 140,
@@ -1474,42 +1542,38 @@ export class Projectile {
       pxRect(ctx, -6, -1, 12, 2, Theme.lightning);
       pxRect(ctx, -2, -1, 6, 2, '#ffffff');
     } else if (this.kind === 'origami') {
+      // Two colours only, and every edge is a shaky ink line. The jitter seed
+      // steps ~12 times a second so it flickers like hand-drawn cels.
       const plane = this.fold === 'airplane';
-      // trail
-      for (let i = 0; i < this.trail.length; i++) {
+      const cel = Math.floor(this.t * 12);
+      // a dotted ink trail, the way a doodle shows movement
+      for (let i = 0; i < this.trail.length; i += 2) {
         const k = i / this.trail.length;
         pxRect(ctx, this.trail[i][0] - 1, this.trail[i][1] - 1, 2, 2,
-               rgba(plane ? '#efeade' : '#ff8a5c', k * 0.4 * Theme.trail));
-      }
-      if (!plane) {
-        glowDot(ctx, this.x, this.y, 16, '#ff8a5c', 0.45);
-        glowDot(ctx, this.x, this.y, 7, '#ffe9a8', 0.6);
-      } else {
-        glowDot(ctx, this.x, this.y, 9, '#ffffff', 0.16);
+               rgba(INK.ink, k * 0.45 * Theme.trail));
       }
       ctx.translate(Math.round(this.x), Math.round(this.y));
-      // planes bank as they glide; missiles just shudder
-      ctx.rotate(this.angle + (plane ? Math.sin(this.flutter) * 0.10 : Math.sin(this.flutter) * 0.05));
+      ctx.rotate(this.angle + Math.sin(this.flutter) * (plane ? 0.10 : 0.04));
       if (plane) {
-        // a dart seen from the side: two folded wings and a keel
-        ctx.fillStyle = '#efeade';
-        ctx.beginPath();
-        ctx.moveTo(7, 0); ctx.lineTo(-6, -4); ctx.lineTo(-3, 0); ctx.lineTo(-6, 4);
-        ctx.closePath(); ctx.fill();
-        ctx.fillStyle = '#c9c2b2';
-        ctx.beginPath();
-        ctx.moveTo(7, 0); ctx.lineTo(-6, 4); ctx.lineTo(-3, 0);
-        ctx.closePath(); ctx.fill();
-        pxRect(ctx, -3, -1, 10, 1, '#ffffff');
+        // a dart: filled paper, inked fold lines over it
+        doodleShape(ctx, [[8, 0], [-7, -5], [-3, 0], [-7, 5]], INK.paper, INK.ink, 1.2, cel, 1.1);
+        doodleShape(ctx, [[8, 0], [-7, 5], [-3, 0]], INK.paperShade, null, 0, cel + 3, 1.1);
+        doodleLine(ctx, [[8, 0], [-3, 0]], INK.ink, 1, cel + 1, 0.9);
+        doodleLine(ctx, [[4, -1], [-5, -4]], INK.inkSoft, 1, cel + 2, 0.9);
       } else {
-        pxRect(ctx, -5, -2, 11, 4, '#efeade');
-        pxRect(ctx, -5, -2, 11, 1, '#ffffff');
-        pxRect(ctx, 5, -1, 3, 2, '#ff8a5c');
-        pxRect(ctx, -6, -4, 3, 3, '#d7d0c0');
-        pxRect(ctx, -6, 1, 3, 3, '#d7d0c0');
-        ctx.globalCompositeOperation = 'lighter';
-        pxRect(ctx, -12, -1, 7, 2, rgba('#ff8a5c', 0.7));
-        pxRect(ctx, -9, -1, 4, 2, rgba('#ffe9a8', 0.9));
+        // a rocket: paper tube, inked nose and fins, hatched exhaust
+        doodleShape(ctx, [[7, 0], [3, -3], [-6, -3], [-6, 3], [3, 3]],
+                    INK.paper, INK.ink, 1.2, cel, 1.0);
+        doodleShape(ctx, [[-6, -3], [-10, -6], [-8, -1]], INK.paperShade, INK.ink, 1, cel + 1, 1.0);
+        doodleShape(ctx, [[-6, 3], [-10, 6], [-8, 1]], INK.paperShade, INK.ink, 1, cel + 2, 1.0);
+        doodleLine(ctx, [[3, -3], [3, 3]], INK.ink, 1, cel + 3, 0.8);
+        doodleLine(ctx, [[-1, -2], [-1, 2]], INK.inkSoft, 1, cel + 4, 0.8);
+        // exhaust: three scribbled strokes that flick with the cel
+        for (let i = 0; i < 3; i++) {
+          const o = (i - 1) * 3;
+          const len = 6 + ((cel + i) % 3) * 4;
+          doodleLine(ctx, [[-7, o * 0.6], [-7 - len, o]], i % 2 ? INK.inkSoft : INK.ink, 1.4, cel + i * 5, 1.6);
+        }
       }
     } else if (this.kind === 'shard') {
       const frag = this.shardPhase === 'fragment';
@@ -1617,9 +1681,9 @@ export class Player {
     this.onGround = true;
     this.platform = null;
     this.facing = 1;
-    this.baseMaxHp = PLAYER.maxHp;
-    this.maxHp = PLAYER.maxHp;
-    this.hp = PLAYER.maxHp;
+    this.baseMaxHp = classId === 'origamist' ? ORIGAMI.maxHp : PLAYER.maxHp;
+    this.maxHp = this.baseMaxHp;
+    this.hp = this.baseMaxHp;
     this.dead = false;
     this.anim = 0;
     this.invuln = 0;
@@ -1662,7 +1726,7 @@ export class Player {
     this.inventory = new Inventory();
     if (classId === 'origamist') {
       // paper is the weapon; the book is the manual it is folded from
-      this.inventory.add('paper', ORIGAMI.startPaper);
+      this.inventory.add('paper', Math.min(ORIGAMI.startPaper, ORIGAMI.maxPaper));
       this.inventory.add('bookairplane', 1);
     } else {
       this.inventory.add(classId === 'melee' ? 'sword' : 'bow', 1);

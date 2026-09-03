@@ -40,19 +40,20 @@ export const ITEMS = {
   },
   // --- Origamist ---------------------------------------------------------
   paper: {
-    id: 'paper', name: 'Paper', rarity: 'common', stack: 100, weapon: 'paper',
+    id: 'paper', name: 'Paper', rarity: 'common', stack: 250, weapon: 'paper',
     desc: ['Ammunition and weapon both.', 'Attacking opens the fold wheel;',
-           'each fold you know costs its own', 'number of sheets.'],
+           'each fold you know costs its own', 'number of sheets.',
+           'You can carry 250 at most.'],
   },
   bookairplane: {
     id: 'bookairplane', name: 'Paper Plane Tutor', rarity: 'uncommon', stack: 1, book: 'airplane',
     desc: ['Teaches the PAPER PLANE fold.', '1 sheet. Glides forever, sinking',
-           'slowly, and kicks off walls.', '15 damage.'],
+           'slowly, and kicks off walls.', '30 damage.'],
   },
   bookmissile: {
     id: 'bookmissile', name: 'Paper Missile Tutor', rarity: 'rare', stack: 1, book: 'missile',
     desc: ['Teaches the PAPER MISSILE fold.', '2 sheets. Starts slow, builds',
-           'speed, detonates on contact for', '20 over 5 blocks.'],
+           'speed, detonates on contact for', '40 over 5 blocks.'],
   },
   damagebooster: {
     id: 'damagebooster', name: 'Damage Booster', rarity: 'rare', stack: 1,
@@ -285,32 +286,32 @@ export function drawItemIcon(ctx, id, x, y, s = 12, t = 0) {
       break;
     }
     case 'paper': {
-      // a folded sheet with a soft crease shadow
+      // a sheet with a scribble of ink on it - two colours, nothing else
       const lift = Math.round(Math.sin(t * 2.5) * 0.6);
-      P(2, 2 + lift, 8, 9, '#efeade');
-      P(2, 2 + lift, 8, 1, '#ffffff');
-      P(2, 10 + lift, 8, 1, '#b9b2a2');
-      P(6, 2 + lift, 1, 9, '#d7d0c0');
-      P(3, 4 + lift, 4, 1, '#b9b2a2');
-      P(3, 6 + lift, 3, 1, '#b9b2a2');
+      P(2, 1 + lift, 8, 10, '#141018');
+      P(3, 2 + lift, 6, 8, '#f4f0e6');
+      P(3, 9 + lift, 6, 1, '#cdc7b8');
+      P(4, 4 + lift, 4, 1, '#141018');
+      P(4, 6 + lift, 3, 1, '#141018');
+      P(4, 8 + lift, 4, 1, '#3a3340');
       break;
     }
     case 'bookairplane':
     case 'bookmissile': {
-      const accent = id === 'bookmissile' ? '#ff8a5c' : '#8cc8ff';
-      P(1, 2, 9, 9, '#5a4632');
-      P(1, 2, 9, 1, '#7a6044');
-      P(2, 3, 7, 7, '#efeade');
-      P(9, 2, 1, 9, '#3a2c1e');
+      // a manual: inked cover, paper page, the fold sketched on it in ink
+      P(1, 2, 9, 9, '#141018');
+      P(2, 3, 7, 7, '#f4f0e6');
+      P(9, 2, 1, 9, '#3a3340');
+      P(2, 3, 1, 7, '#cdc7b8');
       const fl = Math.round(Math.sin(t * 3) * 0.5);
       if (id === 'bookairplane') {
-        P(3, 5 + fl, 5, 1, accent);
-        P(4, 6 + fl, 3, 1, accent);
-        P(5, 4 + fl, 1, 3, accent);
+        P(3, 5 + fl, 5, 1, '#141018');
+        P(4, 6 + fl, 3, 1, '#141018');
+        P(5, 4 + fl, 1, 3, '#3a3340');
       } else {
-        P(4, 4 + fl, 2, 5, accent);
-        P(3, 8 + fl, 4, 1, '#ffd76a');
-        P(4, 3 + fl, 2, 1, '#ffffff');
+        P(4, 4 + fl, 2, 5, '#141018');
+        P(3, 8 + fl, 4, 1, '#3a3340');
+        P(4, 3 + fl, 2, 1, '#3a3340');
       }
       break;
     }
