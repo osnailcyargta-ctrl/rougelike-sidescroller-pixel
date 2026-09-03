@@ -210,13 +210,13 @@ export const ENEMY_TYPES = {
   // The Undead Ceiling's slab. It hangs, so nothing on the ground reaches it
   // and a slam does nothing.
   ceilingBody: {
-    id: 'ceilingBody', name: 'Undead Ceiling', hp: 3600, speed: 0, damage: 26,
+    id: 'ceilingBody', name: 'Undead Ceiling', hp: 2000, speed: 0, damage: 26,
     w: 300, h: 46, attackCooldown: 1, attackRange: 30,
     flying: true, boss: true, slamImmune: true, noContact: true,
   },
   // Its arm. A separate target so hitting the hand still lands on the pool.
   ceilingHand: {
-    id: 'ceilingHand', name: 'Grasping Hand', hp: 3600, speed: 0, damage: 30,
+    id: 'ceilingHand', name: 'Grasping Hand', hp: 2000, speed: 0, damage: 30,
     w: 26, h: 30, attackCooldown: 1, attackRange: 24,
     flying: true, boss: true, slamImmune: true, noContact: true,
   },
@@ -266,7 +266,7 @@ export const BOSS_TYPES = {
   ceiling: {
     id: 'ceiling', name: 'Undead Ceiling', short: 'Ceiling', title: 'THE ROOF OF MEAT',
     kind: 'ceiling',
-    hp: 3600,
+    hp: 2000,
     dmgScale: 2,              // it hits twice as hard as its numbers read
     pace: 0.65,               // and waits this much of each scripted pause
     w: 300, h: 46,            // the slab that hangs from the roof

@@ -140,7 +140,7 @@ hurts far more than the back). Its loop: buried 3s, leap, wait 2s, leap, wait
 2s, leap + spit, buried 3s, spit + leap, wait 2s, repeat. The spit is a fan of
 20 globs thrown up on their own arcs.
 
-**Undead Ceiling, THE ROOF OF MEAT** (3600 HP, fixed). **Room 15.** It is not
+**Undead Ceiling, THE ROOF OF MEAT** (2000 HP, fixed). **Room 15.** It is not
 standing in the arena — it *is* the roof: a slab of grafted flesh stretched
 across the whole top of the screen, breathing through swollen lobes, dripping,
 with sinew hanging off its underside and **one enormous eye** in the middle
@@ -171,9 +171,8 @@ crush brings the whole thing down to you.
 Killing it does not offer a choice. It leaves exactly one thing: the **Damage
 Booster**.
 
-Note that 3600 HP inside 150 seconds is a real DPS check — roughly 24 sustained
-damage per second, which is more than the starter sword or bow put out on their
-own. It is meant to be cleared with what the first fourteen rooms handed you.
+Note that 2000 HP inside 150 seconds is still a DPS check — a little over 13
+sustained damage per second — so it wants a real weapon, not the starter bow.
 
 **Alphads, THE AETHER GOD** (2000 HP, fixed — it does not scale). The run's
 last fight, waiting in **room 20**. It never lands and **ground slam does
