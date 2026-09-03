@@ -485,7 +485,7 @@ export class Game {
     this.projectiles.push(new Projectile({
       x: ox, y: oy,
       vx: Math.cos(aim) * cfg.speed, vy: Math.sin(aim) * cfg.speed,
-      damage: cfg.damage, kind: 'origami', fold: id, team: 'player',
+      damage: p.boosted(cfg.damage, 'paper'), kind: 'origami', fold: id, team: 'player',
       life: id === 'missile' ? 6 : 14, game: this,
     }));
     Sfx.swing();
@@ -617,7 +617,8 @@ export class Game {
     if (owner) owner.nukeBlasts = (owner.nukeBlasts ?? 0) + 1;
     const big = owner ? owner.nukeBlasts % NUKERANG.bigEvery === 0 : false;
     const radius = big ? NUKERANG.bigRadius : NUKERANG.hitRadius;
-    const damage = big ? NUKERANG.bigDamage : NUKERANG.hitDamage;
+    let damage = big ? NUKERANG.bigDamage : NUKERANG.hitDamage;
+    if (this.player) damage = this.player.boosted(damage, 'boomerang');
     const col = big ? Theme.fireHot : Theme.fire;
 
     for (const e of this.enemies) {
@@ -885,6 +886,10 @@ export class Game {
         // wave just ended: patch the player up before the next one lands
         this.waveCooldown = WAVES.interWaveDelay;
         this.player.healPct(WAVE_HEAL);
+        if (this.player.classId === 'origamist') {
+          this.player.inventory.add('paper', ORIGAMI.wavePaper);
+          floatText(this.player.x, this.player.cy - 20, `+${ORIGAMI.wavePaper} PAPER`, '#efeade', { life: 1.1 });
+        }
       }
       this.waveCooldown -= dt;
       if (this.waveCooldown <= 0) {
@@ -901,22 +906,27 @@ export class Game {
     if (this.roomIndex >= FINAL_ROOM) { this.finishRun(); return; }
     if (this.isBossRoom()) {
       // two offers on the centre platform, one pick
-      const [rolledA, rolled] = rollPerkPair(this.player.inventory);
+      const inv = this.player.inventory;
+      const [rolledA, rolled] = rollPerkPair(inv);
+      // The Undead Ceiling only ever hands over the Damage Booster.
+      if (this.boss && this.boss.def.id === 'ceiling' && !inv.has('damagebooster')) {
+        this.dropBossPair('damagebooster', null);
+        this.finishClearRoom();
+        return;
+      }
       // Big Dude keeps the Paper Missile tutor in the first slot, once
       const wantsBook = this.boss && this.boss.def.id === 'bigdude' &&
-        !this.player.inventory.has('bookmissile');
+        !inv.has('bookmissile');
       const a = wantsBook ? 'bookmissile' : rolledA;
-      // the second offer is always the Nukerang the first time it comes up
-      const b = this.player.inventory.has('nukerang') ? rolled : 'nukerang';
-      const group = `boss-${this.roomIndex}`;
-      this.pickups.push(new Pickup(a, DROP_POINT.x - 26, DROP_POINT.y, group));
-      this.pickups.push(new Pickup(b, DROP_POINT.x + 26, DROP_POINT.y, group));
-      for (const pk of this.pickups) {
-        burst(pk.x, pk.y - 12, 24, {
-          color: RARITY[ITEMS[pk.itemId].rarity].color, color2: '#ffffff',
-          speedMin: 30, speedMax: 140, lifeMin: 0.3, lifeMax: 0.8, gravity: 120,
-        });
+      // The second offer is normally the Nukerang, once. An Origamist has no
+      // use for it, so they are taught the Paper Missile instead.
+      let b;
+      if (this.player.classId === 'origamist') {
+        b = inv.has('bookmissile') ? rolled : 'bookmissile';
+      } else {
+        b = inv.has('nukerang') ? rolled : 'nukerang';
       }
+      this.dropBossPair(a, b);
     } else {
       const id = rollDrop(this.player.inventory);
       this.pickups.push(new Pickup(id, DROP_POINT.x, DROP_POINT.y));
@@ -925,6 +935,28 @@ export class Game {
         speedMin: 30, speedMax: 140, lifeMin: 0.3, lifeMax: 0.8, gravity: 120,
       });
     }
+    this.finishClearRoom();
+  }
+
+  // Lay a boss's offers on the centre platform. Pass a single id to hand over
+  // one thing that is not a choice at all.
+  dropBossPair(a, b) {
+    const group = b ? `boss-${this.roomIndex}` : null;
+    if (b) {
+      this.pickups.push(new Pickup(a, DROP_POINT.x - 26, DROP_POINT.y, group));
+      this.pickups.push(new Pickup(b, DROP_POINT.x + 26, DROP_POINT.y, group));
+    } else {
+      this.pickups.push(new Pickup(a, DROP_POINT.x, DROP_POINT.y));
+    }
+    for (const pk of this.pickups) {
+      burst(pk.x, pk.y - 12, 24, {
+        color: RARITY[ITEMS[pk.itemId].rarity].color, color2: '#ffffff',
+        speedMin: 30, speedMax: 140, lifeMin: 0.3, lifeMax: 0.8, gravity: 120,
+      });
+    }
+  }
+
+  finishClearRoom() {
     this.portal = new Portal(VIEW_W - 34, GROUND_Y);
     Camera.add(4);
     Sfx.pickup();

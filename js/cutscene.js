@@ -21,6 +21,7 @@ const SUBTITLE = {
   golem: 'ANCHOR OF THE DEEP VAULT',
   bigdude: 'TWENTY BLOCKS OF APPETITE',
   alphads: 'THE AETHER GOD',
+  ceiling: 'THE ROOF OF MEAT',
 };
 
 export class Cutscene {
@@ -60,6 +61,9 @@ export class Cutscene {
   bossFocus() {
     const b = this.boss;
     if (!b) return { x: VIEW_W / 2, y: 150 };
+    if (b.kind === 'ceiling') {
+      return { x: VIEW_W / 2, y: clamp(b.slabBottom() + 26, 60, GROUND_Y - 40) };
+    }
     if (b.kind === 'worm') {
       return { x: clamp(b.hx, 90, VIEW_W - 90), y: clamp(Math.min(b.hy, GROUND_Y - 30) + 40, 70, GROUND_Y - 20) };
     }

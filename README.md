@@ -70,11 +70,13 @@ centre activates as a third spawn pad. When wave 2 ends, a drop appears on that
 centre platform — a perk 80% of the time, a **weapon** the other 20% (favouring
 one you aren't already carrying, so it can open up the other playstyle) and a gate opens on the right — right-click the drop to take
 it, right-click the gate to descend into the next room. Rooms get denser and
-add new enemy types as you go. A run is **15 rooms long**: Alphads waits in
-room 15 and killing it finishes the game.
+add new enemy types as you go. A run is **20 rooms long**: Alphads waits in
+room 20 and killing it finishes the game.
 
 Enemies keep their base stats through the first five rooms. From **room 6** they
-step up **once every two rooms**: +18% max HP and +12% damage per step, so a
+step up **once every two rooms**, and they **stop scaling after room 12** — past
+that the difficulty comes from the bosses, not from ordinary enemies quietly
+turning into sponges. Each step is +18% max HP and +12% damage, so a
 Ghoul is 80 HP / 12 damage until room 5, 94 / 13 in rooms 6–7, and 123 / 17 by
 rooms 10–11.
 
@@ -103,7 +105,7 @@ HP, the seed, and every item you were carrying (hover one for its tooltip).
 
 ### Boss rooms
 
-Every **5th room** (5, 10, 15, …) runs a **third wave** instead of ending after
+Every **5th room** (5, 10, 15, 20) runs a **third wave** instead of ending after
 two, and holds its drop back for it. Wave 3 spawns a boss in the centre of the
 arena. When it dies, **two perks** appear on the centre platform and you may
 take **one** — the moment you claim one the other greys out for good.
@@ -136,14 +138,38 @@ hurts far more than the back). Its loop: buried 3s, leap, wait 2s, leap, wait
 2s, leap + spit, buried 3s, spit + leap, wait 2s, repeat. The spit is a fan of
 20 globs thrown up on their own arcs.
 
-**Alphads, THE AETHER GOD** (1750 HP, fixed — it does not scale). The run's
-last fight, waiting in **room 15**. It never lands and **ground slam does
+**Undead Ceiling, THE ROOF OF MEAT** (1200 HP, fixed). **Room 15.** It is not
+standing in the arena — it *is* the roof: a slab of grafted flesh stretched
+across the whole top of the screen, breathing through swollen lobes, dripping,
+with sinew hanging off its underside and **one enormous eye** in the middle
+that tracks you. It never moves sideways and **ground slam does nothing**.
+
+* *Stare* — the eye opens, follows you while it charges, then **locks and fires
+  for 1 second** along that fixed line. Once it fires it does not follow.
+* *Grasp* — an arm of muscle grows out of the ceiling above you, hangs, then
+  punches down for 30.
+* *Crush* — the whole slab drops to the floor and grinds there before rising
+  again. **151 damage** to anything under it.
+
+Its loop is `stare, 1s, stare, 1s, stare, 1.2s, grasp, 1s, grasp`, repeating.
+**If the fight is still going after 2 minutes 30 seconds it starts adding the
+crush** to the end of every cycle — it is done waiting.
+
+Because it hangs from the roof, melee has to go up to reach it: from the floor
+you cannot touch it, but the **top drifting platform** puts it in range, and the
+crush brings the whole thing down to you.
+
+Killing it does not offer a choice. It leaves exactly one thing: the **Damage
+Booster**.
+
+**Alphads, THE AETHER GOD** (2000 HP, fixed — it does not scale). The run's
+last fight, waiting in **room 20**. It never lands and **ground slam does
 nothing to it**. The body is a black censor bar under a halo, with two wings on
 each side — a large one above and a small one below — and it carries a gold bow
 that aims wherever its next shot is going. Five attacks:
 
-* *Shot* — five arrows in a row, 20 damage each.
-* *Arrow rain* — twenty arrows fired straight up and off the top of the screen;
+* *Shot* — **ten** arrows in a row, 20 damage each.
+* *Arrow rain* — **twenty-five** arrows fired straight up and off the top of the screen;
   they arc back down as rain, with sights marking the floor under each one.
 * *Time stop* — for **2 seconds** the player and every enemy stop dead (no
   movement, no attacks, no grapple) and the whole screen drains to grayscale.
@@ -154,16 +180,18 @@ that aims wherever its next shot is going. Five attacks:
 * *Healing* — every living shardling is unmade into a green orb that homes in
   on Alphads and heals it **15 HP** on contact. Shoot the orbs to pop them
   before they land.
-* *God rays* — a laser that tracks you for 2 seconds, and every **0.75s** a
-  shock wave peels off it and runs out **10 blocks** to either side.
+* *God rays* — a laser that tracks you **only while it charges**. The instant
+  it fires it **locks to where you were standing** and stays on that line for 2
+  seconds — it does not follow you. Every **0.75s** a shock wave peels off it
+  and runs out **10 blocks** to either side.
 
 Its liturgy: `(shot, 0.5s, shot, 1s, arrow rain, 3s) x3, 1s, time stop,
 (god ray, 2.3s, god ray, 1s, shot, shot, shot), healing`, then repeat.
 
-**Room 15 is the last room.** Killing Alphads ends the run — no drops, no
+**Room 20 is the last room.** Killing Alphads ends the run — no drops, no
 portal, no room 16, just the ending screen with your run summary.
 
-Rooms 5 and 10 alternate between the golem and Big Dude, and each of those
+Rooms 5 and 10 hold the golem and Big Dude, and each of those
 scales from its own first appearance, so a debut boss always fights at its
 listed stats.
 
@@ -229,10 +257,12 @@ spends that fold's sheets; nothing in the room moves until you decide.
 
 Paper comes back to you two ways: every enemy you kill has a **10% chance to
 shed 1–4 sheets**, collected automatically with no need to pick them up, and
-**every new room hands you 50 more** on arrival.
+**every new room hands you 50 more** on arrival, plus **20 for every wave you clear**.
 
 The **Paper Missile Tutor** is held in the first slot of Big Dude's drop pair,
-once — the same rule the Nukerang follows on the other side.
+once. Playing as the Origamist it also replaces the Nukerang in the *second*
+slot of the first boss you kill, since a boomerang is no use to you — so the
+missile is guaranteed either way.
 
 ### Nukerang
 
@@ -260,6 +290,7 @@ Perks are items — they work while they simply sit anywhere in the inventory.
 | Bloodstone | Common | Every 5th hit you land heals 3 HP (+2 per extra stack) |
 | Aegis Shard | Uncommon | +20 absorb shield that soaks damage before your HP; refills 5s after you stop taking hits |
 | Shardgun | Rare | Ranged. **1 shell, 1.5s reload, 20 damage.** Each shot throws 5 shards over 5 blocks; they stop dead at that range, hang there **0.87s**, then re-form as splinters that streak at your **cursor** for **50%** damage with no range limit. Two splinters that meet burst into **8 fragments** at **75%** of base — so where you point when they let go is where the room detonates. Drops from a **Shardling, 10% of the time**, falling from where it broke. One per run |
+| Damage Booster | Rare | **+50% damage with your own class's weapons** while it is held — melee and the Nukerang for MELEE, the bow and Shardgun for RANGER, folds for the ORIGAMIST. It costs you **5 max HP**. The only thing the Undead Ceiling ever drops. One per run |
 | Firey Twin Dagger | Rare | Melee. **2-block reach, 5 damage, one strike every 0.3s** — the fastest weapon in the game. It carries **Fiery Blade built in and never rolls for it**: every connect burns. Every **15th hit** throws you forward in a burning dash that carves everything it passes for **+5** and leaves you briefly untouchable. Drops from a **Lurker, 1% of the time**. One per run |
 | Grappling Hook | Rare | `Q` fires a hook at the cursor. It bites terrain, reels you in on a rope you can swing from, and `Q` again lets go. Past its 11-block reach the hook **falls under gravity and keeps biting** on the way down, so a lobbed shot still catches. One per run |
 

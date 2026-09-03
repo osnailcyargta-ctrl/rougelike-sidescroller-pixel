@@ -96,6 +96,7 @@ export const TWINDAGGER = {
 export const ORIGAMI = {
   startPaper: 100,
   roomPaper: 50,             // handed over on entering a new room
+  wavePaper: 20,             // and after every wave you clear
   dropChance: 0.10,          // per kill, while playing the Origamist
   dropMin: 1, dropMax: 4,
   cooldown: 0.34,
@@ -133,21 +134,26 @@ export const SHARDGUN = {
 export const ROOM_SCALING = {
   startRoom: 6,
   everyRooms: 2,
+  stopRoom: 12,           // enemies stop scaling after room 12
   hpPerStep: 0.18,        // +18% max HP per step
   damagePerStep: 0.12,    // +12% damage per step
   bossHpPerTier: 0.40,    // +40% boss HP per boss room after the first
   bossDamagePerTier: 0.25,
 };
 
-// How many scaling steps a given room has earned.
+// How many scaling steps a given room has earned. It stops climbing at
+// stopRoom: past that the run gets harder through its bosses, not by the
+// regular enemies quietly turning into sponges.
 export function roomScaleSteps(room) {
-  const { startRoom, everyRooms } = ROOM_SCALING;
+  const { startRoom, everyRooms, stopRoom } = ROOM_SCALING;
   if (room < startRoom) return 0;
-  return Math.floor((room - startRoom) / everyRooms) + 1;
+  const capped = Math.min(room, stopRoom);
+  return Math.floor((capped - startRoom) / everyRooms) + 1;
 }
 
-export const BOSS_ROOM_INTERVAL = 5;   // rooms 5, 10, 15 ... get a third wave
-export const FINAL_ROOM = 15;          // Alphads waits here; there is no room 16
+export const BOSS_ROOM_INTERVAL = 5;   // rooms 5, 10, 15, 20 get a third wave
+export const FINAL_ROOM = 20;          // Alphads waits here; there is no room 21
+export const CEILING_ROOM = 15;        // where the Undead Ceiling hangs
 
 export const ENEMY_TYPES = {
   grunt: {
@@ -201,10 +207,23 @@ export const ENEMY_TYPES = {
     standOff: 92, windUp: 0.55, chargeSpeed: 395, chargeTime: 0.34,
     frontGuard: 0.25, summoned: true,
   },
+  // The Undead Ceiling's slab. It hangs, so nothing on the ground reaches it
+  // and a slam does nothing.
+  ceilingBody: {
+    id: 'ceilingBody', name: 'Undead Ceiling', hp: 1200, speed: 0, damage: 26,
+    w: 300, h: 46, attackCooldown: 1, attackRange: 30,
+    flying: true, boss: true, slamImmune: true, noContact: true,
+  },
+  // Its arm. A separate target so hitting the hand still lands on the pool.
+  ceilingHand: {
+    id: 'ceilingHand', name: 'Grasping Hand', hp: 1200, speed: 0, damage: 30,
+    w: 26, h: 30, attackCooldown: 1, attackRange: 24,
+    flying: true, boss: true, slamImmune: true, noContact: true,
+  },
   // Alphads' body. Censored-black, always airborne, and a ground slam cannot
   // touch it.
   alphadsBody: {
-    id: 'alphadsBody', name: 'Alphads', hp: 1750, speed: 0, damage: 22, w: 34, h: 46,
+    id: 'alphadsBody', name: 'Alphads', hp: 2000, speed: 0, damage: 22, w: 34, h: 46,
     attackCooldown: 1, attackRange: 30, flying: true, boss: true, slamImmune: true,
   },
   // Boss parts live in the normal enemy list so every existing hit test works.
@@ -242,16 +261,33 @@ export const BOSS_TYPES = {
     // It paces and hops the whole fight instead of standing there between orders.
     restless: { speed: 46, standOff: 96, hopVel: 250, hopEvery: [0.9, 1.9] },
   },
+  // Room 15. It does not stand on the floor - it IS the ceiling, a sheet of
+  // grafted flesh with one enormous eye, and it never moves sideways.
+  ceiling: {
+    id: 'ceiling', name: 'Undead Ceiling', short: 'Ceiling', title: 'THE ROOF OF MEAT',
+    kind: 'ceiling',
+    hp: 1200,
+    w: 300, h: 46,            // the slab that hangs from the roof
+    restY: 4,                 // how far its top sits above the screen edge
+    eyeR: 15,
+    laser: { duration: 1.0, windUp: 0.7, damage: 24, width: 9, tickDamage: 8, tick: 0.18 },
+    hand: {
+      damage: 30, reach: 190, windUp: 0.75, punchTime: 0.22, holdTime: 0.35,
+      retract: 0.5, w: 26, h: 30,
+    },
+    crush: { damage: 151, fallSpeed: 1500, hold: 0.45, riseSpeed: 190, windUp: 0.9 },
+    crushAfter: 150,          // 2.5 minutes in, it starts flattening the room
+  },
   // The last thing in the vault. It never lands, and it never stops.
   alphads: {
     id: 'alphads', name: 'Alphads', short: 'Alphads', title: 'THE AETHER GOD',
     kind: 'god',
-    hp: 1750,
+    hp: 2000,
     w: 34, h: 46,
     hoverY: 84, driftSpeed: 96, driftRange: 128,
 
-    shot: { arrows: 5, spacing: 0.13, speed: 330, damage: 20, windUp: 0.35 },
-    arrowRain: { count: 20, speed: 545, spread: 150, gravity: 430, windUp: 0.5 },
+    shot: { arrows: 10, spacing: 0.13, speed: 330, damage: 20, windUp: 0.35 },
+    arrowRain: { count: 25, speed: 545, spread: 150, gravity: 430, windUp: 0.5 },
     timeStop: { duration: 2.0, spawn: 3, maxShardlings: 10, windUp: 0.6 },
     healing: { perOrb: 15, orbSpeed: 150, windUp: 0.45 },
     godRay: {
@@ -284,6 +320,9 @@ export const PERK = {
   bloodstoneStackHeal: 2,   // extra HP per additional stack
   lifeCrystalHp: 10,
   lifeCrystalMaxStacks: 5,
+  // Damage Booster: your own class's weapons hit harder, and you get frailer.
+  boosterDamage: 0.50,      // +50% to your class's weapon damage
+  boosterMaxHp: 5,          // -5 max HP for holding it
   burnChance: 0.33,
   burnDuration: 3.0,
   burnTick: 0.1,

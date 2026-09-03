@@ -54,6 +54,11 @@ export const ITEMS = {
     desc: ['Teaches the PAPER MISSILE fold.', '2 sheets. Starts slow, builds',
            'speed, detonates on contact for', '20 over 5 blocks.'],
   },
+  damagebooster: {
+    id: 'damagebooster', name: 'Damage Booster', rarity: 'rare', stack: 1,
+    desc: ['+50% damage with your own class\'s', 'weapons while it is held.',
+           'Costs you 5 max HP.'],
+  },
   shardgun: {
     id: 'shardgun', name: 'Shardgun', rarity: 'rare', stack: 1, weapon: 'shardgun',
     desc: ['Ranged weapon. 1 shell, 1.5s reload.', 'Fires 5 shards over 5 blocks; they',
@@ -97,7 +102,7 @@ export const DROP_POOL = [
 ];
 // Things you only ever need one of.
 const UNIQUE = new Set(['graplinghook', 'nukerang', 'shardgun', 'twindagger',
-  'bookairplane', 'bookmissile']);
+  'bookairplane', 'bookmissile', 'damagebooster']);
 const PERK_WEIGHTS = {
   lifecrystal: 3, fireyblade: 3, bloodstone: 3,
   lightningarrow: 2, wetslime: 2, aegis: 2,
@@ -307,6 +312,20 @@ export function drawItemIcon(ctx, id, x, y, s = 12, t = 0) {
         P(3, 8 + fl, 4, 1, '#ffd76a');
         P(4, 3 + fl, 2, 1, '#ffffff');
       }
+      break;
+    }
+    case 'damagebooster': {
+      // an upward chevron over a cracked heart: more punch, less of you
+      const pulse = Math.round(Math.sin(t * 4) * 0.7);
+      P(2, 8 + pulse, 3, 2, '#ff5c7a');
+      P(7, 8 + pulse, 3, 2, '#ff5c7a');
+      P(3, 10 + pulse, 6, 1, '#c93a58');
+      P(5, 9 + pulse, 2, 1, '#2a1420');
+      for (let i = 0; i < 4; i++) {
+        P(3 + i, 6 - i + pulse, 2, 2, i > 1 ? '#ffe9a8' : '#ffb43c');
+        P(9 - i, 6 - i + pulse, 2, 2, i > 1 ? '#ffe9a8' : '#ffb43c');
+      }
+      P(5, 1 + pulse, 2, 2, '#ffffff');
       break;
     }
     case 'shardgun': {

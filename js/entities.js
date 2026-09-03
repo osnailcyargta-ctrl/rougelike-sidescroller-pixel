@@ -82,6 +82,13 @@ export class Status {
 
 export const SHARD_TINT = '#a98cff';
 
+// What each class considers its own weapons, for the Damage Booster.
+const CLASS_WEAPONS = {
+  melee: ['melee', 'boomerang'],
+  ranger: ['bow', 'shardgun'],
+  origamist: ['paper'],
+};
+
 export const ENEMY_TINT = {
   get grunt() { return Theme.enemyGrunt; },
   get brute() { return Theme.enemyBrute; },
@@ -1674,13 +1681,32 @@ export class Player {
     this.shieldMax = newShieldMax;
     this.shield = clamp(this.shield, 0, this.shieldMax);
     const stacks = Math.min(this.inventory.countOf('lifecrystal'), PERK.lifeCrystalMaxStacks);
-    const newMax = this.baseMaxHp + stacks * PERK.lifeCrystalHp;
+    // the Damage Booster pays for its punch out of your health bar
+    const boosters = this.inventory.countOf('damagebooster');
+    this.classDamageMult = 1 + boosters * PERK.boosterDamage;
+    const newMax = Math.max(10,
+      this.baseMaxHp + stacks * PERK.lifeCrystalHp - boosters * PERK.boosterMaxHp);
     if (newMax !== this.maxHp) {
       const diff = newMax - this.maxHp;
       this.maxHp = newMax;
       this.hp = clamp(this.hp + Math.max(0, diff), 1, this.maxHp);
     }
     this.hp = Math.min(this.hp, this.maxHp);
+  }
+
+  // Which weapon families your chosen class counts as its own. The Damage
+  // Booster only lifts these, so it never turns a stray pickup into the build.
+  get classWeapons() {
+    if (this.classId === 'ranger') return CLASS_WEAPONS.ranger;
+    if (this.classId === 'origamist') return CLASS_WEAPONS.origamist;
+    return CLASS_WEAPONS.melee;
+  }
+
+  // Scale a weapon's damage by the booster, if that weapon is your class's.
+  boosted(amount, weaponKind) {
+    const mult = this.classDamageMult ?? 1;
+    if (mult === 1 || !this.classWeapons.includes(weaponKind)) return amount;
+    return Math.max(1, Math.round(amount * mult));
   }
 
   // Every hit you land; Bloodstone pays out on each fifth one.
@@ -2358,7 +2384,7 @@ export class Player {
     const weapon = this.inventory.selectedWeapon();
     if (!weapon) {
       this.attackCd = 0.35;
-      this.doSwing(SWORD.range * 0.5, PLAYER.punchDamage, 0.9);
+      this.doSwing(SWORD.range * 0.5, this.boosted(PLAYER.punchDamage, 'melee'), 0.9);
       return;
     }
     if (weapon.weapon === 'boomerang') {
@@ -2376,11 +2402,11 @@ export class Player {
       if (weapon.id === 'twindagger') {
         this.attackCd = TWINDAGGER.cooldown;
         this.daggerAlt = !this.daggerAlt;
-        this.doSwing(TWINDAGGER.range, TWINDAGGER.damage, TWINDAGGER.arc,
+        this.doSwing(TWINDAGGER.range, this.boosted(TWINDAGGER.damage, 'melee'), TWINDAGGER.arc,
                      { fiery: true, countHits: true });
       } else {
         this.attackCd = SWORD.cooldown;
-        this.doSwing(SWORD.range, SWORD.damage, SWORD.arc);
+        this.doSwing(SWORD.range, this.boosted(SWORD.damage, 'melee'), SWORD.arc);
       }
     } else if (weapon.weapon === 'paper') {
       // paper never fires directly: it opens the fold wheel and waits
@@ -2395,7 +2421,7 @@ export class Player {
       this.game.projectiles.push(new Projectile({
         x: this.x + Math.cos(a) * 8, y: this.cy + Math.sin(a) * 8,
         vx: Math.cos(a) * BOW.speed, vy: Math.sin(a) * BOW.speed,
-        damage: BOW.damage, kind: 'arrow', team: 'player',
+        damage: this.boosted(BOW.damage, 'bow'), kind: 'arrow', team: 'player',
         maxDist: BOW.range, life: 3, mark, game: this.game,
       }));
       this.swing = { t: 0, angle: a, kind: 'bow' };
@@ -2430,7 +2456,8 @@ export class Player {
       game.projectiles.push(new Projectile({
         x: this.x + Math.cos(a) * 9, y: this.cy + Math.sin(a) * 9,
         vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
-        damage: C.damage, baseDamage: C.damage, kind: 'shard', shardPhase: 'fly',
+        damage: this.boosted(C.damage, 'shardgun'), baseDamage: this.boosted(C.damage, 'shardgun'),
+        kind: 'shard', shardPhase: 'fly',
         team: 'player', life: 6, mark, splinterAim: aimAt, game,
       }));
     }
@@ -2462,10 +2489,14 @@ export class Player {
     let hits = 0;
     for (const e of this.game.enemies) {
       if (e.dead || e.spawnT > 0 || e.untargetable) continue;
-      const d = dist(this.x, this.cy, e.cx, e.cy);
-      if (d > range + e.radius) continue;
-      const ang = Math.atan2(e.cy - this.cy, e.cx - this.x);
-      if (Math.abs(shortAngle(a, ang)) > arc) continue;
+      // measure to the nearest point on the body, not its centre - a boss that
+      // is three hundred pixels wide should not be reachable from anywhere
+      const nx = clamp(this.x, e.cx - e.w / 2, e.cx + e.w / 2);
+      const ny = clamp(this.cy, e.cy - e.h / 2, e.cy + e.h / 2);
+      const d = dist(this.x, this.cy, nx, ny);
+      if (d > range) continue;
+      const ang = Math.atan2(ny - this.cy, nx - this.x);
+      if (d > 2 && Math.abs(shortAngle(a, ang)) > arc) continue;
       hits++;
       this.registerHit();
       const burned = fiery && (alwaysFiery || Math.random() < PERK.burnChance);
@@ -2514,7 +2545,7 @@ export class Player {
     for (const e of this.game.enemies) {
       if (e.dead || e.spawnT > 0 || e.untargetable) continue;
       if (dist(this.x, this.cy, e.cx, e.cy) > TWINDAGGER.range + e.radius + 18) continue;
-      e.damage(TWINDAGGER.dashDamage, {
+      e.damage(this.boosted(TWINDAGGER.dashDamage, 'melee'), {
         knockback: 90, fromX: this.x, angle: a, spread: 0.9, color: Theme.fire, shake: 2, crit: true,
       });
       if (!e.dead) e.applyBurn();

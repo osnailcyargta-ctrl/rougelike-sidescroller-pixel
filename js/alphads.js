@@ -543,7 +543,9 @@ export class AlphadsBoss {
     const o = this.bowTip();
     this.ray = {
       charge: cfg.windUp, t: 0, dur: cfg.duration,
-      angle: 0, ox: o.x, oy: o.y, ex: o.x, ey: o.y, len: 0,
+      angle: Math.atan2((this.game.player.cy) - o.y, this.game.player.x - o.x),
+      lockX: undefined, lockY: undefined,
+      ox: o.x, oy: o.y, ex: o.x, ey: o.y, len: 0,
       nextWave: 0, waves: [],
     };
     this.rayFired = true;
@@ -573,9 +575,19 @@ export class AlphadsBoss {
     const p = this.game.player;
     const o = this.bowTip();
     b.ox = o.x; b.oy = o.y;
-    const want = Math.atan2((p.y - p.h / 2) - o.y, p.x - o.x);
-    b.angle = b.charge > 0 ? want : b.angle + shortAngle(b.angle, want) * clamp(dt / cfg.lag, 0, 1);
+    // It tracks only while it charges. The moment the beam opens it locks to
+    // wherever you were standing and stays there - it does not follow.
+    if (b.charge > 0) {
+      const want = Math.atan2((p.y - p.h / 2) - o.y, p.x - o.x);
+      b.angle = b.angle + shortAngle(b.angle, want) * clamp(dt / cfg.lag, 0, 1);
+      b.lockX = p.x;
+      b.lockY = p.y - p.h / 2;
+    }
     b.len = 900;
+    if (b.charge <= 0 && b.lockX !== undefined) {
+      // aim through the locked point, from wherever the bow happens to be now
+      b.angle = Math.atan2(b.lockY - o.y, b.lockX - o.x);
+    }
     b.ex = o.x + Math.cos(b.angle) * b.len;
     b.ey = o.y + Math.sin(b.angle) * b.len;
 
