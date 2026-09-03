@@ -688,10 +688,10 @@ const DEBUG_ITEMS = Object.keys(ITEMS);
 const DEBUG_MOBS = Object.keys(ENEMY_TYPES).filter((k) => !ENEMY_TYPES[k].boss);
 const DEBUG_BOSSES = Object.keys(BOSS_TYPES);
 
-// Three rows of anything, and a wheel to see the rest. The lists grow every
-// time something is added to the game, so the panel is sized to a fixed number
-// of rows rather than to the content - nothing ever spills out of the card.
-const DEBUG_ROWS = 3;
+// One row of anything, and a wheel to see the rest. The lists grow every time
+// something is added to the game, so the panel is sized to a fixed number of
+// rows rather than to the content - nothing ever spills out of the card.
+const DEBUG_ROWS = 1;
 
 // Scroll a grid under the cursor and draw its bar. Returns the first row to
 // draw, so the caller just offsets by it.
