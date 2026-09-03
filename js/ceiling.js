@@ -62,7 +62,7 @@ export class CeilingBoss {
     this.roomIndex = roomIndex;
 
     this.hpScale = 1;
-    this.dmgScale = 1;
+    this.dmgScale = def.dmgScale ?? 1;
     this.maxHp = def.hp;
     this.hp = this.maxHp;
     this.phase = 1;
@@ -85,7 +85,7 @@ export class CeilingBoss {
     this.waitT = 1.0;
     this.lasers = 0;
     this.beam = null;
-    this.hand = null;
+    this.hands = null;
     this.crush = null;
     this.script = CeilingBoss.buildScript();
 
@@ -106,12 +106,21 @@ export class CeilingBoss {
         x: rand(6, VIEW_W - 6), len: rand(8, 30), p: rand(0, TAU), s: rand(0.6, 1.4),
       });
     }
+    // blotches spread through the whole thickness, given as a fraction of the
+    // slab's depth so they stay put as it descends
+    this.mottle = [];
+    for (let i = 0; i < 30; i++) {
+      this.mottle.push({
+        x: rand(-10, VIEW_W + 10), y: rand(0, 1), r: rand(14, 46),
+        p: rand(0, TAU), s: rand(0.5, 1.3), dark: Math.random() < 0.55,
+      });
+    }
     this.drips = [];
 
     this.spawnParts();
   }
 
-  // laser x3 a second apart, a breath, then two grasps.
+  // laser x3 a second apart, a breath, then two waves of grasping arms.
   static buildScript() {
     return [
       { a: 'laser' }, { wait: 1.0 },
@@ -122,7 +131,7 @@ export class CeilingBoss {
     ];
   }
 
-  get parts() { return [this.body, this.handPart].filter(Boolean); }
+  get parts() { return [this.body, ...(this.hands ?? []).map((h) => h.part)].filter(Boolean); }
 
   spawnParts() {
     const d = this.def;
@@ -142,10 +151,10 @@ export class CeilingBoss {
     this.deathT = 0;
     this.hp = 0;
     this.beam = null;
-    this.hand = null;
     this.crush = null;
     if (this.body) this.body.dead = true;
-    if (this.handPart) { this.handPart.dead = true; this.handPart = null; }
+    for (const h of this.hands ?? []) { if (h.part) h.part.dead = true; }
+    this.hands = null;
     Camera.add(16);
     this.game.hitstop(0.24);
     screenFlash(0.5, '#ff8a9a', 0.4);
@@ -183,7 +192,7 @@ export class CeilingBoss {
     this.stateT = 0;
     if (s.wait !== undefined) {
       this.state = 'idle';
-      this.waitT = s.wait;
+      this.waitT = s.wait * (this.def.pace ?? 1);
       return;
     }
     if (s.a === 'laser') { this.state = 'laser'; this.beam = null; }
@@ -374,42 +383,76 @@ export class CeilingBoss {
 
   // --- the arm -----------------------------------------------------------
 
+  // Five arms at once, from five places along the slab. One of them comes for
+  // you; the rest come down where you might run, staggered so the room fills
+  // up a limb at a time.
   startHand() {
     const cfg = this.def.hand;
     const p = this.game.player;
-    const ox = clamp(p.x, 24, VIEW_W - 24);
-    this.hand = {
-      phase: 'grow', t: 0,
-      ox, oy: this.slabBottom(ox),
-      x: ox, y: this.slabBottom(ox),
-      tx: p.x, ty: p.y - p.h / 2,
-      hit: false,
-    };
-    if (!this.handPart) {
-      this.handPart = new MeatPart('ceilingHand', ox, this.slabBottom(ox), this.game, this);
-      this.game.enemies.push(this.handPart);
+    const n = cfg.count;
+    this.hands = [];
+    // evenly spaced anchors, jittered, with one placed right over the player
+    const slots = [];
+    for (let i = 0; i < n; i++) {
+      slots.push(clamp(28 + (i + 0.5) * ((VIEW_W - 56) / n) + rand(-14, 14), 24, VIEW_W - 24));
     }
-    this.handPart.dead = false;
+    // whichever anchor is nearest becomes the one that actually hunts you
+    let hunter = 0, best = Infinity;
+    for (let i = 0; i < n; i++) {
+      const d = Math.abs(slots[i] - p.x);
+      if (d < best) { best = d; hunter = i; }
+    }
+    slots[hunter] = clamp(p.x, 24, VIEW_W - 24);
+
+    for (let i = 0; i < n; i++) {
+      const ox = slots[i];
+      const oy = this.slabBottom(ox);
+      // the hunter tracks you; the others commit to their own patch of floor
+      const tx = i === hunter ? p.x : ox + rand(-18, 18);
+      const ty = i === hunter ? p.y - p.h / 2 : GROUND_Y - 14;
+      const h = {
+        phase: 'grow', t: -i * cfg.stagger,
+        ox, oy, x: ox, y: oy, tx, ty,
+        hunter: i === hunter, hit: false, part: null,
+      };
+      h.part = new MeatPart('ceilingHand', ox, oy, this.game, this);
+      this.game.enemies.push(h.part);
+      this.hands.push(h);
+      impactRing(ox, oy, { color: TINT.vein, r0: 3, r1: 40, life: 0.35, width: 2, squash: 0.5 });
+      burst(ox, oy, 14, {
+        color: TINT.flesh, color2: TINT.vein, speedMin: 30, speedMax: 150,
+        lifeMin: 0.25, lifeMax: 0.7, gravity: 320, angle: Math.PI / 2, spread: 1.2,
+      });
+    }
     Sfx.swing();
-    impactRing(ox, this.hand.oy, { color: TINT.vein, r0: 3, r1: 40, life: 0.35, width: 2, squash: 0.5 });
-    burst(ox, this.hand.oy, 18, {
-      color: TINT.flesh, color2: TINT.vein, speedMin: 30, speedMax: 150,
-      lifeMin: 0.25, lifeMax: 0.7, gravity: 320, angle: Math.PI / 2, spread: 1.2,
-    });
+    Camera.add(5);
   }
 
   updateHand(dt) {
-    const h = this.hand;
-    if (!h) return;
+    if (!this.hands || !this.hands.length) return;
+    for (let i = this.hands.length - 1; i >= 0; i--) {
+      if (this.updateOneHand(this.hands[i], dt)) this.hands.splice(i, 1);
+    }
+    if (!this.hands.length) {
+      this.hands = null;
+      if (this.state === 'hand') this.nextStep();
+    }
+  }
+
+  // Returns true once this arm is finished and should be dropped.
+  updateOneHand(h, dt) {
     const cfg = this.def.hand;
     const p = this.game.player;
     h.t += dt;
+    if (h.t < 0) return false;                 // still waiting its turn
     h.oy = this.slabBottom(h.ox);
 
     if (h.phase === 'grow') {
-      // it swells out of the ceiling, tracking you while it is still forming
-      h.tx = lerp(h.tx, p.x, 1 - Math.pow(0.05, dt));
-      h.ty = lerp(h.ty, p.y - p.h / 2, 1 - Math.pow(0.05, dt));
+      // the hunter keeps adjusting while it forms; the rest have already chosen
+      if (h.hunter) {
+        h.tx = lerp(h.tx, p.x, 1 - Math.pow(0.05, dt));
+        h.ty = lerp(h.ty, p.y - p.h / 2, 1 - Math.pow(0.05, dt));
+      }
       const k = clamp(h.t / cfg.windUp, 0, 1);
       h.x = h.ox;
       h.y = h.oy + k * 22;
@@ -420,6 +463,8 @@ export class CeilingBoss {
         });
       }
       if (h.t >= cfg.windUp) { h.phase = 'punch'; h.t = 0; h.hit = false; Sfx.slam(); }
+      if (h.part) { h.part.x = h.x; h.part.y = h.y + cfg.h / 2; }
+      return false;
     } else if (h.phase === 'punch') {
       const k = clamp(h.t / cfg.punchTime, 0, 1);
       const ease = 1 - Math.pow(1 - k, 4);
@@ -441,20 +486,19 @@ export class CeilingBoss {
       h.x = lerp(h.tx, h.ox, k);
       h.y = lerp(h.ty, h.oy, k);
       if (k >= 1) {
-        this.hand = null;
-        if (this.handPart) { this.handPart.dead = true; this.handPart = null; }
+        if (h.part) { h.part.dead = true; h.part = null; }
         burst(h.ox, h.oy, 12, {
           color: TINT.flesh, speedMin: 20, speedMax: 110, lifeMin: 0.25, lifeMax: 0.6,
           gravity: 320, angle: Math.PI / 2, spread: 1.1,
         });
-        if (this.state === 'hand') this.nextStep();
-        return;
+        return true;
       }
     }
-    if (this.handPart) {
-      this.handPart.x = h.x;
-      this.handPart.y = h.y + cfg.h / 2;
+    if (h.part) {
+      h.part.x = h.x;
+      h.part.y = h.y + cfg.h / 2;
     }
+    return false;
   }
 
   // --- the crush ---------------------------------------------------------
@@ -496,12 +540,10 @@ export class CeilingBoss {
       c.y += cfg.fallSpeed * dt;
       this.y = c.y;                          // so the check below sees this frame
       const floorY = GROUND_Y - this.def.h - 4;
-      // anything the underside reaches gets flattened, once
+      // anything the underside reaches is flattened, once, through everything
       if (!c.hit && !p.dead && this.slabBottom(p.x) >= p.y - p.h) {
         c.hit = true;
-        p.hurt(Math.round(cfg.damage * this.dmgScale), p.x + 1);
-        Camera.add(10);
-        screenFlash(0.3, '#ff5c7a', 0.2);
+        this.flatten(p);
       }
       if (c.y >= floorY) {
         c.y = floorY;
@@ -529,7 +571,7 @@ export class CeilingBoss {
     if (c.phase === 'hold') {
       if (!c.hit && !p.dead && this.slabBottom(p.x) >= p.y - p.h) {
         c.hit = true;
-        p.hurt(Math.round(cfg.damage * this.dmgScale), p.x + 1);
+        this.flatten(p);
       }
       if (c.t >= cfg.hold) { c.phase = 'rise'; c.t = 0; }
       return;
@@ -543,6 +585,28 @@ export class CeilingBoss {
       this.waitT = 1.0;
       this.step = -1;
     }
+  }
+
+  // The crush is not damage you take, it is the clock running out. It goes
+  // straight past shields, invulnerability frames and dashes.
+  flatten(p) {
+    const cfg = this.def.crush;
+    Camera.add(14);
+    Camera.punch(2.6);
+    screenFlash(0.45, '#ff5c7a', 0.3);
+    burst(p.x, p.cy, 46, {
+      color: '#c0323f', color2: '#ff8a9a', speedMin: 60, speedMax: 300,
+      lifeMin: 0.3, lifeMax: 1.0, sizeMax: 3, gravity: 460, drag: 0.9,
+    });
+    floatText(p.x, p.cy - 12, cfg.damage, '#ff5c7a', { crit: true, life: 1.2 });
+    if (p.dead) return;
+    // bypass the shield and every guard the player has
+    p.shield = 0;
+    p.invuln = 0;
+    p.dashT = 0;
+    if (this.game.debug && (this.game.debug.god || this.game.debug.infHealth)) return;
+    p.hp = 0;
+    p.die();
   }
 
   // --- art ---------------------------------------------------------------
@@ -569,7 +633,7 @@ export class CeilingBoss {
     this.drawSlab(ctx, t, flash);
     this.drawStrands(ctx, t);
     this.drawEye(ctx, t, flash);
-    this.drawHand(ctx, t, flash);
+    this.drawHands(ctx, t, flash);
     this.drawBeam(ctx);
     this.drawDrips(ctx);
     ctx.restore();
@@ -577,7 +641,9 @@ export class CeilingBoss {
 
   drawSlab(ctx, t, flash) {
     const d = this.def;
-    const top = this.y - 40;              // it runs off the top of the frame
+    // Everything above the underside is flesh, all the way past the top of the
+    // screen, so a crush never exposes the room behind it.
+    const top = Math.min(-VIEW_H, this.y - VIEW_H);
     const bottomMid = this.slabBottom(VIEW_W / 2);
 
     // the meat itself: a filled band whose lower edge bulges between lobes
@@ -589,7 +655,7 @@ export class CeilingBoss {
       ctx.lineTo(x, this.slabBottom(x) + Math.sin(x * 0.09 + this.pulse) * 2);
     }
     ctx.closePath();
-    const g = ctx.createLinearGradient(0, top, 0, bottomMid);
+    const g = ctx.createLinearGradient(0, this.y - 34, 0, bottomMid);
     g.addColorStop(0, flash ? '#ffffff' : '#28101a');
     g.addColorStop(0.35, flash ? '#ffcccc' : TINT.fleshDeep);
     g.addColorStop(0.72, flash ? '#ffdddd' : TINT.flesh);
@@ -614,16 +680,33 @@ export class CeilingBoss {
     }
 
     // veins crawling across it
-    ctx.strokeStyle = rgba(TINT.vein, 0.5);
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 9; i++) {
+    const veinTop = Math.max(top, this.y - VIEW_H);
+    for (let i = 0; i < 40; i++) {
+      const y0 = veinTop + i * 11;
+      if (y0 > bottomMid) break;
+      // the ones nearer the underside are lit; the deep ones almost vanish
+      const depth = clamp((y0 - veinTop) / Math.max(1, bottomMid - veinTop), 0, 1);
+      ctx.strokeStyle = rgba(TINT.vein, 0.10 + depth * 0.34);
+      ctx.lineWidth = i % 3 === 0 ? 1.5 : 1;
       ctx.beginPath();
-      const y0 = top + 26 + i * 5;
       ctx.moveTo(-8, y0);
       for (let x = 0; x <= VIEW_W + 8; x += 12) {
         ctx.lineTo(x, y0 + Math.sin(x * 0.05 + i * 1.7 + this.pulse * 0.5) * 5);
       }
       ctx.stroke();
+    }
+    // mottling deeper in the meat, so the bulk is not one flat sheet
+    for (const m of this.mottle) {
+      const my = veinTop + m.y * Math.max(1, bottomMid - veinTop);
+      if (my > bottomMid) continue;
+      const r = m.r * (0.9 + 0.12 * Math.sin(this.pulse * m.s + m.p));
+      const mg = ctx.createRadialGradient(m.x, my, 1, m.x, my, r);
+      mg.addColorStop(0, rgba(m.dark ? '#3a1018' : TINT.fleshLit, 0.30));
+      mg.addColorStop(1, rgba(m.dark ? '#3a1018' : TINT.fleshLit, 0));
+      ctx.fillStyle = mg;
+      ctx.beginPath();
+      ctx.arc(m.x, my, r, 0, TAU);
+      ctx.fill();
     }
     // a wet rim along the bottom edge
     ctx.strokeStyle = rgba(TINT.sinew, 0.55);
@@ -813,9 +896,14 @@ export class CeilingBoss {
     }
   }
 
-  drawHand(ctx, t, flash) {
-    const h = this.hand;
-    if (!h) return;
+  drawHands(ctx, t, flash) {
+    for (const h of this.hands ?? []) {
+      if (h.t < 0) continue;
+      this.drawOneHand(ctx, t, flash, h);
+    }
+  }
+
+  drawOneHand(ctx, t, flash, h) {
     const cfg = this.def.hand;
     const grow = h.phase === 'grow' ? clamp(h.t / cfg.windUp, 0, 1) : 1;
 

@@ -58,7 +58,7 @@ export class AlphadsBoss {
     this.roomIndex = roomIndex;
 
     this.hpScale = 1;
-    this.dmgScale = 1;
+    this.dmgScale = def.dmgScale ?? 1;
     this.maxHp = def.hp;
     this.hp = this.maxHp;
     this.phase = 1;
@@ -162,7 +162,8 @@ export class AlphadsBoss {
     this.stateT = 0;
     if (s.wait !== undefined) {
       this.state = 'idle';
-      this.waitT = s.wait;
+      // it breathes less between verses the harder it is tuned
+      this.waitT = s.wait * (this.def.pace ?? 1);
       this.targetX = clamp(this.game.player.x + rand(-110, 110), 70, VIEW_W - 70);
       return;
     }
@@ -293,7 +294,8 @@ export class AlphadsBoss {
     const a = Math.atan2((p.y - p.h / 2) - o.y, p.x - o.x) + rand(-0.045, 0.045);
     this.game.projectiles.push(new Projectile({
       x: o.x, y: o.y, vx: Math.cos(a) * cfg.speed, vy: Math.sin(a) * cfg.speed,
-      damage: cfg.damage, team: 'enemy', kind: 'godarrow', life: 4, game: this.game,
+      damage: Math.round(cfg.damage * this.dmgScale),
+      team: 'enemy', kind: 'godarrow', life: 4, game: this.game,
     }));
     Sfx.bow();
     Camera.add(3.2);
@@ -348,7 +350,7 @@ export class AlphadsBoss {
       this.game.projectiles.push(new Projectile({
         x: o.x + rand(-6, 6), y: o.y,
         vx, vy: -cfg.speed * rand(0.94, 1.06),
-        gravity: cfg.gravity, damage: this.def.shot.damage,
+        gravity: cfg.gravity, damage: Math.round(this.def.shot.damage * this.dmgScale),
         team: 'enemy', kind: 'godarrow', life: 8, keepTop: true, game: this.game,
       }));
     }

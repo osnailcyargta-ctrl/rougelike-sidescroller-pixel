@@ -210,13 +210,13 @@ export const ENEMY_TYPES = {
   // The Undead Ceiling's slab. It hangs, so nothing on the ground reaches it
   // and a slam does nothing.
   ceilingBody: {
-    id: 'ceilingBody', name: 'Undead Ceiling', hp: 1200, speed: 0, damage: 26,
+    id: 'ceilingBody', name: 'Undead Ceiling', hp: 3600, speed: 0, damage: 26,
     w: 300, h: 46, attackCooldown: 1, attackRange: 30,
     flying: true, boss: true, slamImmune: true, noContact: true,
   },
   // Its arm. A separate target so hitting the hand still lands on the pool.
   ceilingHand: {
-    id: 'ceilingHand', name: 'Grasping Hand', hp: 1200, speed: 0, damage: 30,
+    id: 'ceilingHand', name: 'Grasping Hand', hp: 3600, speed: 0, damage: 30,
     w: 26, h: 30, attackCooldown: 1, attackRange: 24,
     flying: true, boss: true, slamImmune: true, noContact: true,
   },
@@ -266,23 +266,30 @@ export const BOSS_TYPES = {
   ceiling: {
     id: 'ceiling', name: 'Undead Ceiling', short: 'Ceiling', title: 'THE ROOF OF MEAT',
     kind: 'ceiling',
-    hp: 1200,
+    hp: 3600,
+    dmgScale: 2,              // it hits twice as hard as its numbers read
+    pace: 0.65,               // and waits this much of each scripted pause
     w: 300, h: 46,            // the slab that hangs from the roof
     restY: 4,                 // how far its top sits above the screen edge
     eyeR: 15,
-    laser: { duration: 1.0, windUp: 0.7, damage: 24, width: 9, tickDamage: 8, tick: 0.18 },
+    laser: { duration: 1.0, windUp: 0.5, damage: 24, width: 9, tickDamage: 8, tick: 0.15 },
     hand: {
-      damage: 30, reach: 190, windUp: 0.75, punchTime: 0.22, holdTime: 0.35,
-      retract: 0.5, w: 26, h: 30,
+      count: 5,               // five arms, from five places along the slab
+      stagger: 0.16,          // how far apart they punch
+      damage: 30, reach: 190, windUp: 0.7, punchTime: 0.2, holdTime: 0.3,
+      retract: 0.45, w: 26, h: 30,
     },
-    crush: { damage: 151, fallSpeed: 1500, hold: 0.45, riseSpeed: 190, windUp: 0.9 },
-    crushAfter: 150,          // 2.5 minutes in, it starts flattening the room
+    // The crush is not an attack you survive. It is the clock running out.
+    crush: { damage: 2000, fallSpeed: 1500, hold: 0.45, riseSpeed: 190, windUp: 0.9 },
+    crushAfter: 150,          // 2.5 minutes to kill it, or it flattens you
   },
   // The last thing in the vault. It never lands, and it never stops.
   alphads: {
     id: 'alphads', name: 'Alphads', short: 'Alphads', title: 'THE AETHER GOD',
     kind: 'god',
     hp: 2000,
+    dmgScale: 2,              // twice the bite for the same listed numbers
+    pace: 0.65,               // and every wait between attacks is this long
     w: 34, h: 46,
     hoverY: 84, driftSpeed: 96, driftRange: 128,
 
@@ -345,4 +352,5 @@ export const WAVES = {
   bossRoomWaves: 3,
   interWaveDelay: 1.6,
   spawnStagger: 0.45,
+  maxPerWave: 17,           // however deep the room, never more than this
 };

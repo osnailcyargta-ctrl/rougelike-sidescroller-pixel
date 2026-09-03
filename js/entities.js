@@ -1757,15 +1757,20 @@ export class Player {
     Sfx.hurt();
     floatText(this.cx, this.cy - 12, `-${Math.round(amount)}`, Theme.hp, { crit: true });
     burst(this.cx, this.cy, 12, { color: Theme.hp, color2: '#ffffff', speedMin: 30, speedMax: 140, lifeMin: 0.2, lifeMax: 0.5 });
-    if (this.hp <= 0) {
-      this.hp = 0;
-      this.dead = true;
-      this.releaseGrapple(true);
-      Sfx.die();
-      Camera.add(12);
-      burst(this.cx, this.cy, 40, { color: Theme.player, color2: Theme.hp, speedMin: 30, speedMax: 220, lifeMin: 0.4, lifeMax: 1.1, sizeMax: 3 });
-      this.game.onPlayerDeath();
-    }
+    if (this.hp <= 0) this.die();
+  }
+
+  // Ends the run. Called by hurt when the bar empties, and directly by the
+  // few things that kill outright.
+  die() {
+    if (this.dead) return;
+    this.hp = 0;
+    this.dead = true;
+    this.releaseGrapple(true);
+    Sfx.die();
+    Camera.add(12);
+    burst(this.cx, this.cy, 40, { color: Theme.player, color2: Theme.hp, speedMin: 30, speedMax: 220, lifeMin: 0.4, lifeMax: 1.1, sizeMax: 3 });
+    this.game.onPlayerDeath();
   }
 
   heal(n) {
