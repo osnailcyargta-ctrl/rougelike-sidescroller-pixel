@@ -2,7 +2,7 @@
 import { clamp, lerp, rand, randInt, choice, srand, schoice, rgba, mixHex, TAU, dist } from './util.js';
 import { Theme } from './theme.js';
 import { pxRect, glowDot, spawnParticle, burst, linGrad } from './gfx.js';
-import { VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER, BLOCK, WAVES } from './config.js';
+import { VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER, BLOCK, WAVES, ANVIL } from './config.js';
 import { ITEMS, RARITY, drawItemIcon } from './items.js';
 import { Sfx } from './audio.js';
 import { Options } from './settings.js';
@@ -453,6 +453,52 @@ export class Pickup {
     ctx.scale(pop, pop);
     drawItemIcon(ctx, this.itemId, -6, -6, 12, this.t);
     ctx.restore();
+  }
+}
+
+// An anvil bolted to the drifting platform, so it slides with it. Every second
+// room has one; right-click it to open the forge.
+export class Anvil {
+  constructor(platform) {
+    this.platform = platform;
+    this.x = platform.x + platform.w / 2;
+    this.y = platform.y;
+    this.t = 0;
+    this.spark = 0;
+  }
+  update(dt) {
+    this.t += dt;
+    // ride the platform exactly, however it drifts
+    this.x = this.platform.x + this.platform.w / 2;
+    this.y = this.platform.y;
+    this.spark -= dt;
+    if (this.spark <= 0) {
+      this.spark = rand(0.5, 1.8);
+      for (let i = 0; i < 3; i++) {
+        spawnParticle({
+          x: this.x + rand(-6, 6), y: this.y - 12, vx: rand(-40, 40), vy: rand(-70, -20),
+          life: rand(0.3, 0.7), size: 1, color: i ? '#ffb43c' : '#fff0a0',
+          gravity: 260, drag: 0.92, kind: 'streak',
+        });
+      }
+    }
+  }
+  draw(ctx) {
+    const bob = Math.sin(this.t * 1.6) * 0.6;
+    const y = this.y - 14 + bob;
+    glowDot(ctx, this.x, y + 8, 20, '#ffb43c', 0.14 + 0.05 * Math.sin(this.t * 3));
+    // the block: a wide face on a narrow waist on a base
+    pxRect(ctx, this.x - 10, y, 20, 5, '#6b7484');
+    pxRect(ctx, this.x - 10, y, 20, 1, '#aeb8c9');
+    pxRect(ctx, this.x - 4, y + 5, 8, 4, '#535b69');
+    pxRect(ctx, this.x - 8, y + 9, 16, 4, '#4a5262');
+    pxRect(ctx, this.x - 8, y + 12, 16, 1, '#2c3140');
+    // the horn
+    pxRect(ctx, this.x - 14, y + 1, 4, 3, '#6b7484');
+    pxRect(ctx, this.x - 14, y + 1, 4, 1, '#aeb8c9');
+    // heat still in the face
+    const heat = 0.35 + 0.25 * Math.sin(this.t * 2.4);
+    pxRect(ctx, this.x - 8, y + 1, 16, 1, rgba('#ffb43c', heat));
   }
 }
 

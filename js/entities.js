@@ -9,7 +9,7 @@ import {
 } from './gfx.js';
 import { Sfx } from './audio.js';
 import {
-  VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, SHARDGUN, TWINDAGGER, ORIGAMI, NUKERANG, GRAPPLE,
+  VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, SHARDGUN, TWINDAGGER, ORIGAMI, NUKERANG, GRAPPLE, ARMOR, BLOCK,
   ENEMY_TYPES, PERK, ROOM_SCALING, roomScaleSteps,
 } from './config.js';
 import { ITEMS, Inventory } from './items.js';
@@ -1681,6 +1681,9 @@ export class Player {
     this.onGround = true;
     this.platform = null;
     this.facing = 1;
+    this.defense = 0;
+    this.armorBuff = {};
+    this.armorSet = null;
     this.baseMaxHp = classId === 'origamist' ? ORIGAMI.maxHp : PLAYER.maxHp;
     this.maxHp = this.baseMaxHp;
     this.hp = this.baseMaxHp;
@@ -1738,7 +1741,32 @@ export class Player {
   get cx() { return this.x; }
   get cy() { return this.y - this.h / 2; }
 
+  // Everything armour changes, recomputed from scratch whenever the inventory
+  // moves. One place, so nothing can drift out of sync.
+  recomputeArmor() {
+    const inv = this.inventory;
+    let defense = 0;
+    const b = { meleeDamage: 0, meleeRange: 0, meleeCooldown: 0,
+                origamiDamage: 0, foldCooldown: 0, planeSpeed: 0 };
+    for (const worn of inv.wornPieces()) {
+      const def = ITEMS[worn.id];
+      if (!def) continue;
+      defense += def.defense ?? 0;
+      for (const k of Object.keys(def.buff ?? {})) b[k] = (b[k] ?? 0) + def.buff[k];
+    }
+    const set = inv.activeSet();
+    if (set) {
+      const bonus = ARMOR.sets[set]?.bonus ?? {};
+      defense += bonus.defense ?? 0;
+      if (bonus.meleeCooldown) b.meleeCooldown += bonus.meleeCooldown;
+    }
+    this.defense = defense;
+    this.armorBuff = b;
+    this.armorSet = set;
+  }
+
   recomputeStats() {
+    this.recomputeArmor();
     const aegis = this.inventory.countOf('aegis');
     const newShieldMax = aegis * PERK.aegisShield;
     if (newShieldMax > this.shieldMax) this.shield += newShieldMax - this.shieldMax;
@@ -1810,6 +1838,8 @@ export class Player {
         return;
       }
     }
+    // armour eats a flat slice of the hit, but a hit always leaves a mark
+    if (this.defense > 0) amount = Math.max(1, amount - this.defense);
     this.hp -= amount;
     this.invuln = PLAYER.invulnTime;
     this.hurtFlash = 0.25;
@@ -2453,7 +2483,8 @@ export class Player {
     const weapon = this.inventory.selectedWeapon();
     if (!weapon) {
       this.attackCd = 0.35;
-      this.doSwing(SWORD.range * 0.5, this.boosted(PLAYER.punchDamage, 'melee'), 0.9);
+      this.doSwing(SWORD.range * 0.5 + (this.armorBuff?.meleeRange ?? 0) * BLOCK,
+                   this.boosted(PLAYER.punchDamage, 'melee'), 0.9);
       return;
     }
     if (weapon.weapon === 'boomerang') {
@@ -2468,14 +2499,19 @@ export class Player {
       return;
     }
     if (weapon.weapon === 'melee') {
+      const cdMult = 1 + (this.armorBuff?.meleeCooldown ?? 0);
+      const reach = (this.armorBuff?.meleeRange ?? 0) * BLOCK;
+      const dmgMult = 1 + (this.armorBuff?.meleeDamage ?? 0);
       if (weapon.id === 'twindagger') {
-        this.attackCd = TWINDAGGER.cooldown;
+        this.attackCd = TWINDAGGER.cooldown * cdMult;
         this.daggerAlt = !this.daggerAlt;
-        this.doSwing(TWINDAGGER.range, this.boosted(TWINDAGGER.damage, 'melee'), TWINDAGGER.arc,
-                     { fiery: true, countHits: true });
+        this.doSwing(TWINDAGGER.range + reach,
+                     Math.round(this.boosted(TWINDAGGER.damage, 'melee') * dmgMult),
+                     TWINDAGGER.arc, { fiery: true, countHits: true });
       } else {
-        this.attackCd = SWORD.cooldown;
-        this.doSwing(SWORD.range, this.boosted(SWORD.damage, 'melee'), SWORD.arc);
+        this.attackCd = SWORD.cooldown * cdMult;
+        this.doSwing(SWORD.range + reach,
+                     Math.round(this.boosted(SWORD.damage, 'melee') * dmgMult), SWORD.arc);
       }
     } else if (weapon.weapon === 'paper') {
       // paper never fires directly: it opens the fold wheel and waits

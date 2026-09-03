@@ -90,6 +90,32 @@ export const TWINDAGGER = {
   dropChance: 0.01,
 };
 
+// Armour. Three slots, two sets, and a flat defence number that comes straight
+// off every hit you take.
+export const ARMOR = {
+  slots: ['helmet', 'chest', 'legs'],
+  smeltValue: 2,             // bars you get for melting a weapon down
+  ironCost: 3,               // bars per iron piece
+  paperCost: 75,             // sheets per paper piece
+  // which weapons the anvil will take apart
+  smeltable: ['sword', 'shardgun', 'nukerang', 'graplinghook', 'twindagger'],
+  sets: {
+    iron: { name: 'IRON', bonus: { defense: 1, meleeCooldown: -0.10 } },
+    paper: { name: 'PAPER', bonus: { fold: 'shield' } },
+  },
+};
+
+// The Paper set's reward: three plates that orbit you and cut what they touch.
+export const PAPER_SHIELD = {
+  cost: 20,
+  count: 3,
+  damage: 20,
+  radius: 26,
+  spin: 2.1,                 // radians per second
+  life: 90,                  // 1.5 minutes, then they are gone
+  hitCooldown: 0.5,          // per enemy, so one shield cannot shred instantly
+};
+
 // Origamist: paper is ammunition, and every fold is a different weapon.
 export const ORIGAMI = {
   maxHp: 50,                 // the Origamist is made of paper too
@@ -113,8 +139,16 @@ export const ORIGAMI = {
       damage: 40, speed: 70, maxSpeed: 520, accel: 620,
       blastRadius: 5 * BLOCK, blastDamage: 40,
     },
+    // unlocked by wearing the whole Paper set, not by a tutor book
+    shield: {
+      id: 'shield', name: 'PAPER SHIELD', set: 'paper', cost: PAPER_SHIELD.cost,
+      cooldown: 0.6, damage: PAPER_SHIELD.damage,
+    },
   },
 };
+
+// The anvil rides the drifting platform on even-numbered rooms.
+export const ANVIL = { everyRooms: 2, w: 20, h: 14, reach: 46 };
 
 // Shardgun: one shell, five shards, and a second act. The shards stop dead at
 // their range, hang there, then re-form as splinters that chase the cursor.

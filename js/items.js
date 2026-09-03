@@ -55,6 +55,47 @@ export const ITEMS = {
     desc: ['Teaches the PAPER MISSILE fold.', '2 sheets. Starts slow, builds',
            'speed, detonates on contact for', '40 over 5 blocks.'],
   },
+  // --- armour ------------------------------------------------------------
+  ironbar: {
+    id: 'ironbar', name: 'Iron Bar', rarity: 'common', stack: MAX_STACK,
+    desc: ['Melted-down weapon.', 'Three bars make one iron', 'armour piece at an anvil.'],
+  },
+  ironhelmet: {
+    id: 'ironhelmet', name: 'Iron Helmet', rarity: 'uncommon', stack: 1,
+    armor: 'helmet', set: 'iron', defense: 3,
+    buff: { meleeDamage: 0.20 },
+    desc: ['Head armour. 3 defence.', '+20% melee damage.'],
+  },
+  ironchestplate: {
+    id: 'ironchestplate', name: 'Iron Chestplate', rarity: 'uncommon', stack: 1,
+    armor: 'chest', set: 'iron', defense: 4,
+    buff: { meleeRange: 1 },
+    desc: ['Body armour. 4 defence.', '+1 tile of melee reach.'],
+  },
+  ironleggings: {
+    id: 'ironleggings', name: 'Iron Leggings', rarity: 'uncommon', stack: 1,
+    armor: 'legs', set: 'iron', defense: 3,
+    buff: {},
+    desc: ['Leg armour. 3 defence.'],
+  },
+  paperhelmet: {
+    id: 'paperhelmet', name: 'Paper Helmet', rarity: 'uncommon', stack: 1,
+    armor: 'helmet', set: 'paper', defense: 0,
+    buff: { origamiDamage: 0.10 },
+    desc: ['Folded head armour. 0 defence.', '+10% Origamist damage.'],
+  },
+  paperchestplate: {
+    id: 'paperchestplate', name: 'Paper Chestplate', rarity: 'uncommon', stack: 1,
+    armor: 'chest', set: 'paper', defense: 2,
+    buff: { foldCooldown: -0.30 },
+    desc: ['Folded body armour. 2 defence.', '-30% fold cooldown.'],
+  },
+  paperleggings: {
+    id: 'paperleggings', name: 'Paper Leggings', rarity: 'uncommon', stack: 1,
+    armor: 'legs', set: 'paper', defense: 1,
+    buff: { planeSpeed: 0.10 },
+    desc: ['Folded leg armour. 1 defence.', '+10% paper plane speed.'],
+  },
   damagebooster: {
     id: 'damagebooster', name: 'Damage Booster', rarity: 'rare', stack: 1,
     desc: ['+50% damage with your own class\'s', 'weapons while it is held.',
@@ -146,10 +187,56 @@ export function rollPerkPair(inventory) {
   return [first, second];
 }
 
+export const ARMOR_SLOTS = ['helmet', 'chest', 'legs'];
+
 export class Inventory {
   constructor() {
     this.slots = new Array(INV_SIZE).fill(null);
     this.selected = 0;
+    // worn pieces, one per slot. Each holds a { id, count: 1 } like any stack.
+    this.armor = { helmet: null, chest: null, legs: null };
+  }
+
+  // Which armour slot an item belongs in, or null if it is not armour.
+  static armorSlot(id) { return ITEMS[id]?.armor ?? null; }
+
+  // Every worn piece, in slot order.
+  wornPieces() {
+    return ARMOR_SLOTS.map((k) => this.armor[k]).filter(Boolean);
+  }
+
+  // The set name if all three worn pieces belong to the same one.
+  activeSet() {
+    const worn = this.wornPieces();
+    if (worn.length < ARMOR_SLOTS.length) return null;
+    const set = ITEMS[worn[0].id]?.set;
+    return worn.every((w) => ITEMS[w.id]?.set === set) ? set : null;
+  }
+
+  // Put an item into its armour slot, sending whatever was there back to the
+  // grid. Returns false if it does not belong there or there is no room.
+  equip(slotIndex) {
+    const item = this.slots[slotIndex];
+    if (!item) return false;
+    const key = Inventory.armorSlot(item.id);
+    if (!key) return false;
+    const prev = this.armor[key];
+    this.armor[key] = { id: item.id, count: 1 };
+    this.slots[slotIndex] = prev ?? null;
+    return true;
+  }
+
+  // Take a piece off. Returns false when the grid is full.
+  unequip(key, toIndex = -1) {
+    const worn = this.armor[key];
+    if (!worn) return false;
+    if (toIndex >= 0 && !this.slots[toIndex]) {
+      this.slots[toIndex] = worn;
+      this.armor[key] = null;
+      return true;
+    }
+    if (this.add(worn.id, 1) === 0) { this.armor[key] = null; return true; }
+    return false;
   }
 
   stackLimit(id) { return ITEMS[id]?.stack ?? MAX_STACK; }
@@ -327,6 +414,46 @@ export function drawItemIcon(ctx, id, x, y, s = 12, t = 0) {
         P(9 - i, 6 - i + pulse, 2, 2, i > 1 ? '#ffe9a8' : '#ffb43c');
       }
       P(5, 1 + pulse, 2, 2, '#ffffff');
+      break;
+    }
+    case 'ironbar': {
+      const lift = Math.round(Math.sin(t * 2.5) * 0.5);
+      P(1, 6 + lift, 10, 4, '#7d8798');
+      P(1, 6 + lift, 10, 1, '#c3ccdb');
+      P(1, 9 + lift, 10, 1, '#4a5262');
+      P(3, 7 + lift, 2, 1, '#e6ecf7');
+      break;
+    }
+    case 'ironhelmet': case 'ironchestplate': case 'ironleggings':
+    case 'paperhelmet': case 'paperchestplate': case 'paperleggings': {
+      const iron = id.startsWith('iron');
+      const body = iron ? '#8e99ac' : '#f4f0e6';
+      const lit = iron ? '#ccd6e6' : '#ffffff';
+      const dark = iron ? '#4a5262' : '#141018';
+      const lift = Math.round(Math.sin(t * 2.2) * 0.5);
+      if (id.endsWith('helmet')) {
+        P(2, 2 + lift, 8, 6, body);
+        P(2, 2 + lift, 8, 1, lit);
+        P(2, 8 + lift, 3, 3, body);
+        P(7, 8 + lift, 3, 3, body);
+        P(4, 5 + lift, 4, 2, dark);          // visor
+        P(5, 0 + lift, 2, 2, iron ? '#ccd6e6' : dark);   // crest
+      } else if (id.endsWith('chestplate')) {
+        P(2, 2 + lift, 8, 8, body);
+        P(2, 2 + lift, 8, 1, lit);
+        P(0, 3 + lift, 2, 4, body);
+        P(10, 3 + lift, 2, 4, body);
+        P(5, 4 + lift, 2, 5, dark);          // sternum seam
+        P(2, 9 + lift, 8, 1, dark);
+      } else {
+        P(2, 1 + lift, 8, 3, body);
+        P(2, 1 + lift, 8, 1, lit);
+        P(2, 4 + lift, 3, 7, body);
+        P(7, 4 + lift, 3, 7, body);
+        P(5, 4 + lift, 2, 6, dark);          // the gap between the legs
+        P(2, 10 + lift, 3, 1, dark);
+        P(7, 10 + lift, 3, 1, dark);
+      }
       break;
     }
     case 'shardgun': {

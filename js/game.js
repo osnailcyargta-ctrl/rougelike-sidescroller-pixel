@@ -11,13 +11,14 @@ import { PostFX, parseShaderPack, DEFAULT_COMPOSITE } from './postfx.js';
 import {
   VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, DROP_POINT, PERK, WAVES, PLAYER as PCFG,
   BOSS_ROOM_INTERVAL, NUKERANG, FINAL_ROOM, SHARDGUN, TWINDAGGER, SWORD, BOW, ORIGAMI,
+  ARMOR, PAPER_SHIELD, ANVIL,
 } from './config.js';
-import { Player, Enemy, Projectile, SHARD_TINT, INK } from './entities.js';
+import { Player, Enemy, Projectile, SHARD_TINT, INK, doodleShape, doodleLine } from './entities.js';
 import { makeBoss } from './boss.js';
 import { Cutscene } from './cutscene.js';
-import { drawBackground, drawArena, drawLightShafts, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal } from './world.js';
+import { drawBackground, drawArena, drawLightShafts, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal, Anvil } from './world.js';
 import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
-import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, panel, button } from './ui.js';
+import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, drawForge, panel, button } from './ui.js';
 import { drawText, drawTextShadow } from './font.js';
 import { Options, loadOptions, saveOptions, applyVisualOptions, captureShaderBase, saveShader, loadShader } from './settings.js';
 import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, drawControls, drawVictory } from './screens.js';
@@ -56,9 +57,12 @@ export class Game {
     this.projectiles = [];
     this.pickups = [];
     this.shockwaves = [];
+    this.shields = [];        // orbiting paper plates, if the set is worn
     this.bolts = [];
     this.pendingSpawns = [];
     this.portal = null;
+    this.anvil = null;
+    this.forge = null;       // the crafting popup, open only while paused
     this.boss = null;
     this.cutscene = new Cutscene(this);
     this.roomIndex = 1;
@@ -232,6 +236,7 @@ export class Game {
     this.pickups.length = 0;
     this.shockwaves.length = 0;
     this.bolts.length = 0;
+    this.shields.length = 0;
     this.kills = 0;
     this.roomIndex = 1;
     this.deathT = 0;
@@ -259,6 +264,11 @@ export class Game {
     this.pickups.length = 0;
     this.enemies.length = 0;
     this.projectiles.length = 0;
+    this.shields.length = 0;
+    // every second room comes with a forge, riding the drifting platform
+    const drift = PLATFORMS.find((pl) => pl.tag === 'drift');
+    this.anvil = (index % ANVIL.everyRooms === 0 && drift) ? new Anvil(drift) : null;
+    this.forge = null;
     this.player.x = 120;
     this.player.y = GROUND_Y;
     this.player.vx = this.player.vy = 0;
@@ -417,6 +427,111 @@ export class Game {
     });
   }
 
+  // --- the forge ---------------------------------------------------------
+
+  // Melt a weapon down for bars, or spend bars and paper on armour. The world
+  // stops while it is open, like the fold wheel.
+  forgeRecipes() {
+    const inv = this.player.inventory;
+    const bars = inv.countOf('ironbar');
+    const paper = inv.countOf('paper');
+    const list = [];
+    // smelting: one row per weapon you are actually carrying
+    for (const id of ARMOR.smeltable) {
+      if (!inv.has(id)) continue;
+      list.push({
+        kind: 'smelt', id, icon: id,
+        label: `MELT ${ITEMS[id].name.toUpperCase()}`,
+        cost: `-> ${ARMOR.smeltValue} BARS`,
+        ok: true,
+      });
+    }
+    // armour
+    for (const [set, cost, unit, have] of [['iron', ARMOR.ironCost, 'BARS', bars],
+                                           ['paper', ARMOR.paperCost, 'PAPER', paper]]) {
+      for (const slot of ARMOR.slots) {
+        const id = set + (slot === 'chest' ? 'chestplate' : slot === 'legs' ? 'leggings' : 'helmet');
+        if (!ITEMS[id]) continue;
+        const owned = inv.has(id) || inv.wornPieces().some((w) => w.id === id);
+        list.push({
+          kind: 'craft', id, icon: id, set,
+          label: ITEMS[id].name.toUpperCase(),
+          cost: owned ? 'OWNED' : `${cost} ${unit}`,
+          ok: !owned && have >= cost,
+          owned,
+        });
+      }
+    }
+    return list;
+  }
+
+  openForge() {
+    if (!this.player || this.forge) return;
+    this.forge = { sel: 0, t: 0, list: this.forgeRecipes() };
+    Sfx.ui();
+  }
+
+  closeForge() {
+    if (!this.forge) return;
+    this.forge = null;
+    Sfx.ui();
+  }
+
+  updateForge(dt) {
+    const f = this.forge;
+    f.t += dt;
+    f.list = this.forgeRecipes();
+    const n = f.list.length;
+    if (n === 0) { if (Input.mouseDown.right || Input.pressed.has('Escape')) this.closeForge(); return; }
+    f.sel = clamp(f.sel, 0, n - 1);
+    if (Input.wheel !== 0) {
+      f.sel = (f.sel + sign(Input.wheel) + n) % n;
+      Sfx.ui();
+    }
+    if (Input.pressed.has(Binds.jump) || Input.pressed.has('ArrowUp')) { f.sel = (f.sel - 1 + n) % n; Sfx.ui(); }
+    if (Input.pressed.has(Binds.down) || Input.pressed.has('ArrowDown')) { f.sel = (f.sel + 1) % n; Sfx.ui(); }
+    if (Input.pressed.has('Escape') || Input.mouseDown.right) { this.closeForge(); return; }
+    if (f.hover >= 0 && f.hover !== undefined) f.sel = f.hover;
+    if (f.t > 0.12 && Input.mouseDown.left) this.craft(f.list[f.sel]);
+  }
+
+  craft(entry) {
+    const p = this.player;
+    const inv = p.inventory;
+    if (!entry) return;
+    if (entry.kind === 'smelt') {
+      if (!inv.remove(entry.id, 1)) return;
+      inv.add('ironbar', ARMOR.smeltValue);
+      floatText(this.anvil ? this.anvil.x : p.x, (this.anvil ? this.anvil.y : p.cy) - 22,
+                `+${ARMOR.smeltValue} BARS`, '#ccd6e6', { life: 1.0 });
+      this.forgeSparks('#ffb43c');
+    } else {
+      if (!entry.ok) { Sfx.ui(); return; }
+      const set = entry.set;
+      const cost = set === 'iron' ? ARMOR.ironCost : ARMOR.paperCost;
+      const mat = set === 'iron' ? 'ironbar' : 'paper';
+      if (!inv.remove(mat, cost)) return;
+      if (inv.add(entry.id, 1) > 0) { inv.add(mat, cost); Sfx.ui(); return; }   // no room
+      floatText(this.anvil ? this.anvil.x : p.x, (this.anvil ? this.anvil.y : p.cy) - 22,
+                ITEMS[entry.id].name.toUpperCase(), set === 'iron' ? '#ccd6e6' : INK.paper, { life: 1.2 });
+      this.forgeSparks(set === 'iron' ? '#ccd6e6' : INK.paper);
+    }
+    p.recomputeStats();
+    Sfx.pickup();
+  }
+
+  forgeSparks(color) {
+    const a = this.anvil;
+    if (!a) return;
+    Camera.add(4);
+    Camera.punch(0.6);
+    impactRing(a.x, a.y - 10, { color, r0: 2, r1: 40, life: 0.35, width: 2 });
+    burst(a.x, a.y - 10, 22, {
+      color, color2: '#fff0a0', speedMin: 40, speedMax: 220,
+      lifeMin: 0.15, lifeMax: 0.55, gravity: 320, drag: 0.9, kind: 'streak',
+    });
+  }
+
   // --- origami -----------------------------------------------------------
 
   // Attacking with paper stops the world and asks which fold you want. Only
@@ -427,6 +542,8 @@ export class Game {
     if (p.attackCd > 0) return;              // folds have their own cadence
     if (p.attackCd > 0) return;              // folds have their own cadence
     const known = p.inventory.knownFolds();
+    // the Paper set teaches a fold no book does
+    if (p.armorSet === 'paper' && !known.includes('shield')) known.push('shield');
     if (!known.length) return;
     const options = known.map((id) => {
       const cfg = ORIGAMI.forms[id];
@@ -483,19 +600,28 @@ export class Game {
     const aim = this.fold ? this.fold.aim : p.aim;
     this.fold = null;
     if (!cfg || !p) return;
+    if (id === 'shield' && this.shields.length) {
+      Sfx.ui();
+      floatText(p.x, p.cy - 14, 'SHIELDS STILL UP', Theme.uiDim, { life: 0.8 });
+      return;
+    }
     if (!p.inventory.remove('paper', cfg.cost)) {
       Sfx.ui();
       floatText(p.x, p.cy - 14, 'NO PAPER', Theme.uiDim, { life: 0.7 });
       return;
     }
     p.recomputeStats();
-    p.attackCd = cfg.cooldown ?? ORIGAMI.cooldown;
+    p.attackCd = (cfg.cooldown ?? ORIGAMI.cooldown) * (1 + (p.armorBuff?.foldCooldown ?? 0));
     p.swing = { t: 0, angle: aim, kind: 'throw' };
+    if (id === 'shield') { this.raisePaperShields(); return; }
     const ox = p.x + Math.cos(aim) * 9, oy = p.cy + Math.sin(aim) * 9;
+    // paper leggings push the plane along faster
+    const speed = cfg.speed * (id === 'airplane' ? 1 + (p.armorBuff?.planeSpeed ?? 0) : 1);
     this.projectiles.push(new Projectile({
       x: ox, y: oy,
-      vx: Math.cos(aim) * cfg.speed, vy: Math.sin(aim) * cfg.speed,
-      damage: p.boosted(cfg.damage, 'paper'), kind: 'origami', fold: id, team: 'player',
+      vx: Math.cos(aim) * speed, vy: Math.sin(aim) * speed,
+      damage: Math.round(p.boosted(cfg.damage, 'paper') * (1 + (p.armorBuff?.origamiDamage ?? 0))),
+      kind: 'origami', fold: id, team: 'player',
       life: id === 'missile' ? 6 : 14, game: this,
     }));
     Sfx.swing();
@@ -527,6 +653,89 @@ export class Game {
         lifeMin: 0.3, lifeMax: 0.8, sizeMin: 1, sizeMax: 3, gravity: -30,
         angle: aim + Math.PI, spread: 0.8, glow: false,
       });
+    }
+  }
+
+  // Three plates that orbit you for a minute and a half, cutting whatever they
+  // pass through. Only one set can be up at a time.
+  raisePaperShields() {
+    const p = this.player;
+    for (let i = 0; i < PAPER_SHIELD.count; i++) {
+      this.shields.push({ a: (i / PAPER_SHIELD.count) * TAU, t: 0, hits: new Map(), pop: 0 });
+    }
+    Sfx.pickup();
+    Camera.add(6);
+    impactRing(p.x, p.cy, { color: INK.paper, r0: 4, r1: PAPER_SHIELD.radius * 2.4, life: 0.5, width: 2 });
+    impactRing(p.x, p.cy, { color: INK.ink, r0: 2, r1: PAPER_SHIELD.radius * 1.6, life: 0.35, width: 1.5 });
+    burst(p.x, p.cy, 26, {
+      color: INK.paper, color2: INK.ink, speedMin: 40, speedMax: 190,
+      lifeMin: 0.2, lifeMax: 0.7, gravity: 60, drag: 0.9, glow: false,
+    });
+  }
+
+  updatePaperShields(dt) {
+    if (!this.shields.length) return;
+    const p = this.player;
+    const C = PAPER_SHIELD;
+    for (let i = this.shields.length - 1; i >= 0; i--) {
+      const sh = this.shields[i];
+      sh.t += dt;
+      sh.a += C.spin * dt;
+      sh.pop = Math.min(1, sh.pop + dt * 5);
+      if (sh.t >= C.life) {
+        this.shields.splice(i, 1);
+        burst(p.x + Math.cos(sh.a) * C.radius, p.cy + Math.sin(sh.a) * C.radius * 0.75, 12, {
+          color: INK.paper, color2: INK.paperShade, speedMin: 20, speedMax: 110,
+          lifeMin: 0.3, lifeMax: 0.9, gravity: 300, drag: 0.9, glow: false,
+        });
+        continue;
+      }
+      const sx = p.x + Math.cos(sh.a) * C.radius;
+      const sy = p.cy + Math.sin(sh.a) * C.radius * 0.75;
+      sh.x = sx; sh.y = sy;
+      // decay the per-enemy cooldowns
+      for (const [uid, tt] of sh.hits) {
+        if (tt - dt <= 0) sh.hits.delete(uid); else sh.hits.set(uid, tt - dt);
+      }
+      for (const e of this.enemies) {
+        if (e.dead || e.spawnT > 0 || e.untargetable) continue;
+        if (sh.hits.has(e.uid)) continue;
+        if (Math.abs(sx - e.cx) > e.w / 2 + 6 || Math.abs(sy - e.cy) > e.h / 2 + 6) continue;
+        sh.hits.set(e.uid, C.hitCooldown);
+        e.damage(p.boosted(C.damage, 'paper'), {
+          color: INK.ink, knockback: 60, fromX: p.x, shake: 0,
+        });
+        burst(sx, sy, 10, {
+          color: INK.ink, color2: INK.paper, speedMin: 30, speedMax: 140,
+          lifeMin: 0.12, lifeMax: 0.4, gravity: 120, drag: 0.88, glow: false,
+        });
+      }
+      if (Math.random() < dt * 8) {
+        spawnParticle({
+          x: sx, y: sy, vx: rand(-8, 8), vy: rand(-8, 8), life: rand(0.2, 0.5),
+          size: 1, color: Math.random() < 0.4 ? INK.ink : INK.paper,
+          gravity: 40, drag: 0.94, kind: 'shrink', glow: false,
+        });
+      }
+    }
+  }
+
+  drawPaperShields(ctx) {
+    const C = PAPER_SHIELD;
+    for (const sh of this.shields) {
+      if (sh.x === undefined) continue;
+      const fade = clamp((C.life - sh.t) / 6, 0, 1);      // they thin out at the end
+      const cel = Math.floor(sh.t * 12);
+      ctx.save();
+      ctx.globalAlpha = fade;
+      ctx.translate(Math.round(sh.x), Math.round(sh.y));
+      ctx.rotate(sh.a * 0.6);
+      ctx.scale(sh.pop, sh.pop);
+      doodleShape(ctx, [[0, -7], [6, -2], [4, 7], [-4, 7], [-6, -2]],
+                  INK.paper, INK.ink, 1.2, cel, 1.0);
+      doodleLine(ctx, [[0, -5], [0, 5]], INK.inkSoft, 1, cel + 1, 0.8);
+      doodleLine(ctx, [[-3, 0], [3, 0]], INK.inkSoft, 1, cel + 2, 0.8);
+      ctx.restore();
     }
   }
 
@@ -794,6 +1003,12 @@ export class Game {
     const p = this.player;
     if (!p) return;
 
+    // The forge holds the whole world still until you close it.
+    if (this.forge) {
+      if (p.dead || this.screen !== 'playing') { this.forge = null; return; }
+      this.updateForge(dt);
+      return;
+    }
     // The fold wheel holds the whole world still until you pick one.
     if (this.fold) {
       if (p.dead || this.screen !== 'playing') { this.fold = null; return; }
@@ -874,7 +1089,9 @@ export class Game {
       if (this.projectiles[i].dead) this.projectiles.splice(i, 1);
     }
 
+    if (!frozen) this.updatePaperShields(dt);
     for (const pk of this.pickups) pk.update(dt);
+    if (this.anvil) this.anvil.update(dt);
     if (this.portal) this.portal.update(dt);
 
     for (let i = this.shockwaves.length - 1; i >= 0; i--) {
@@ -1009,6 +1226,12 @@ export class Game {
       }
       return;
     }
+    // the anvil
+    if (this.anvil && dist(mx, my, this.anvil.x, this.anvil.y - 8) < 24 &&
+        dist(p.x, p.cy, this.anvil.x, this.anvil.y - 8) < ANVIL.reach) {
+      this.openForge();
+      return;
+    }
     // portal
     if (this.portal && this.roomCleared) {
       if (dist(mx, my, this.portal.x, this.portal.y - 18) < 26) {
@@ -1058,11 +1281,13 @@ export class Game {
     }
 
     for (const pk of this.pickups) pk.draw(ctx);
+    if (this.anvil) this.anvil.draw(ctx);
     if (this.portal) this.portal.draw(ctx);
     for (const e of this.enemies) e.draw(ctx);
     if (this.boss && this.boss.draw) this.boss.draw(ctx);
     for (const pr of this.projectiles) pr.draw(ctx);
     if (this.player) this.player.draw(ctx);
+    this.drawPaperShields(ctx);
 
     if (this.boss && this.boss.drawBeams) this.boss.drawBeams(ctx);
 
@@ -1087,6 +1312,7 @@ export class Game {
     if (!this.cutscene.active && this.screen !== 'victory') drawHUD(ctx, this);
     this.cutscene.draw(ctx);
     if (this.fold) drawFoldWheel(ctx, this);
+    if (this.forge) drawForge(ctx, this);
     if (this.invOpen) drawInventory(ctx, this);
     else if (UI.tooltip) drawTooltip(ctx, UI.tooltip);
 

@@ -299,6 +299,34 @@ are empty and you cannot throw again. Every enemy it passes through takes a
 over a much wider radius. The counter carries across throws, so you can line the
 third one up.
 
+### Armour and the anvil
+
+The inventory has **three armour slots** — head, body, legs — down the left of
+the grid. Drag a piece onto its slot to wear it, drag it back off to take it
+away. Every worn piece adds **flat defence**, taken straight off each hit you
+receive (a hit always leaves at least 1), and carries a buff. Wearing all three
+pieces of one set adds a set bonus on top.
+
+Every **second room** puts an **anvil on the drifting platform** — it rides the
+platform as it slides. Right-click it to open the forge. Nothing there is
+timed; the world stops while it is open.
+
+| Recipe | Cost | Effect |
+| --- | --- | --- |
+| Melt a weapon | Iron Sword, Shardgun, Nukerang, Grappling Hook or Firey Twin Dagger | **2 Iron Bars** |
+| Iron Helmet | 3 bars | 3 defence, **+20% melee damage** |
+| Iron Chestplate | 3 bars | 4 defence, **+1 tile of melee reach** |
+| Iron Leggings | 3 bars | 3 defence |
+| *Iron set bonus* | wear all three | **+1 defence, -10% melee cooldown** (11 defence total) |
+| Paper Helmet | 75 paper | 0 defence, **+10% Origamist damage** |
+| Paper Chestplate | 75 paper | 2 defence, **-30% fold cooldown** |
+| Paper Leggings | 75 paper | 1 defence, **+10% paper plane speed** |
+| *Paper set bonus* | wear all three | a fourth fold: **PAPER SHIELD** |
+
+**Paper Shield** costs **20 sheets** and raises **3 plates that orbit you**,
+cutting anything they pass through for **20**. They last **90 seconds** and you
+can only have one set up — the fold is refused until the last plate is gone.
+
 ### Perks
 
 Perks are items — they work while they simply sit anywhere in the inventory.

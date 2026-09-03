@@ -7,7 +7,7 @@ import { pxRect, glowDot, Camera } from './gfx.js';
 import { VIEW_W, VIEW_H, BOW, SHARDGUN, PLAYER, ENEMY_TYPES, BOSS_TYPES } from './config.js';
 import { ENEMY_TINT } from './entities.js';
 import { Options } from './settings.js';
-import { ITEMS, RARITY, INV_COLS, INV_ROWS, INV_SIZE, HOTBAR_SIZE, drawItemIcon } from './items.js';
+import { ITEMS, RARITY, INV_COLS, INV_ROWS, INV_SIZE, HOTBAR_SIZE, ARMOR_SLOTS, Inventory, drawItemIcon } from './items.js';
 import { Input, Binds, BIND_ORDER, BIND_LABELS, bindLabel } from './input.js';
 import { Sfx } from './audio.js';
 
@@ -481,6 +481,68 @@ function shortWrap(a) {
   return a - Math.PI;
 }
 
+// The forge: one scrolling list of what this anvil can do with what you are
+// carrying. Wheel or W/S to move, left click to commit, right click to leave.
+export function drawForge(ctx, game) {
+  const f = game.forge;
+  const p = game.player;
+  if (!f || !p) return;
+  const t = UI.t;
+  const ease = 1 - Math.pow(1 - clamp(f.t * 7, 0, 1), 3);
+
+  ctx.save();
+  ctx.fillStyle = rgba('#05060c', 0.55 * ease);
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.restore();
+
+  const w = 236, rowH = 15;
+  const h = 40 + Math.max(1, f.list.length) * rowH + 16;
+  const x = Math.round((VIEW_W - w) / 2);
+  const y = Math.round((VIEW_H - h) / 2);
+  ctx.save();
+  ctx.globalAlpha = ease;
+  panel(ctx, x, y, w, h, { accent: '#ffb43c', alpha: 0.95 });
+  drawTextShadow(ctx, 'ANVIL', x + w / 2, y + 6, '#ffb43c', 2, 'center');
+
+  const bars = p.inventory.countOf('ironbar');
+  const paper = p.inventory.countOf('paper');
+  drawText(ctx, `${bars} BARS`, x + 8, y + 24, '#ccd6e6', 1);
+  drawText(ctx, `${paper} PAPER`, x + w - 8, y + 24, '#f4f0e6', 1, 'right');
+  pxRect(ctx, x + 8, y + 34, w - 16, 1, rgba(Theme.uiDim, 0.5));
+
+  f.hover = -1;
+  if (!f.list.length) {
+    drawText(ctx, 'NOTHING TO WORK WITH', x + w / 2, y + 46, Theme.uiDim, 1, 'center');
+  }
+  for (let i = 0; i < f.list.length; i++) {
+    const e = f.list[i];
+    const ry = y + 40 + i * rowH;
+    const hot = inside(x + 6, ry, w - 12, rowH - 1);
+    if (hot) f.hover = i;
+    const sel = i === f.sel;
+    if (sel) {
+      ctx.fillStyle = rgba('#ffb43c', 0.16);
+      ctx.fillRect(x + 6, ry, w - 12, rowH - 1);
+      ctx.strokeStyle = rgba('#ffb43c', 0.8);
+      ctx.strokeRect(x + 6.5, ry + 0.5, w - 13, rowH - 2);
+    }
+    drawItemIcon(ctx, e.icon, x + 10, ry + 1, 12, t);
+    const col = e.owned ? Theme.uiDim : e.ok ? (sel ? '#ffd76a' : Theme.ui) : Theme.uiDim;
+    drawText(ctx, e.label, x + 26, ry + 4, col, 1);
+    drawText(ctx, e.cost, x + w - 10, ry + 4,
+             e.owned ? Theme.uiDim : e.ok ? '#8ce88c' : Theme.hp, 1, 'right');
+    // what the piece actually does, on the highlighted row
+    if (sel && ITEMS[e.id]?.armor) {
+      // above the panel, so it never covers the rows you are choosing between
+      UI.tooltip = { id: e.id, x: x + w / 2, y: y - 2 };
+    }
+  }
+  drawText(ctx, 'WHEEL / W-S  SELECT     LMB MAKE     RMB CLOSE',
+           x + w / 2, y + h - 11, rgba(Theme.uiDim, 0.85), 1, 'center');
+  ctx.restore();
+  if (UI.tooltip) { drawTooltip(ctx, UI.tooltip); UI.tooltip = null; }
+}
+
 function drawPerkStrip(ctx, game) {
   const inv = game.player.inventory;
   const perks = [];
@@ -502,17 +564,48 @@ function drawPerkStrip(ctx, game) {
 
 // --- inventory -----------------------------------------------------------
 
+const ARMOR_LABEL = { helmet: 'HEAD', chest: 'BODY', legs: 'LEGS' };
+
 export function drawInventory(ctx, game) {
-  const inv = game.player.inventory;
+  const p = game.player;
+  const inv = p.inventory;
   ctx.fillStyle = rgba('#000000', 0.6);
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   const s = 22, gap = 4;
   const gw = INV_COLS * s + (INV_COLS - 1) * gap;
   const gh = INV_ROWS * s + (INV_ROWS - 1) * gap;
-  const px = Math.round((VIEW_W - gw) / 2) - 12;
+  // the armour column sits to the left of the grid, so shift the whole thing
+  const armW = s + 22;
+  const px = Math.round((VIEW_W - gw - armW) / 2) - 12 + armW;
   const py = 54;
-  panel(ctx, px, py - 22, gw + 24, gh + 32);
+  panel(ctx, px - armW - 6, py - 22, gw + 24 + armW + 6, gh + 32);
   drawTextShadow(ctx, 'INVENTORY', px + (gw + 24) / 2, py - 16, Theme.uiAccent, 1, 'center');
+
+  // --- armour slots
+  const ax = px - armW - 2;
+  let hoverArmor = null;
+  drawText(ctx, 'WORN', ax + s / 2, py - 16, Theme.uiDim, 1, 'center');
+  for (let i = 0; i < ARMOR_SLOTS.length; i++) {
+    const key = ARMOR_SLOTS[i];
+    const y = py + i * (s + gap);
+    const item = UI.drag && UI.drag.armor === key ? null : inv.armor[key];
+    slotBox(ctx, ax, y, s, false, item, UI.t);
+    // an empty slot says what belongs in it
+    if (!item) drawText(ctx, ARMOR_LABEL[key], ax + s / 2, y + s / 2 - 3, rgba(Theme.uiDim, 0.65), 1, 'center');
+    if (inside(ax, y, s, s)) {
+      hoverArmor = key;
+      ctx.strokeStyle = Theme.uiAccent;
+      ctx.strokeRect(ax + 0.5, y + 0.5, s - 1, s - 1);
+      if (item) UI.tooltip = { id: item.id, x: ax + s / 2, y: y - 4 };
+    }
+  }
+  // defence and the set bonus, under the column
+  const setName = inv.activeSet();
+  const dy = py + ARMOR_SLOTS.length * (s + gap) + 2;
+  drawText(ctx, `DEF ${p.defense}`, ax + s / 2, dy, p.defense > 0 ? '#8ce88c' : Theme.uiDim, 1, 'center');
+  if (setName) {
+    drawText(ctx, `${setName.toUpperCase()} SET`, ax + s / 2, dy + 10, Theme.uiAccent, 1, 'center');
+  }
 
   let hoverIdx = -1;
   for (let i = 0; i < INV_SIZE; i++) {
@@ -531,19 +624,38 @@ export function drawInventory(ctx, game) {
     }
   }
 
-  // drag & drop
-  if (Input.mouseDown.left && hoverIdx >= 0 && inv.slots[hoverIdx] && !UI.drag) {
-    UI.drag = { from: hoverIdx };
-    Sfx.ui();
+  // --- drag & drop, across the grid and the armour column both
+  if (Input.mouseDown.left && !UI.drag) {
+    if (hoverIdx >= 0 && inv.slots[hoverIdx]) { UI.drag = { from: hoverIdx }; Sfx.ui(); }
+    else if (hoverArmor && inv.armor[hoverArmor]) { UI.drag = { armor: hoverArmor }; Sfx.ui(); }
   }
   if (UI.drag) {
-    const item = inv.slots[UI.drag.from];
+    const item = UI.drag.armor ? inv.armor[UI.drag.armor] : inv.slots[UI.drag.from];
     if (item) {
       drawItemIcon(ctx, item.id, Input.mouse.x - 6, Input.mouse.y - 6, 12, UI.t);
       if (item.count > 1) drawTextShadow(ctx, item.count, Input.mouse.x + 8, Input.mouse.y + 2, Theme.ui, 1);
+      // the slot it would land in lights up while you hold it
+      const key = Inventory.armorSlot(item.id);
+      if (key && !UI.drag.armor) {
+        const i = ARMOR_SLOTS.indexOf(key);
+        const y = py + i * (s + gap);
+        ctx.strokeStyle = rgba('#8ce88c', 0.5 + 0.4 * Math.sin(UI.t * 8));
+        ctx.strokeRect(ax - 0.5, y - 0.5, s + 1, s + 1);
+      }
     }
     if (Input.mouseUp.left) {
-      if (hoverIdx >= 0) inv.swap(UI.drag.from, hoverIdx);
+      if (UI.drag.armor) {
+        // dropping a worn piece: onto the grid, or back where it came from
+        if (hoverIdx >= 0) inv.unequip(UI.drag.armor, inv.slots[hoverIdx] ? -1 : hoverIdx);
+        else if (!hoverArmor) inv.unequip(UI.drag.armor);
+      } else if (hoverArmor) {
+        // only into its own slot; anything else just falls back
+        const item2 = inv.slots[UI.drag.from];
+        if (item2 && Inventory.armorSlot(item2.id) === hoverArmor) inv.equip(UI.drag.from);
+        else Sfx.ui();
+      } else if (hoverIdx >= 0) {
+        inv.swap(UI.drag.from, hoverIdx);
+      }
       UI.drag = null;
       game.player.recomputeStats();
     }
