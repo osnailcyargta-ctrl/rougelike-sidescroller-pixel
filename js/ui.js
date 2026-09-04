@@ -9,7 +9,7 @@ import { ENEMY_TINT } from './entities.js';
 import { Options } from './settings.js';
 import { ITEMS, RARITY, INV_COLS, INV_ROWS, INV_SIZE, HOTBAR_SIZE, ARMOR_SLOTS, Inventory, drawItemIcon } from './items.js';
 import { Input, Binds, BIND_ORDER, BIND_LABELS, bindLabel } from './input.js';
-import { hotbarSlotRect, hudInset } from './layout.js';
+import { hotbarSlotRect, hudInset, forgeLayout, forgeRowRect, closeRect } from './layout.js';
 import { Sfx } from './audio.js';
 
 export const UI = {
@@ -38,6 +38,20 @@ export function uiBeginFrame(dt) {
 function inside(x, y, w, h) {
   const m = Input.mouse;
   return m.x >= x && m.x < x + w && m.y >= y && m.y < y + h;
+}
+
+// The X every popup wears in its top right corner. Hit testing lives with
+// the popup's own update, so this only paints; hot is passed in.
+export function closeButton(ctx, r, hot) {
+  ctx.fillStyle = rgba(hot ? Theme.hp : '#000000', hot ? 0.30 : 0.45);
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+  ctx.strokeStyle = hot ? Theme.hp : rgba(Theme.uiDim, 0.85);
+  ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+  const col = hot ? '#ffffff' : Theme.uiDim;
+  for (let i = 0; i < 6; i++) {
+    pxRect(ctx, r.x + 3 + i, r.y + 3 + i, 1, 1, col);
+    pxRect(ctx, r.x + 8 - i, r.y + 3 + i, 1, 1, col);
+  }
 }
 
 export function panel(ctx, x, y, w, h, opts = {}) {
@@ -474,9 +488,28 @@ export function drawFoldWheel(ctx, game) {
     const afford = have >= cur.cost;
     drawText(ctx, `${cur.cost} / ${have} SHEETS`, cx, cy + R + 18,
              afford ? Theme.ui : Theme.hp, 1, 'center');
-    if (n > 1) drawText(ctx, 'SCROLL TO TURN', cx, cy + R + 30, rgba(Theme.uiDim, 0.8), 1, 'center');
+    if (f.touchHint) {
+      drawText(ctx, f.holdK > 0.001 ? 'HOLD TO FOLD' : (n > 1 ? 'DRAG UP OR DOWN' : 'HOLD TO FOLD'),
+               cx, cy + R + 30, rgba(f.holdK > 0.001 ? Theme.uiAccent : Theme.uiDim, 0.9), 1, 'center');
+    } else if (n > 1) {
+      drawText(ctx, 'SCROLL TO TURN', cx, cy + R + 30, rgba(Theme.uiDim, 0.8), 1, 'center');
+    }
     ctx.restore();
   }
+
+  // --- the hold-to-commit ring, drawn only while a finger is actually down
+  if (f.holdK > 0.001) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = rgba('#ffd76a', 0.9);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, Math.max(0.5, R + 9), -Math.PI / 2, -Math.PI / 2 + TAU * f.holdK);
+    ctx.stroke();
+    glowDot(ctx, cx, cy, (R + 12) * f.holdK, '#ffd76a', 0.12 * f.holdK);
+    ctx.restore();
+  }
+  if (f.close) closeButton(ctx, f.close, !!f.closeHot);
 }
 
 // Wrap an angle into -PI..PI without importing the whole util surface.
@@ -500,10 +533,8 @@ export function drawForge(ctx, game) {
   ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   ctx.restore();
 
-  const w = 236, rowH = 15;
-  const h = 40 + Math.max(1, f.list.length) * rowH + 16;
-  const x = Math.round((VIEW_W - w) / 2);
-  const y = Math.round((VIEW_H - h) / 2);
+  const g = f.geom ?? forgeLayout(f.list.length);
+  const { x, y, w, h, rowH } = g;
   ctx.save();
   ctx.globalAlpha = ease;
   panel(ctx, x, y, w, h, { accent: '#ffb43c', alpha: 0.95 });
@@ -515,15 +546,14 @@ export function drawForge(ctx, game) {
   drawText(ctx, `${paper} PAPER`, x + w - 8, y + 24, '#f4f0e6', 1, 'right');
   pxRect(ctx, x + 8, y + 34, w - 16, 1, rgba(Theme.uiDim, 0.5));
 
-  f.hover = -1;
   if (!f.list.length) {
     drawText(ctx, 'NOTHING TO WORK WITH', x + w / 2, y + 46, Theme.uiDim, 1, 'center');
   }
   for (let i = 0; i < f.list.length; i++) {
     const e = f.list[i];
-    const ry = y + 40 + i * rowH;
-    const hot = inside(x + 6, ry, w - 12, rowH - 1);
-    if (hot) f.hover = i;
+    const rr = forgeRowRect(g, i);
+    const ry = rr.y;
+    const hot = f.hover === i;
     const sel = i === f.sel;
     if (sel) {
       ctx.fillStyle = rgba('#ffb43c', 0.16);
@@ -542,8 +572,8 @@ export function drawForge(ctx, game) {
       UI.tooltip = { id: e.id, x: x + w / 2, y: y - 2 };
     }
   }
-  drawText(ctx, 'WHEEL / W-S  SELECT     LMB MAKE     RMB CLOSE',
-           x + w / 2, y + h - 11, rgba(Theme.uiDim, 0.85), 1, 'center');
+  drawText(ctx, 'TAP A ROW TO MAKE IT', x + w / 2, y + h - 11, rgba(Theme.uiDim, 0.85), 1, 'center');
+  closeButton(ctx, closeRect(x, y, w), !!f.closeHot);
   ctx.restore();
   if (UI.tooltip) { drawTooltip(ctx, UI.tooltip); UI.tooltip = null; }
 }
@@ -590,19 +620,10 @@ export function drawInventory(ctx, game) {
   // Close button in the top right corner. On a phone there is no ESC key and
   // the pad is hidden while the inventory is up, so without this the only way
   // out is the BAG button you may not remember pressing.
-  const cbs = 12;
-  const cbx = panX + panW - cbs - 4, cby = panY + 4;
+  const cbr = closeRect(panX, panY, panW);
   // a drag in flight owns the cursor: dropping an item must not close the panel
-  const cbHot = !UI.drag && inside(cbx, cby, cbs, cbs);
-  ctx.fillStyle = rgba(cbHot ? Theme.hp : '#000000', cbHot ? 0.30 : 0.45);
-  ctx.fillRect(cbx, cby, cbs, cbs);
-  ctx.strokeStyle = cbHot ? Theme.hp : rgba(Theme.uiDim, 0.85);
-  ctx.strokeRect(cbx + 0.5, cby + 0.5, cbs - 1, cbs - 1);
-  const xcol = cbHot ? '#ffffff' : Theme.uiDim;
-  for (let i = 0; i < 6; i++) {
-    pxRect(ctx, cbx + 3 + i, cby + 3 + i, 1, 1, xcol);
-    pxRect(ctx, cbx + 8 - i, cby + 3 + i, 1, 1, xcol);
-  }
+  const cbHot = !UI.drag && inside(cbr.x, cbr.y, cbr.w, cbr.h);
+  closeButton(ctx, cbr, cbHot);
   if (cbHot) {
     UI.hovered = 'inv-close';
     if (Input.mouseDown.left) {

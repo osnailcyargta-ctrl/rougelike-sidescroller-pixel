@@ -62,3 +62,32 @@ export function hudInset() {
   const q = padLayout().pause;
   return Math.round(q.x + q.r + 5);
 }
+
+// --- the anvil popup ------------------------------------------------------
+// Shared so the row you tap and the row that gets forged are the same row.
+// They used to disagree: the hover was worked out while drawing, so a touch
+// that arrived and clicked inside one frame was matched against the previous
+// frame's cursor position and forged whatever had been selected before.
+
+export const FORGE_W = 236;
+export const FORGE_ROW_H = 15;
+export const CLOSE_SIZE = 12;
+
+export function forgeLayout(rows) {
+  const w = FORGE_W, rowH = FORGE_ROW_H;
+  const h = 40 + Math.max(1, rows) * rowH + 16;
+  return { x: Math.round((VIEW_W - w) / 2), y: Math.round((VIEW_H - h) / 2), w, h, rowH };
+}
+
+export function forgeRowRect(g, i) {
+  return { x: g.x + 6, y: g.y + 40 + i * g.rowH, w: g.w - 12, h: g.rowH - 1 };
+}
+
+// The close button every popup puts in its top right corner.
+export function closeRect(x, y, w) {
+  return { x: x + w - CLOSE_SIZE - 4, y: y + 4, w: CLOSE_SIZE, h: CLOSE_SIZE };
+}
+
+export function inRect(r, mx, my) {
+  return mx >= r.x && mx < r.x + r.w && my >= r.y && my < r.y + r.h;
+}

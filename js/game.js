@@ -21,6 +21,7 @@ import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, rollPerkPair, drawItemIcon } from
 import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, drawForge, panel, button } from './ui.js';
 import { updateTouchPad, drawTouchPad, drawAimLeash, Pad } from './touch.js';
 import { Perf, perfTick, syncPerfOptions, TIERS } from './perf.js';
+import { forgeLayout, forgeRowRect, closeRect, inRect } from './layout.js';
 import { drawText, drawTextShadow } from './font.js';
 import { Options, loadOptions, saveOptions, applyVisualOptions, captureShaderBase, saveShader, loadShader } from './settings.js';
 import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, drawControls, drawVictory } from './screens.js';
@@ -28,6 +29,11 @@ import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, d
 // Health restored to the player after every cleared wave; clearing a room and
 // stepping through the gate restores the rest.
 const WAVE_HEAL = 0.25;
+
+// Touch handling for the fold wheel: how far a drag has to travel to step to
+// the next fold, and how long you have to hold still before it commits.
+const FOLD_DRAG_STEP = 26;
+const FOLD_HOLD_TIME = 1.0;
 
 export class Game {
   static get WAVE_HEAL() { return WAVE_HEAL; }
@@ -512,8 +518,25 @@ export class Game {
     if (Input.pressed.has(Binds.jump) || Input.pressed.has('ArrowUp')) { f.sel = (f.sel - 1 + n) % n; Sfx.ui(); }
     if (Input.pressed.has(Binds.down) || Input.pressed.has('ArrowDown')) { f.sel = (f.sel + 1) % n; Sfx.ui(); }
     if (Input.pressed.has('Escape') || Input.mouseDown.right) { this.closeForge(); return; }
-    if (f.hover >= 0 && f.hover !== undefined) f.sel = f.hover;
-    if (f.t > 0.12 && Input.mouseDown.left) this.craft(f.list[f.sel]);
+
+    // Work out what the cursor is over NOW. Reading a hover that was worked
+    // out while drawing is a frame behind, and a touch arrives and clicks in
+    // the same frame - which is how tapping one recipe used to forge another.
+    const g = forgeLayout(n);
+    f.geom = g;
+    let over = -1;
+    for (let i = 0; i < n; i++) {
+      if (inRect(forgeRowRect(g, i), Input.mouse.x, Input.mouse.y)) { over = i; break; }
+    }
+    f.hover = over;
+    if (over >= 0) f.sel = over;
+
+    const cr = closeRect(g.x, g.y, g.w);
+    f.closeHot = inRect(cr, Input.mouse.x, Input.mouse.y);
+    if (f.closeHot && Input.mouseDown.left) { this.closeForge(); return; }
+    // only a click that lands on a recipe forges it, so a stray tap on the
+    // panel or the backdrop can never spend your bars
+    if (f.t > 0.12 && Input.mouseDown.left && over >= 0) this.craft(f.list[over]);
   }
 
   craft(entry) {
@@ -572,7 +595,8 @@ export class Game {
     });
     // rot is where the ring is; targetRot is where it is heading. Scrolling
     // adds a full slice to the target, so it always spins the way you scrolled.
-    this.fold = { options, sel: 0, t: 0, aim: p.aim, rot: 0, targetRot: 0, spin: 0 };
+    this.fold = { options, sel: 0, t: 0, aim: p.aim, rot: 0, targetRot: 0, spin: 0,
+                  hold: null, holdK: 0, close: null, closeHot: false, touchHint: false };
     Sfx.ui();
   }
 
@@ -605,7 +629,47 @@ export class Game {
       }
     }
     if (Input.pressed.has('Escape') || Input.mouseDown.right) { this.closeFoldWheel(); return; }
-    if (f.t > 0.12 && Input.mouseDown.left) this.chooseFold(f.options[f.sel].id);
+
+    // The wheel sits over the player, so its close button has to be worked out
+    // from the same projection the drawing uses. Doing it here means update and
+    // draw agree, and a tap is matched against where the button really is.
+    const scr = Camera.project(this.player.x, this.player.cy - 44);
+    const wx = Math.round(clamp(scr.x, 60, VIEW_W - 60));
+    const wy = Math.round(clamp(scr.y, 52, VIEW_H - 66));
+    const cr = { x: clamp(wx + 46, 4, VIEW_W - 16), y: clamp(wy - 54, 4, VIEW_H - 16), w: 12, h: 12 };
+    f.close = cr;
+    f.closeHot = inRect(cr, Input.mouse.x, Input.mouse.y);
+    if (f.closeHot && Input.mouseDown.left) { this.closeFoldWheel(); return; }
+
+    // On touch there is no wheel to spin and no number row to press, and a tap
+    // that committed the moment it landed would pick whatever happened to be
+    // at the top. So: drag up or down to turn the wheel, then hold still to
+    // commit. Browsing restarts the timer, so you can look before you fold.
+    f.touchHint = Options.mobileControls || Input.touchSeen;
+    if (f.touchHint) {
+      if (Input.mouseDown.left && !f.closeHot) f.hold = { y: Input.mouse.y, t: 0 };
+      if (f.hold && Input.mouse.left) {
+        f.hold.t += dt;
+        const dy = Input.mouse.y - f.hold.y;
+        if (n > 1 && Math.abs(dy) >= FOLD_DRAG_STEP) {
+          const dir = dy > 0 ? 1 : -1;
+          f.sel = (f.sel + dir + n) % n;
+          f.targetRot -= dir * step;
+          f.spin = 1;
+          f.hold.y += dir * FOLD_DRAG_STEP;   // rebase so a long drag keeps stepping
+          f.hold.t = 0;
+          Sfx.ui();
+          Camera.punch(0.18);
+        }
+        f.holdK = clamp(f.hold.t / FOLD_HOLD_TIME, 0, 1);
+        if (f.hold.t >= FOLD_HOLD_TIME) { this.chooseFold(f.options[f.sel].id); return; }
+      } else {
+        f.holdK = 0;
+      }
+      if (Input.mouseUp.left) { f.hold = null; f.holdK = 0; }
+    } else if (f.t > 0.12 && Input.mouseDown.left) {
+      this.chooseFold(f.options[f.sel].id);
+    }
   }
 
   closeFoldWheel() {
