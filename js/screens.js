@@ -266,8 +266,8 @@ function drawTouchTab(ctx, game, t) {
     'FLICK IT DOWN TWICE IN',
     'THE AIR TO GROUND SLAM.',
     '',
-    'TAP A HOTBAR SLOT TO',
-    'SWAP WEAPON.',
+    'THE STICKS ONLY ANSWER TO',
+    'A DRAG, NOT A TAP.',
   ];
   let ggy = gy + 13;
   for (const line of gest) {
@@ -280,7 +280,7 @@ function drawTouchTab(ctx, game, t) {
   drawText(ctx, 'THE PAD', lx, 64, Theme.platformGlow, 1);
   const legend = [
     ['LEFT STICK', 'MOVE / JUMP / DROP'],
-    ['RIGHT STICK', 'AIM'],
+    ['RIGHT STICK', 'MOVE THE CROSSHAIR'],
     ['FIRE', 'ATTACK (HOLD)'],
     ['HOOK', 'GRAPPLE'],
     ['USE', 'INTERACT'],

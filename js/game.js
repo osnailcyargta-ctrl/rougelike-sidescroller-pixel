@@ -19,7 +19,7 @@ import { Cutscene } from './cutscene.js';
 import { drawBackground, drawArena, drawLightShafts, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal, Anvil } from './world.js';
 import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
 import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, drawForge, panel, button } from './ui.js';
-import { updateTouchPad, drawTouchPad } from './touch.js';
+import { updateTouchPad, drawTouchPad, Pad } from './touch.js';
 import { drawText, drawTextShadow } from './font.js';
 import { Options, loadOptions, saveOptions, applyVisualOptions, captureShaderBase, saveShader, loadShader } from './settings.js';
 import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, drawControls, drawVictory } from './screens.js';
@@ -954,7 +954,7 @@ export class Game {
     // One bad frame must never end the run: log it and keep the loop alive.
     try {
       // the pad turns fingers into keys and cursor before anything reads them
-      updateTouchPad(this);
+      updateTouchPad(this, dt);
       this.handleGlobalKeys();
       if (this.debugOpen) {
         updateWorld(dt, true);
@@ -1339,7 +1339,7 @@ export class Game {
     if (this.screen === 'playing' && !this.invOpen && this.player && !this.player.dead) {
       if (Options.showRange) this.drawRangeRing(ctx);
       if (Options.showCooldown) this.drawCooldownRing(ctx);
-      if (Options.showReticle) this.drawReticle(ctx);
+      if (Options.showReticle || Pad.active) this.drawReticle(ctx);
     }
     ctx.restore();
 

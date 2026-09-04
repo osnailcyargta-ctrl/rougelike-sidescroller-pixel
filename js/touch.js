@@ -15,6 +15,7 @@
 //     input.js, never by poking gameplay state directly. Dash, ground slam,
 //     drop-through and hold-to-move then work on touch for free, because they
 //     are the keyboard's own double-tap and hold rules running unmodified.
+import { VIEW_W, VIEW_H } from './config.js';
 import { Input, Binds, virtualKeyDown, virtualKeyUp, virtualKeyTap } from './input.js';
 import { Options } from './settings.js';
 import { Theme } from './theme.js';
@@ -35,8 +36,12 @@ const AXES = {
   down:  { bind: 'down',  on: 0.52, off: 0.34, of: (s) => s.y },
 };
 
-const AIM_DEADZONE = 0.34;   // below this the aim keeps its last angle
-const AIM_DIST = 64;         // where the stand-in cursor sits from the player
+// The aim stick steers a free crosshair rather than swinging a fixed arm
+// around the player: it is a speed, not an angle, so the aim can be put
+// anywhere on the screen and left there.
+const AIM_DEAD = 0.14;       // thumb noise below this does not move the aim
+const AIM_SPEED = 340;       // px/s at full throw
+const AIM_EDGE = 6;          // keep the crosshair on screen
 
 export const Pad = {
   active: false,           // the pad is live this frame (playing, no modal)
@@ -44,8 +49,8 @@ export const Pad = {
   axes: new Set(),         // which AXES entries are currently engaged
   left: { x: 0, y: 0, mag: 0, active: false },
   right: { x: 0, y: 0, mag: 0, active: false },
-  aim: 0,
-  aimReady: false,         // aim has been seeded from the player's facing
+  cursor: { x: 0, y: 0 },  // the free crosshair, in world space
+  cursorReady: false,      // seeded from the player once the pad comes up
   autoFire: false,         // the AUTO toggle
   geom: null,
   _mouseLeft: false,       // mouse buttons the pad is currently holding down
@@ -82,7 +87,11 @@ function drainTouches(game, g, active) {
   for (const ev of Input.touchQueue) {
     if (ev.type === 'start') {
       const claim = Pad.active ? claimFor(ev, g, game) : 'ui';
-      Pad.touches.set(ev.id, { claim, vx: ev.vx, vy: ev.vy, wx: ev.wx, wy: ev.wy, sx: ev.sx, sy: ev.sy });
+      // ox/oy is where this finger landed: the anchor every drag is measured from
+      Pad.touches.set(ev.id, {
+        claim, vx: ev.vx, vy: ev.vy, ox: ev.vx, oy: ev.vy,
+        wx: ev.wx, wy: ev.wy, sx: ev.sx, sy: ev.sy,
+      });
       if (claim === 'ui') {
         // the cursor has to be under the finger before the click lands, or the
         // button being tapped will not consider itself hovered this frame
@@ -131,14 +140,24 @@ function drainTouches(game, g, active) {
 
 // --- sticks ---------------------------------------------------------------
 
+// The throw is measured from where the finger LANDED, not from the middle of
+// the ring, so putting a thumb down never yanks the stick over - it only
+// answers to an actual drag. Past full throw the origin is dragged along
+// behind the finger, so reversing direction responds at once instead of
+// having to unwind all the slack first.
 function readStick(claim, c) {
   for (const t of Pad.touches.values()) {
     if (t.claim !== claim) continue;
-    let x = (t.vx - c.x) / c.r;
-    let y = (t.vy - c.y) / c.r;
-    const m = Math.hypot(x, y);
-    if (m > 1) { x /= m; y /= m; }
-    return { x, y, mag: Math.min(1, m), active: true };
+    let dx = t.vx - t.ox, dy = t.vy - t.oy;
+    const d = Math.hypot(dx, dy);
+    if (d > c.r) {
+      const pull = (d - c.r) / d;
+      t.ox += dx * pull;
+      t.oy += dy * pull;
+      dx = t.vx - t.ox;
+      dy = t.vy - t.oy;
+    }
+    return { x: dx / c.r, y: dy / c.r, mag: Math.min(1, Math.hypot(dx, dy) / c.r), active: true };
   }
   return { x: 0, y: 0, mag: 0, active: false };
 }
@@ -193,7 +212,7 @@ function heldButton(id) {
   return false;
 }
 
-export function updateTouchPad(game) {
+export function updateTouchPad(game, dt = 0) {
   const g = padLayout();
   Pad.geom = g;
 
@@ -210,16 +229,31 @@ export function updateTouchPad(game) {
   syncSticks(Pad.active, g);
 
   if (Pad.active) {
-    if (!Pad.aimReady) { Pad.aim = p.facing < 0 ? Math.PI : 0; Pad.aimReady = true; }
-    if (Pad.right.mag > AIM_DEADZONE) Pad.aim = Math.atan2(Pad.right.y, Pad.right.x);
+    if (!Pad.cursorReady) {
+      Pad.cursor.x = p.x + (p.facing < 0 ? -48 : 48);
+      Pad.cursor.y = p.cy;
+      Pad.cursorReady = true;
+    }
+    // squared response: fine placement near the middle of the throw, quick
+    // sweeps out at the edge
+    const m = Math.max(0, (Pad.right.mag - AIM_DEAD) / (1 - AIM_DEAD));
+    if (m > 0) {
+      const speed = (m * m * 0.75 + m * 0.25) * AIM_SPEED * dt / Math.max(Pad.right.mag, 1e-6);
+      Pad.cursor.x += Pad.right.x * speed;
+      Pad.cursor.y += Pad.right.y * speed;
+    }
+    Pad.cursor.x = clamp(Pad.cursor.x, AIM_EDGE, VIEW_W - AIM_EDGE);
+    Pad.cursor.y = clamp(Pad.cursor.y, AIM_EDGE, VIEW_H - AIM_EDGE);
     // the pad owns the cursor while it is up: there is no real one to respect
-    Input.mouse.x = p.x + Math.cos(Pad.aim) * AIM_DIST;
-    Input.mouse.y = p.cy + Math.sin(Pad.aim) * AIM_DIST;
+    Input.mouse.x = Pad.cursor.x;
+    Input.mouse.y = Pad.cursor.y;
   } else {
-    Pad.aimReady = false;
+    Pad.cursorReady = false;
   }
 
-  setMouse('left', heldButton('shoot') || (Pad.active && Pad.autoFire && Pad.right.mag > AIM_DEADZONE));
+  // AUTO fires while the aim thumb is down, whether or not it is moving, so
+  // you can hold the crosshair on something and keep hitting it
+  setMouse('left', heldButton('shoot') || (Pad.active && Pad.autoFire && Pad.right.active));
   setMouse('right', heldButton('interact'));
 }
 
