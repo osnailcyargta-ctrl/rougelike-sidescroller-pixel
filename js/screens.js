@@ -7,6 +7,7 @@ import { pxRect, glowDot, spawnParticle } from './gfx.js';
 import { VIEW_W, VIEW_H, FINAL_ROOM } from './config.js';
 import { panel, button, slider, textField, drawTooltip, UI } from './ui.js';
 import { Options, optionsIn, saveOptions, resetOptions, applyVisualOptions } from './settings.js';
+import { Perf, syncPerfOptions } from './perf.js';
 import { drawItemIcon, ITEMS, RARITY } from './items.js';
 import { AudioCfg, setVolume, Sfx } from './audio.js';
 import { randomSeedText } from './util.js';
@@ -257,6 +258,19 @@ function drawTouchTab(ctx, game, t) {
     y += 16;
   }
 
+  // performance. The watchdog picks a tier on its own; this forces the floor.
+  const lp = !!Options.lowPower;
+  drawText(ctx, 'LOW POWER MODE', x, y + 4, lp ? Theme.ui : Theme.uiDim, 1);
+  if (button(ctx, 'opt-lowpower', ctl, y, 44, 14, lp ? 'ON' : 'OFF', { selected: lp })) {
+    Options.lowPower = !lp;
+    saveOptions();
+    if (syncPerfOptions()) game.resize();
+    Sfx.ui();
+  }
+  // short enough to clear the switch beside it
+  drawText(ctx, lp ? 'FORCED' : Perf.name, read, y + 2, Theme.uiDim, 1, 'right');
+  y += 20;
+
   const gy = y + 10;
   drawText(ctx, 'GESTURES', x, gy, Theme.platformGlow, 1);
   const gest = [
@@ -294,6 +308,9 @@ function drawTouchTab(ctx, game, t) {
     drawText(ctx, v, vx, ly, Theme.uiDim, 1);
     ly += 11;
   }
+  drawText(ctx, 'PERFORMANCE', lx, ly + 8, Theme.platformGlow, 1);
+  drawText(ctx, 'QUALITY DROPS BY ITSELF', lx, ly + 21, Theme.uiDim, 1);
+  drawText(ctx, 'IF FRAMES GET TIGHT.', lx, ly + 31, Theme.uiDim, 1);
 }
 
 // Two columns of switches. Nothing here changes the game, only what it is

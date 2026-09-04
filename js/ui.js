@@ -583,8 +583,33 @@ export function drawInventory(ctx, game) {
   const armW = s + 22;
   const px = Math.round((VIEW_W - gw - armW) / 2) - 12 + armW;
   const py = 54;
-  panel(ctx, px - armW - 6, py - 22, gw + 24 + armW + 6, gh + 32);
+  const panX = px - armW - 6, panY = py - 22, panW = gw + 24 + armW + 6;
+  panel(ctx, panX, panY, panW, gh + 32);
   drawTextShadow(ctx, 'INVENTORY', px + (gw + 24) / 2, py - 16, Theme.uiAccent, 1, 'center');
+
+  // Close button in the top right corner. On a phone there is no ESC key and
+  // the pad is hidden while the inventory is up, so without this the only way
+  // out is the BAG button you may not remember pressing.
+  const cbs = 12;
+  const cbx = panX + panW - cbs - 4, cby = panY + 4;
+  // a drag in flight owns the cursor: dropping an item must not close the panel
+  const cbHot = !UI.drag && inside(cbx, cby, cbs, cbs);
+  ctx.fillStyle = rgba(cbHot ? Theme.hp : '#000000', cbHot ? 0.30 : 0.45);
+  ctx.fillRect(cbx, cby, cbs, cbs);
+  ctx.strokeStyle = cbHot ? Theme.hp : rgba(Theme.uiDim, 0.85);
+  ctx.strokeRect(cbx + 0.5, cby + 0.5, cbs - 1, cbs - 1);
+  const xcol = cbHot ? '#ffffff' : Theme.uiDim;
+  for (let i = 0; i < 6; i++) {
+    pxRect(ctx, cbx + 3 + i, cby + 3 + i, 1, 1, xcol);
+    pxRect(ctx, cbx + 8 - i, cby + 3 + i, 1, 1, xcol);
+  }
+  if (cbHot) {
+    UI.hovered = 'inv-close';
+    if (Input.mouseDown.left) {
+      game.invOpen = false;
+      Sfx.ui();
+    }
+  }
 
   // --- armour slots
   const ax = px - armW - 2;

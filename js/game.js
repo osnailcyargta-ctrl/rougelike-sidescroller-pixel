@@ -20,6 +20,7 @@ import { drawBackground, drawArena, drawLightShafts, drawSpawnPads, updateWorld,
 import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
 import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, drawForge, panel, button } from './ui.js';
 import { updateTouchPad, drawTouchPad, drawAimLeash, Pad } from './touch.js';
+import { Perf, perfTick, syncPerfOptions, TIERS } from './perf.js';
 import { drawText, drawTextShadow } from './font.js';
 import { Options, loadOptions, saveOptions, applyVisualOptions, captureShaderBase, saveShader, loadShader } from './settings.js';
 import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, drawControls, drawVictory } from './screens.js';
@@ -82,6 +83,7 @@ export class Game {
 
     // saved settings first, so the very first frame already looks right
     loadOptions();
+    syncPerfOptions();
     applyVisualOptions();
     setVolume(Options.volume);
 
@@ -105,18 +107,25 @@ export class Game {
 
   // --- plumbing ----------------------------------------------------------
 
+  // Fill the viewport. Snapping the scale to a half step keeps the pixel grid
+  // even, which is worth having on a desktop window with room to spare - but
+  // on a phone the gap between a snapped 1.0 and an exact 1.48 is most of the
+  // screen, so there the exact fit wins and the grid gives.
   resize() {
-    const pad = 0;
-    const scale = Math.max(1, Math.min(
-      Math.floor((innerWidth - pad) / VIEW_W * 2) / 2,
-      Math.floor((innerHeight - pad) / VIEW_H * 2) / 2,
-    ));
+    const fit = Math.min(innerWidth / VIEW_W, innerHeight / VIEW_H);
+    const snap = Math.floor(fit * 2) / 2;
+    const scale = (snap >= 1 && fit - snap < 0.08) ? snap : Math.max(0.5, fit);
     this.scale = scale;
+    this.display.style.width = `${Math.round(VIEW_W * scale)}px`;
+    this.display.style.height = `${Math.round(VIEW_H * scale)}px`;
+    // The scene is 480x270 however big the window is, so compositing it at
+    // three or four device pixels per source pixel costs fill rate for
+    // nothing you can see. Cap it, and lower the cap when the phone is
+    // struggling - this is the single biggest lever there is.
     const dpr = Math.min(2, devicePixelRatio || 1);
-    this.display.style.width = `${VIEW_W * scale}px`;
-    this.display.style.height = `${VIEW_H * scale}px`;
-    this.display.width = Math.round(VIEW_W * scale * dpr);
-    this.display.height = Math.round(VIEW_H * scale * dpr);
+    const bw = Math.round(Math.min(VIEW_W * scale * dpr, VIEW_W * Perf.pixelCap));
+    this.display.width = bw;
+    this.display.height = Math.round(bw * (VIEW_H / VIEW_W));
   }
 
   toWorld(sx, sy) {
@@ -928,6 +937,7 @@ export class Game {
   // --- update ------------------------------------------------------------
 
   loop(now) {
+    const workStart = performance.now();
     let dt = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
     inputTick(dt);
@@ -955,6 +965,12 @@ export class Game {
     try {
       // the pad turns fingers into keys and cursor before anything reads them
       updateTouchPad(this, dt);
+      // watch real frame times and give back quality if this device needs it
+      const tier = perfTick(dt, this.workMs ?? 0);
+      if (tier !== null) {
+        this.resize();
+        this.toast(`GRAPHICS: ${TIERS[tier].name}`);
+      }
       this.handleGlobalKeys();
       if (this.debugOpen) {
         updateWorld(dt, true);
@@ -977,6 +993,9 @@ export class Game {
       this.ctx.globalCompositeOperation = 'source-over';
     }
     inputEndFrame();
+    // how long this frame's work actually took, vsync excluded: the only
+    // honest measure of whether there is room to turn quality back up
+    this.workMs = performance.now() - workStart;
     requestAnimationFrame(this.loop);
   }
 

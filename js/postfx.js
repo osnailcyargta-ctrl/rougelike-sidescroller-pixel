@@ -2,6 +2,7 @@
 // The composite stage is what a user-supplied .shdr replaces, so a shader
 // pack can repaint the entire game.
 import { Theme } from './theme.js';
+import { Perf } from './perf.js';
 
 const VERT = `
 attribute vec2 aPos;
@@ -268,8 +269,10 @@ export class PostFX {
     gl.uniform1f(this.uni(this.pBright, 'uThreshold'), Theme.bloomThreshold);
     this.drawQuad(this.pBright);
 
-    // blur A -> B -> A (three widening ping-pong iterations for a softer halo)
-    for (let i = 0; i < 3; i++) {
+    // blur A -> B -> A (widening ping-pong iterations for a softer halo).
+    // Each one is two passes over a quarter-size buffer, so trimming them is
+    // the cheapest quality to give back on a phone that is struggling.
+    for (let i = 0; i < Perf.blurIters; i++) {
       this.blurPass(this.rtA, this.rtB, 1 / this.rtA.w * (1 + i), 0);
       this.blurPass(this.rtB, this.rtA, 0, 1 / this.rtA.h * (1 + i));
     }

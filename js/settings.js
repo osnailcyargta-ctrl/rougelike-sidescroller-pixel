@@ -14,6 +14,7 @@ export const OPTION_DEFS = [
   { id: 'mobileControls', label: 'ON-SCREEN CONTROLS', group: 'touch', type: 'bool', def: false },
   { id: 'touchScale', label: 'PAD SIZE', group: 'touch', type: 'range', def: 1.0, max: 1.5 },
   { id: 'touchOpacity', label: 'PAD OPACITY', group: 'touch', type: 'range', def: 0.6, max: 1 },
+  { id: 'lowPower', label: 'LOW POWER MODE', group: 'touch', type: 'bool', def: false },
 
   // --- indicators
   { id: 'showFps', label: 'SHOW FPS', group: 'indicator', type: 'bool', def: false },

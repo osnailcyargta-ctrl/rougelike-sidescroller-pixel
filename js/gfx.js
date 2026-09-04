@@ -3,6 +3,7 @@
 import { clamp, lerp, rand, randInt, rgba, TAU, mixHex } from './util.js';
 import { Theme } from './theme.js';
 import { Options } from './settings.js';
+import { Perf } from './perf.js';
 
 export const Camera = {
   x: 0, y: 0, shake: 0, shakeT: 0, ox: 0, oy: 0,
@@ -86,7 +87,7 @@ export function impactRing(x, y, opts = {}) {
 }
 
 export function spawnParticle(p) {
-  if (particles.length > 900) particles.shift();
+  if (particles.length > Perf.particleCap) particles.shift();
   particles.push(Object.assign({
     x: 0, y: 0, vx: 0, vy: 0, life: 0.5, t: 0, size: 1,
     color: '#fff', color2: null, gravity: 0, drag: 0.98,
@@ -96,7 +97,7 @@ export function spawnParticle(p) {
 
 export function burst(x, y, n, opts = {}) {
   // the density slider scales every burst in the game from one place
-  const count = Math.max(1, Math.round(n * (Options.particles ?? 1)));
+  const count = Math.max(1, Math.round(n * (Options.particles ?? 1) * Perf.particleScale));
   for (let i = 0; i < count; i++) {
     const a = opts.angle !== undefined ? opts.angle + rand(-(opts.spread ?? Math.PI), opts.spread ?? Math.PI) : rand(0, TAU);
     const sp = rand(opts.speedMin ?? 20, opts.speedMax ?? 120);
@@ -298,26 +299,39 @@ export function drawParticles(ctx) {
     }
     const s = Math.max(1, Math.round(p.size * (p.kind === 'shrink' ? k : 1)));
     if (p.kind === 'smoke') {
-      // two offset puffs give it body instead of one flat disc
       const r = s * 2.4 * (1.15 - k * 0.35);
-      const g = ctx.createRadialGradient(p.x, p.y - r * 0.15, 0, p.x, p.y, r);
-      g.addColorStop(0, rgba(p.color, 0.55));
-      g.addColorStop(0.55, rgba(p.color, 0.26));
-      g.addColorStop(1, rgba(p.color, 0));
-      ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, r, 0, TAU);
-      ctx.fill();
+      if (Perf.glowParticles) {
+        // two offset puffs give it body instead of one flat disc
+        const g = ctx.createRadialGradient(p.x, p.y - r * 0.15, 0, p.x, p.y, r);
+        g.addColorStop(0, rgba(p.color, 0.55));
+        g.addColorStop(0.55, rgba(p.color, 0.26));
+        g.addColorStop(1, rgba(p.color, 0));
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, TAU);
+        ctx.fill();
+      } else {
+        // a gradient per puff per frame is the single most expensive thing
+        // on the 2D canvas; a flat disc reads close enough to be worth it
+        ctx.fillStyle = rgba(p.color, 0.30);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r * 0.8, 0, TAU);
+        ctx.fill();
+      }
     } else if (p.kind === 'streak') {
       // a tapered comet: bright head, thinning tail
       const sp = Math.hypot(p.vx, p.vy);
       const len = Math.min(18, sp * 0.055);
       const a = Math.atan2(p.vy, p.vx);
       const tx = p.x - Math.cos(a) * len, ty = p.y - Math.sin(a) * len;
-      const g = ctx.createLinearGradient(p.x, p.y, tx, ty);
-      g.addColorStop(0, col);
-      g.addColorStop(1, rgba(p.color, 0));
-      ctx.strokeStyle = g;
+      if (Perf.glowParticles) {
+        const g = ctx.createLinearGradient(p.x, p.y, tx, ty);
+        g.addColorStop(0, col);
+        g.addColorStop(1, rgba(p.color, 0));
+        ctx.strokeStyle = g;
+      } else {
+        ctx.strokeStyle = col;
+      }
       ctx.lineWidth = Math.max(1, s * 0.9);
       ctx.lineCap = 'round';
       ctx.beginPath();
