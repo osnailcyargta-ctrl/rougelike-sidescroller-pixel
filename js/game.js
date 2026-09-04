@@ -45,6 +45,16 @@ export class Game {
     this.scene.height = VIEW_H;
     this.ctx = this.scene.getContext('2d', { alpha: false });
     this.ctx.imageSmoothingEnabled = false;
+    // The pixel canvas also sits in the page, laid over the WebGL one. When
+    // the post chain is off it is simply shown as it is, which skips handing
+    // the frame to the GPU altogether. pointer-events stays off so input
+    // still lands on the canvas underneath that owns the listeners.
+    this.scene.id = 'raw';
+    // matched border and centring so it lands exactly over the other canvas
+    this.scene.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);'
+      + 'pointer-events:none;image-rendering:pixelated;background:#000;'
+      + 'border:2px solid var(--edge);border-radius:3px;visibility:hidden;z-index:2';
+    root.appendChild(this.scene);
     this.postfx = new PostFX(this.display, this.scene);
 
     this.screen = 'menu';
@@ -122,8 +132,13 @@ export class Game {
     const snap = Math.floor(fit * 2) / 2;
     const scale = (snap >= 1 && fit - snap < 0.08) ? snap : Math.max(0.5, fit);
     this.scale = scale;
-    this.display.style.width = `${Math.round(VIEW_W * scale)}px`;
-    this.display.style.height = `${Math.round(VIEW_H * scale)}px`;
+    const cssW = Math.round(VIEW_W * scale), cssH = Math.round(VIEW_H * scale);
+    this.display.style.width = `${cssW}px`;
+    this.display.style.height = `${cssH}px`;
+    if (this.scene) {
+      this.scene.style.width = `${cssW}px`;
+      this.scene.style.height = `${cssH}px`;
+    }
     // The scene is 480x270 however big the window is, so compositing it at
     // three or four device pixels per source pixel costs fill rate for
     // nothing you can see. Cap it, and lower the cap when the phone is
@@ -141,6 +156,19 @@ export class Game {
     // undo the camera so aiming stays exact through shake and zoom punches
     const w = Camera.unproject(vx, vy);
     return { x: clamp(w.x, -40, VIEW_W + 40), y: clamp(w.y, -40, VIEW_H + 40) };
+  }
+
+  // Either composite through the shader chain, or just show the pixel canvas.
+  present(dt) {
+    const raw = !Perf.postfx;
+    if (raw !== this.rawPresent) {
+      this.rawPresent = raw;
+      // the GL canvas is left in place and still visible underneath: it owns
+      // the input listeners, and hiding it would stop them firing. The pixel
+      // canvas is opaque and exactly covers it, so its stale frame never shows.
+      this.scene.style.visibility = raw ? 'visible' : 'hidden';
+    }
+    if (!raw) this.postfx.render(dt);
   }
 
   // Screen space, camera left in. The on-screen pad is bolted to the display,
@@ -1049,7 +1077,7 @@ export class Game {
       if (!this.screenShake) { Camera.ox = 0; Camera.oy = 0; }
 
       this.render(dt);
-      this.postfx.render(dt);
+      this.present(dt);
     } catch (err) {
       if (!this._loggedError) { console.error('frame error', err); this._loggedError = true; }
       this.ctx.setTransform(1, 0, 0, 1, 0, 0);

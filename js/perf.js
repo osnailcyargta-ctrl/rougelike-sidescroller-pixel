@@ -17,12 +17,16 @@
 import { Options } from './settings.js';
 
 export const TIERS = [
-  // minimum: everything that can be switched off, is
-  { name: 'LOW', pixelCap: 1.0, blurIters: 1, particleScale: 0.35, particleCap: 260, glowParticles: false },
+  // Minimum: the post chain is switched off entirely and the pixel canvas is
+  // shown as it is. That is not just "fewer effects" - it removes the frame's
+  // single most expensive step, handing the finished 2D canvas to the GPU as
+  // a texture, which profiling puts at around 40% of the work on a slow
+  // device. Nothing else on the list comes close.
+  { name: 'LOW', postfx: false, pixelCap: 1.0, blurIters: 1, particleScale: 0.35, particleCap: 260, glowParticles: false },
   // reduced: keeps the look, loses the excess
-  { name: 'MID', pixelCap: 1.5, blurIters: 2, particleScale: 0.65, particleCap: 500, glowParticles: true },
+  { name: 'MID', postfx: true, pixelCap: 1.5, blurIters: 2, particleScale: 0.65, particleCap: 500, glowParticles: true },
   // full
-  { name: 'HIGH', pixelCap: 2.0, blurIters: 3, particleScale: 1.0, particleCap: 900, glowParticles: true },
+  { name: 'HIGH', postfx: true, pixelCap: 2.0, blurIters: 3, particleScale: 1.0, particleCap: 900, glowParticles: true },
 ];
 
 export const Perf = {
@@ -41,6 +45,10 @@ export const Perf = {
 // measure. Asking for less than that means the quality can only ever fall.
 const WINDOW = 1.0;
 const SLOW_MS = 21;      // below ~48fps: the player feels this as stutter
+// Below ~30fps the middle tier is not worth walking through: it still pays
+// for the post chain, which is the expensive part, so its worst frames are
+// barely better than full quality. Go straight to the one that turns it off.
+const VERY_SLOW_MS = 33;
 // Climbing back needs proof of HEADROOM, and the frame interval cannot give
 // it: rendering is vsync locked, so a frame that took 4ms of work and one
 // that took 16 both read as 16.7ms on a 60Hz screen. So the recovery test
@@ -101,6 +109,7 @@ export function perfTick(dt, workMs = 0) {
   if (avg > SLOW_MS) {
     good = 0;
     if (++strikes >= 2 && Perf.tier > 0) {
+      const drop = avg > VERY_SLOW_MS ? Perf.tier : 1;
       strikes = 0;
       settle = SETTLE;
       // if we only just climbed into this tier and it already cannot hold,
@@ -109,7 +118,7 @@ export function perfTick(dt, workMs = 0) {
       if (sinceClimb < CLIMB_GRACE) climbFails++;
       sinceClimb = Infinity;
       Perf.lowered = true;
-      apply(Perf.tier - 1);
+      apply(Perf.tier - drop);
       return Perf.tier;
     }
   } else if (workAvg > 0 && workAvg < HEADROOM_MS) {

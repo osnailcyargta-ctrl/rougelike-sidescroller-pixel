@@ -12,6 +12,23 @@ void main() {
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`;
 
+// The scene arrives from a 2D canvas, whose first row is its TOP, while GL
+// counts texture rows from the bottom. That used to be reconciled by asking
+// the driver to flip the image on every upload - which is a full CPU pass
+// over the frame, and measured here as the single most expensive thing the
+// renderer did on a slow device. The flip is really a present-to-screen
+// concern, so it lives in the vertex shader of the final pass instead: the
+// offscreen passes keep the plain mapping and stay consistent with each
+// other, and only the composite reads the image the other way up. Shader
+// packs are unaffected - they only ever read vUv.
+const VERT_PRESENT = `
+attribute vec2 aPos;
+varying vec2 vUv;
+void main() {
+  vUv = vec2(aPos.x * 0.5 + 0.5, 0.5 - aPos.y * 0.5);
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}`;
+
 const FRAG_BRIGHT = `
 precision mediump float;
 varying vec2 vUv;
@@ -134,8 +151,8 @@ function compile(gl, type, src) {
   return s;
 }
 
-function program(gl, fragSrc) {
-  const vs = compile(gl, gl.VERTEX_SHADER, VERT);
+function program(gl, fragSrc, vertSrc = VERT) {
+  const vs = compile(gl, gl.VERTEX_SHADER, vertSrc);
   const fs = compile(gl, gl.FRAGMENT_SHADER, fragSrc);
   const p = gl.createProgram();
   gl.attachShader(p, vs);
@@ -196,7 +213,7 @@ export class PostFX {
 
     this.pBright = program(gl, FRAG_BRIGHT);
     this.pBlur = program(gl, FRAG_BLUR);
-    this.pComposite = program(gl, DEFAULT_COMPOSITE);
+    this.pComposite = program(gl, DEFAULT_COMPOSITE, VERT_PRESENT);
 
     this.sceneTex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, this.sceneTex);
@@ -204,6 +221,14 @@ export class PostFX {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+    // storage allocated once; every frame writes into it rather than asking
+    // the driver to allocate a new texture
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.scene.width, this.scene.height, 0,
+                  gl.RGBA, gl.UNSIGNED_BYTE, null);
+    this.texW = this.scene.width;
+    this.texH = this.scene.height;
 
     const bw = Math.max(1, this.scene.width >> 1);
     const bh = Math.max(1, this.scene.height >> 1);
@@ -216,7 +241,7 @@ export class PostFX {
   setComposite(src) {
     if (!this.ok) return 'WebGL unavailable';
     try {
-      const p = program(this.gl, src);
+      const p = program(this.gl, src, VERT_PRESENT);
       if (this.pComposite) this.gl.deleteProgram(this.pComposite);
       this.pComposite = p;
       this.compositeSource = src;
@@ -256,8 +281,13 @@ export class PostFX {
     }
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, this.sceneTex);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.scene);
+    if (this.texW !== this.scene.width || this.texH !== this.scene.height) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, this.scene.width, this.scene.height, 0,
+                    gl.RGBA, gl.UNSIGNED_BYTE, null);
+      this.texW = this.scene.width;
+      this.texH = this.scene.height;
+    }
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, this.scene);
 
     // bright pass into A
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.rtA.fbo);
