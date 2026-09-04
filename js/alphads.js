@@ -3,7 +3,7 @@
 import { clamp, lerp, rand, randInt, choice, dist, distToSegment, shortAngle, sign, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
 import {
-  Camera, burst, floatText, spawnParticle, impactRing, limb, pxRect, glowDot, ribbon, screenFlash,
+  Camera, burst, floatText, spawnParticle, impactRing, limb, limbInk, pxRect, glowDot, ribbon, screenFlash,
 } from './gfx.js';
 import { Sfx } from './audio.js';
 import { VIEW_W, VIEW_H, GROUND_Y, BLOCK, BOSS_TYPES, ROOM_SCALING, ENEMY_TYPES } from './config.js';
@@ -832,6 +832,7 @@ export class AlphadsBoss {
     // the body: a censor bar, and nothing else
     const w = d.w, h = d.h;
     glowDot(ctx, x, y, 46, TINT.halo, 0.18);
+    pxRect(ctx, x - w / 2 - 2, y - h / 2 - 2, w + 4, h + 4, flash ? '#ffffff' : '#05040a');
     pxRect(ctx, x - w / 2 - 1, y - h / 2 - 1, w + 2, h + 2, flash ? '#ffffff' : TINT.censorEdge);
     pxRect(ctx, x - w / 2, y - h / 2, w, h, flash ? '#ffffff' : TINT.censor);
     if (!flash) {
@@ -842,6 +843,18 @@ export class AlphadsBoss {
       }
       pxRect(ctx, x - w / 2, y - h / 2, w, 1, rgba(TINT.halo, 0.35));
       pxRect(ctx, x - w / 2, y + h / 2 - 1, w, 1, rgba(TINT.halo, 0.2));
+      // gilded brackets pinning the redaction over whatever is underneath
+      const bk = 6, gold = rgba(TINT.gold, 0.85 + 0.15 * Math.sin(t * 2.4));
+      for (const sxg of [-1, 1]) for (const syg of [-1, 1]) {
+        const cx0 = x + sxg * (w / 2) - (sxg > 0 ? 1 : 0);
+        const cy0 = y + syg * (h / 2) - (syg > 0 ? 1 : 0);
+        pxRect(ctx, sxg > 0 ? cx0 - bk + 1 : cx0, cy0, bk, 1, gold);
+        pxRect(ctx, cx0, syg > 0 ? cy0 - bk + 1 : cy0, 1, bk, gold);
+      }
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      glowDot(ctx, x, y, w * 0.8, TINT.halo, 0.10 + 0.05 * Math.sin(t * 2));
+      ctx.restore();
     }
 
     // the bow: held out at arm's length and aimed where the next shot goes
@@ -852,7 +865,7 @@ export class AlphadsBoss {
     const bx = x + Math.cos(aim) * 21;
     const by = y + Math.sin(aim) * 21;
     // arm reaching for it, drawn under the bow
-    limb(ctx, x + f * (w / 2 - 3), y + 3, aim, dist(x, y, bx, by) - 2, 4, TINT.censorEdge);
+    limbInk(ctx, x + f * (w / 2 - 3), y + 3, aim, dist(x, y, bx, by) - 2, 4, TINT.censorEdge, '#05040a');
 
     const pull = drawing ? 5 + Math.sin(t * 18) : 1.5;
     ctx.save();

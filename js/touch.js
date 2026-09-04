@@ -8,14 +8,15 @@
 //     finger comes up. A thumb that starts on the move stick stays on the
 //     move stick even if it wanders across the screen, so the sticks and the
 //     buttons can never steal each other's fingers mid-drag.
-//  2. The stick bases never move. The ring is drawn where it lives and the
-//     knob is the finger's offset from that ring's centre, clamped to its
-//     radius - so what you see and what you are steering are the same circle.
+//  2. The stick bases never move, and a stick only answers to a DRAG. Throw is
+//     measured from where the finger landed, not from the middle of the ring,
+//     so putting a thumb down is never itself an input - the knob only leaves
+//     centre once you actually pull.
 //  3. Every gameplay action is delivered as a virtual key press through
 //     input.js, never by poking gameplay state directly. Dash, ground slam,
 //     drop-through and hold-to-move then work on touch for free, because they
 //     are the keyboard's own double-tap and hold rules running unmodified.
-import { VIEW_W, VIEW_H } from './config.js';
+import { VIEW_W, VIEW_H, BLOCK } from './config.js';
 import { Input, Binds, virtualKeyDown, virtualKeyUp, virtualKeyTap } from './input.js';
 import { Options } from './settings.js';
 import { Theme } from './theme.js';
@@ -42,6 +43,7 @@ const AXES = {
 const AIM_DEAD = 0.14;       // thumb noise below this does not move the aim
 const AIM_SPEED = 340;       // px/s at full throw
 const AIM_EDGE = 6;          // keep the crosshair on screen
+const AIM_RANGE = 7 * BLOCK; // and on a 7 tile leash from the player
 
 export const Pad = {
   active: false,           // the pad is live this frame (playing, no modal)
@@ -51,6 +53,8 @@ export const Pad = {
   right: { x: 0, y: 0, mag: 0, active: false },
   cursor: { x: 0, y: 0 },  // the free crosshair, in world space
   cursorReady: false,      // seeded from the player once the pad comes up
+  leashed: false,          // the crosshair is pressing against its range limit
+  leashK: 0,               // eased, so the limit ring fades rather than blinks
   autoFire: false,         // the AUTO toggle
   geom: null,
   _mouseLeft: false,       // mouse buttons the pad is currently holding down
@@ -244,12 +248,24 @@ export function updateTouchPad(game, dt = 0) {
     }
     Pad.cursor.x = clamp(Pad.cursor.x, AIM_EDGE, VIEW_W - AIM_EDGE);
     Pad.cursor.y = clamp(Pad.cursor.y, AIM_EDGE, VIEW_H - AIM_EDGE);
+    // Free, but on a leash: the aim can go anywhere inside seven tiles of the
+    // player and no further. Reeling in after the screen clamp keeps the
+    // crosshair on screen too, since it only ever moves toward the player.
+    const lx = Pad.cursor.x - p.x, ly = Pad.cursor.y - p.cy;
+    const ld = Math.hypot(lx, ly);
+    Pad.leashed = ld > AIM_RANGE - 0.5;
+    if (ld > AIM_RANGE) {
+      Pad.cursor.x = p.x + (lx / ld) * AIM_RANGE;
+      Pad.cursor.y = p.cy + (ly / ld) * AIM_RANGE;
+    }
     // the pad owns the cursor while it is up: there is no real one to respect
     Input.mouse.x = Pad.cursor.x;
     Input.mouse.y = Pad.cursor.y;
   } else {
     Pad.cursorReady = false;
+    Pad.leashed = false;
   }
+  Pad.leashK += ((Pad.leashed ? 1 : 0) - Pad.leashK) * Math.min(1, dt * 9);
 
   // AUTO fires while the aim thumb is down, whether or not it is moving, so
   // you can hold the crosshair on something and keep hitting it
@@ -338,4 +354,32 @@ export function drawTouchPad(ctx, game) {
   const bh = Math.round(q.r * 0.72), bw = Math.max(1, Math.round(q.r * 0.16));
   pxRect(ctx, q.x - bw * 2, q.y - bh / 2, bw, bh, rgba('#ffffff', 0.8 * a));
   pxRect(ctx, q.x + bw, q.y - bh / 2, bw, bh, rgba('#ffffff', 0.8 * a));
+}
+
+// The edge of the aim's reach, drawn in world space with the reticle rather
+// than with the pad furniture. A faint ring the whole time so the limit is
+// learnable, and a bright arc under the crosshair while it presses against it.
+export function drawAimLeash(ctx, game) {
+  if (!Pad.active) return;
+  const p = game.player;
+  if (!p) return;
+  const a = clamp(Options.touchOpacity ?? 0.6, 0.15, 1);
+  ctx.save();
+  ctx.lineWidth = 1;
+  ctx.setLineDash([2, 6]);
+  ctx.lineDashOffset = -game.time * 6;
+  ctx.strokeStyle = rgba(Theme.uiDim, (0.12 + 0.10 * Pad.leashK) * a);
+  ctx.beginPath();
+  ctx.arc(p.x, p.cy, AIM_RANGE, 0, TAU);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  if (Pad.leashK > 0.02) {
+    const ang = Math.atan2(Pad.cursor.y - p.cy, Pad.cursor.x - p.x);
+    ctx.strokeStyle = rgba(Theme.uiAccent, 0.55 * Pad.leashK * a);
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(p.x, p.cy, AIM_RANGE, ang - 0.5, ang + 0.5);
+    ctx.stroke();
+  }
+  ctx.restore();
 }

@@ -1,11 +1,8 @@
 // Player, enemies and projectiles: physics, combat, status effects, drawing.
-import {
-  clamp, lerp, rand, randInt, choice, dist, distToSegment, shortAngle, sign, rgba, TAU,
-} from './util.js';
+import { clamp, lerp, rand, randInt, choice, dist, distToSegment, shortAngle, sign, rgba, TAU, mixHex } from './util.js';
 import { Theme } from './theme.js';
 import {
-  Camera, burst, floatText, spawnParticle, impactRing, dropShadow, ribbon,
-  makeChain, stepChain, limb, pxRect, glowDot, boltPath, strokeBolt, drawBoomerang, screenFlash,
+  Camera, burst, floatText, spawnParticle, impactRing, dropShadow, ribbon, makeChain, stepChain, limb, pxRect, glowDot, boltPath, strokeBolt, drawBoomerang, screenFlash, pxSolid, limbInk, glowEye, inkFor,
 } from './gfx.js';
 import { Sfx } from './audio.js';
 import {
@@ -870,109 +867,232 @@ export class Enemy {
   drawGrunt(ctx, t, flash) {
     const c = flash ? '#ffffff' : Theme.enemyGrunt;
     const d = flash ? '#ffffff' : Theme.enemyDark;
+    const ink = flash ? '#ffffff' : inkFor(Theme.enemyGrunt);
     const moving = Math.abs(this.vx) > 6;
     const cyc = t * (moving ? 9 : 2.4);
     const bob = Math.sin(cyc * 2) * (moving ? 1.2 : 0.6);
     const x = Math.round(this.x), y = Math.round(this.y + bob);
     const f = this.facing;
+
+    // a ragged cloak dragging a beat behind the walk
+    const sway = Math.sin(cyc - 0.8) * (moving ? 2.2 : 0.8);
+    const cloak = flash ? '#ffffff' : '#7a1f38';
+    for (let i = 0; i < 4; i++) {
+      const k = i / 3;
+      const cw = 9 - i * 2;
+      pxSolid(ctx, x - f * (2 + k * 3) - cw / 2 + sway * k, y - 15 + i * 3, cw, 3,
+              cloak, { ink, light: null, dark: null });
+    }
+
     // legs
-    limb(ctx, x - 2, y - 7, Math.PI / 2 + Math.sin(cyc) * 0.7, 7, 3, d);
-    limb(ctx, x + 2, y - 7, Math.PI / 2 - Math.sin(cyc) * 0.7, 7, 3, d);
-    // body
-    pxRect(ctx, x - 5, y - 15, 10, 9, c);
-    pxRect(ctx, x - 5, y - 15, 10, 2, flash ? '#fff' : '#ff90b0');
+    limbInk(ctx, x - 2, y - 7, Math.PI / 2 + Math.sin(cyc) * 0.7, 7, 3, d, ink);
+    limbInk(ctx, x + 2, y - 7, Math.PI / 2 - Math.sin(cyc) * 0.7, 7, 3, d, ink);
+    // body, with a belt across it
+    pxSolid(ctx, x - 5, y - 15, 10, 9, c, { ink, rim: true, rimSide: f });
+    pxRect(ctx, x - 5, y - 9, 10, 1, flash ? '#fff' : '#4a1224');
+    pxRect(ctx, x - 1, y - 10, 2, 3, flash ? '#fff' : Theme.steel);
     // head
-    pxRect(ctx, x - 4, y - 21, 8, 6, c);
-    pxRect(ctx, x - 4 + (f > 0 ? 4 : 0), y - 20, 3, 2, flash ? '#fff' : Theme.eye);
-    // horn
-    pxRect(ctx, x - 4, y - 23, 2, 2, d);
-    pxRect(ctx, x + 2, y - 23, 2, 2, d);
+    pxSolid(ctx, x - 4, y - 21, 8, 6, c, { ink, rim: true, rimSide: f });
+    // a hooded brow line, then the eye burning under it
+    pxRect(ctx, x - 4, y - 21, 8, 2, flash ? '#fff' : '#4a1224');
+    glowEye(ctx, x - 4 + (f > 0 ? 4 : 1), y - 19, 3, 2, flash ? '#fff' : Theme.eye, 0.30);
+    // horns
+    pxSolid(ctx, x - 5, y - 24, 2, 3, d, { ink, dark: null });
+    pxSolid(ctx, x + 3, y - 24, 2, 3, d, { ink, dark: null });
+
     // weapon arm
     const swing = this.telegraph > 0 ? -0.9 - (0.22 - this.telegraph) * 2
       : this.state === 'strike' && this.stateT < 0.18 ? 1.1 : Math.sin(cyc + 1) * 0.3;
-    limb(ctx, x + f * 3, y - 13, (f > 0 ? 0 : Math.PI) + swing * f, 8, 3, d);
-    const hx = x + f * 3 + Math.cos((f > 0 ? 0 : Math.PI) + swing * f) * 8;
-    const hy = y - 13 + Math.sin((f > 0 ? 0 : Math.PI) + swing * f) * 8;
-    limb(ctx, hx, hy, (f > 0 ? -0.5 : Math.PI + 0.5) + swing * f, 8, 2, flash ? '#fff' : Theme.steel);
+    const arm = (f > 0 ? 0 : Math.PI) + swing * f;
+    limbInk(ctx, x + f * 3, y - 13, arm, 8, 3, d, ink);
+    const hx = x + f * 3 + Math.cos(arm) * 8;
+    const hy = y - 13 + Math.sin(arm) * 8;
+    const blade = (f > 0 ? -0.5 : Math.PI + 0.5) + swing * f;
+    // a notched blade: dark spine, bright edge, and a glint that travels it
+    limbInk(ctx, hx, hy, blade, 9, 3, flash ? '#fff' : Theme.steelDark, ink);
+    limb(ctx, hx, hy, blade, 9, 1, flash ? '#fff' : '#eef4ff');
+    const gk = (t * 0.7) % 1;
+    if (gk < 0.5) {
+      const gx = hx + Math.cos(blade) * (2 + gk * 14);
+      const gy = hy + Math.sin(blade) * (2 + gk * 14);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      glowDot(ctx, gx, gy, 4, '#ffffff', 0.5 * Math.sin(gk * 2 * Math.PI));
+      ctx.restore();
+    }
+    if (this.telegraph > 0) {
+      glowDot(ctx, hx, hy, 12, Theme.enemyGrunt, 0.35 * (1 - this.telegraph / 0.22));
+    }
   }
 
   drawBrute(ctx, t, flash) {
     const c = flash ? '#ffffff' : Theme.enemyBrute;
     const d = flash ? '#ffffff' : Theme.enemyDark;
+    const ink = flash ? '#ffffff' : inkFor(Theme.enemyBrute);
+    const plate = flash ? '#ffffff' : '#b18cff';
     const moving = Math.abs(this.vx) > 6;
     const cyc = t * (moving ? 6 : 1.8);
     const bob = Math.sin(cyc * 2) * (moving ? 1.6 : 0.8);
     const x = Math.round(this.x), y = Math.round(this.y + bob);
     const f = this.facing;
-    limb(ctx, x - 4, y - 9, Math.PI / 2 + Math.sin(cyc) * 0.5, 9, 5, d);
-    limb(ctx, x + 4, y - 9, Math.PI / 2 - Math.sin(cyc) * 0.5, 9, 5, d);
-    pxRect(ctx, x - 8, y - 20, 16, 12, c);
-    pxRect(ctx, x - 8, y - 20, 16, 3, flash ? '#fff' : '#b18cff');
-    pxRect(ctx, x - 6, y - 26, 12, 7, c);
-    pxRect(ctx, x - 6 + (f > 0 ? 6 : 1), y - 24, 5, 2, flash ? '#fff' : Theme.eye);
-    pxRect(ctx, x - 8, y - 29, 3, 4, d);
-    pxRect(ctx, x + 5, y - 29, 3, 4, d);
+    const charging = this.state === 'charge';
+
+    // vents down the spine, breathing harder the angrier it is
+    const heat = 0.25 + 0.35 * Math.sin(t * (charging ? 12 : 3)) + (charging ? 0.4 : 0);
+    for (let i = 0; i < 3; i++) {
+      const vy = y - 24 + i * 5;
+      pxRect(ctx, x - f * 9, vy, 2, 3, flash ? '#fff' : '#2a1348');
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      glowDot(ctx, x - f * 8, vy + 1, 7, '#ff7a3c', 0.20 * heat);
+      ctx.restore();
+    }
+
+    limbInk(ctx, x - 4, y - 9, Math.PI / 2 + Math.sin(cyc) * 0.5, 9, 5, d, ink);
+    limbInk(ctx, x + 4, y - 9, Math.PI / 2 - Math.sin(cyc) * 0.5, 9, 5, d, ink);
+    // torso
+    pxSolid(ctx, x - 8, y - 20, 16, 12, c, { ink, rim: true, rimSide: f });
+    // a slab of chest armour with a sigil that lights when it winds up
+    pxSolid(ctx, x - 6, y - 18, 12, 7, flash ? '#fff' : '#5a3a9a', { ink: null, light: plate, dark: null });
+    const sig = this.telegraph > 0 ? 1 : 0.35 + 0.25 * Math.sin(t * 4);
+    pxRect(ctx, x - 2, y - 16, 4, 1, flash ? '#fff' : mixHex('#b18cff', '#ffffff', sig));
+    pxRect(ctx, x - 1, y - 17, 2, 3, flash ? '#fff' : mixHex('#b18cff', '#ffffff', sig));
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    glowDot(ctx, x, y - 15, 12, plate, 0.20 * sig);
+    ctx.restore();
+    // head, sunk between the shoulders
+    pxSolid(ctx, x - 6, y - 26, 12, 7, c, { ink, rim: true, rimSide: f });
+    pxRect(ctx, x - 6, y - 26, 12, 2, flash ? '#fff' : '#2a1348');
+    glowEye(ctx, x - 6 + (f > 0 ? 6 : 1), y - 23, 5, 2, flash ? '#fff' : Theme.eye, 0.30);
+    // horns, thicker at the skull
+    pxSolid(ctx, x - 9, y - 30, 3, 5, d, { ink, dark: null });
+    pxSolid(ctx, x + 6, y - 30, 3, 5, d, { ink, dark: null });
+    // shoulder pauldrons
+    pxSolid(ctx, x - 10, y - 21, 4, 5, flash ? '#fff' : '#4a2d80', { ink, dark: null });
+    pxSolid(ctx, x + 6, y - 21, 4, 5, flash ? '#fff' : '#4a2d80', { ink, dark: null });
+
     const wind = this.telegraph > 0 ? -1.4 : this.state === 'strike' && this.stateT < 0.2 ? 1.3 : Math.sin(cyc) * 0.25;
-    limb(ctx, x + f * 6, y - 18, (f > 0 ? 0.2 : Math.PI - 0.2) + wind * f, 12, 5, c);
-    const fx = x + f * 6 + Math.cos((f > 0 ? 0.2 : Math.PI - 0.2) + wind * f) * 12;
-    const fy = y - 18 + Math.sin((f > 0 ? 0.2 : Math.PI - 0.2) + wind * f) * 12;
-    pxRect(ctx, fx - 3, fy - 3, 6, 6, d);
-    if (this.state === 'charge') glowDot(ctx, x, y - 12, 20, Theme.enemyBrute, 0.3);
+    const arm = (f > 0 ? 0.2 : Math.PI - 0.2) + wind * f;
+    limbInk(ctx, x + f * 6, y - 18, arm, 12, 5, c, ink);
+    const fx = x + f * 6 + Math.cos(arm) * 12;
+    const fy = y - 18 + Math.sin(arm) * 12;
+    // the fist, with knuckle plates
+    pxSolid(ctx, fx - 3, fy - 3, 6, 6, d, { ink });
+    pxRect(ctx, fx - 3, fy - 3, 6, 1, flash ? '#fff' : '#6a4ab0');
+    pxRect(ctx, fx + (f > 0 ? 2 : -3), fy - 2, 1, 4, flash ? '#fff' : plate);
+    if (charging) glowDot(ctx, x, y - 12, 20, Theme.enemyBrute, 0.3);
+    if (this.telegraph > 0) glowDot(ctx, fx, fy, 14, plate, 0.5 * (1 - this.telegraph / this.def.windUp));
   }
 
   drawLurker(ctx, t, flash) {
-    const c = flash ? '#ffffff' : ENEMY_TINT.lurker;
+    const tint = ENEMY_TINT.lurker;
+    const c = flash ? '#ffffff' : tint;
     const d = flash ? '#ffffff' : '#2a1020';
+    const ink = flash ? '#ffffff' : inkFor(tint);
     const crouch = this.telegraph > 0 ? clamp(1 - this.telegraph / this.def.windUp, 0, 1) * 4 : 0;
     const lunging = this.state === 'lunge';
     const cyc = t * (Math.abs(this.vx) > 6 ? 12 : 3);
     const x = Math.round(this.x);
     const y = Math.round(this.y + Math.sin(cyc * 2) * 0.6);
     const f = this.facing;
-    // long back legs
-    limb(ctx, x - 3, y - 6 + crouch, Math.PI / 2 + 0.7 + Math.sin(cyc) * 0.5, 7, 2, d);
-    limb(ctx, x + 3, y - 6 + crouch, Math.PI / 2 - 0.7 - Math.sin(cyc) * 0.5, 7, 2, d);
-    // low slung body, leaning into the lunge
     const lean = lunging ? f * 2 : 0;
-    pxRect(ctx, x - 6 + lean, y - 12 + crouch, 12, 6, c);
-    pxRect(ctx, x - 6 + lean, y - 12 + crouch, 12, 2, flash ? '#fff' : '#ffb07a');
-    // head thrust forward
-    pxRect(ctx, x + f * 4 + lean, y - 14 + crouch, 6, 5, c);
-    pxRect(ctx, x + f * 5 + lean, y - 13 + crouch, 3, 1, flash ? '#fff' : '#fff3b0');
-    // tail
-    limb(ctx, x - f * 6 + lean, y - 10 + crouch, f > 0 ? Math.PI - 0.5 : 0.5, 9, 2, d);
+
+    // a smear of where it has just been, while it is committed to the lunge
+    if (lunging) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      for (let i = 1; i <= 3; i++) {
+        ctx.globalAlpha = 0.16 / i;
+        pxRect(ctx, x - f * i * 4 - 6 + lean, y - 12 + crouch, 12, 6, tint);
+      }
+      ctx.restore();
+    }
+
+    limbInk(ctx, x - 3, y - 6 + crouch, Math.PI / 2 + 0.7 + Math.sin(cyc) * 0.5, 7, 2, d, ink);
+    limbInk(ctx, x + 3, y - 6 + crouch, Math.PI / 2 - 0.7 - Math.sin(cyc) * 0.5, 7, 2, d, ink);
+    // tail, with a tuft on the end
+    const ta = f > 0 ? Math.PI - 0.5 : 0.5;
+    limbInk(ctx, x - f * 6 + lean, y - 10 + crouch, ta, 9, 2, d, ink);
+    const tx = x - f * 6 + lean + Math.cos(ta) * 9, ty = y - 10 + crouch + Math.sin(ta) * 9;
+    pxSolid(ctx, tx - 1, ty - 2, 3, 4, c, { ink, dark: null });
+
+    // low slung body
+    pxSolid(ctx, x - 6 + lean, y - 12 + crouch, 12, 6, c, { ink, rim: true, rimSide: f });
+    // a ridge of spines along the back
+    for (let i = 0; i < 4; i++) {
+      const sx2 = x - 4 + lean + i * 3;
+      const sh = 2 + (i === 1 || i === 2 ? 1 : 0);
+      pxSolid(ctx, sx2, y - 12 - sh + crouch, 2, sh, d, { ink, light: null, dark: null });
+    }
+    // head thrust forward, with a jaw
+    pxSolid(ctx, x + f * 4 + lean - (f > 0 ? 0 : 6), y - 14 + crouch, 6, 5, c, { ink, rim: true, rimSide: f });
+    const jx = x + f * 4 + lean - (f > 0 ? 0 : 6);
+    pxRect(ctx, jx, y - 10 + crouch, 6, 1, flash ? '#fff' : d);
+    for (let i = 0; i < 3; i++) {
+      pxRect(ctx, jx + 1 + i * 2, y - 10 + crouch, 1, 1, flash ? '#fff' : '#fff3b0');
+    }
+    glowEye(ctx, x + f * 5 + lean - (f > 0 ? 0 : 4), y - 13 + crouch, 3, 2,
+            flash ? '#fff' : '#fff3b0', 0.32);
+
     if (this.telegraph > 0) {
       const k = 1 - this.telegraph / this.def.windUp;
-      glowDot(ctx, x, y - 10, 10 + k * 12, ENEMY_TINT.lurker, 0.15 + k * 0.35);
+      glowDot(ctx, x, y - 10, 10 + k * 12, tint, 0.15 + k * 0.35);
     }
-    if (lunging) glowDot(ctx, x, y - 9, 16, ENEMY_TINT.lurker, 0.4);
+    if (lunging) glowDot(ctx, x, y - 9, 16, tint, 0.4);
   }
 
   drawSpitter(ctx, t, flash) {
-    const c = flash ? '#ffffff' : ENEMY_TINT.spitter;
+    const tint = ENEMY_TINT.spitter;
+    const c = flash ? '#ffffff' : tint;
     const d = flash ? '#ffffff' : '#1d3a12';
+    const ink = flash ? '#ffffff' : inkFor(tint);
     const charge = this.telegraph > 0 ? clamp(1 - this.telegraph / this.def.windUp, 0, 1) : 0;
     const breathe = Math.sin(t * 2.5) * 1 + charge * 2;
     const x = Math.round(this.x), y = Math.round(this.y);
     const f = this.facing;
-    limb(ctx, x - 4, y - 5, Math.PI / 2 + 0.5, 6, 3, d);
-    limb(ctx, x + 4, y - 5, Math.PI / 2 - 0.5, 6, 3, d);
-    // bulbous sac
-    pxRect(ctx, x - 8, y - 13 - breathe, 16, 9 + breathe, c);
+
+    limbInk(ctx, x - 4, y - 5, Math.PI / 2 + 0.5, 6, 3, d, ink);
+    limbInk(ctx, x + 4, y - 5, Math.PI / 2 - 0.5, 6, 3, d, ink);
+
+    // the sac
+    const sh = 9 + breathe;
+    pxSolid(ctx, x - 8, y - 13 - breathe, 16, sh, c, { ink, rim: true, rimSide: f });
     pxRect(ctx, x - 6, y - 15 - breathe, 12, 3, flash ? '#fff' : '#d6ff8a');
-    pxRect(ctx, x - 4, y - 8, 3, 3, d);
-    pxRect(ctx, x + 2, y - 8, 3, 3, d);
-    // spout
-    limb(ctx, x + f * 6, y - 12 - breathe, f > 0 ? -0.5 : Math.PI + 0.5, 7, 4, d);
-    if (charge > 0) {
-      const px2 = x + f * (6 + Math.cos(f > 0 ? -0.5 : Math.PI + 0.5) * 7);
-      glowDot(ctx, px2, y - 15 - breathe, 6 + charge * 8, ENEMY_TINT.spitter, 0.2 + charge * 0.5);
+    // bubbles rising inside it, brighter while it charges
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 4; i++) {
+      const k = ((t * (0.5 + i * 0.17) + i * 0.31) % 1);
+      const bx = x - 5 + ((i * 5 + 3) % 13);
+      const by = y - 5 - k * (sh - 2) - breathe;
+      const r = 1 + (i % 2);
+      pxRect(ctx, bx, by, r, r, rgba('#eaffb0', (0.25 + charge * 0.5) * (1 - k)));
     }
+    ctx.restore();
+    // veins
+    pxRect(ctx, x - 7, y - 9 - breathe, 3, 1, flash ? '#fff' : d);
+    pxRect(ctx, x + 4, y - 7 - breathe, 3, 1, flash ? '#fff' : d);
+    glowEye(ctx, x - 4, y - 8, 3, 3, flash ? '#fff' : '#0d1f08', 0);
+    glowEye(ctx, x + 2, y - 8, 3, 3, flash ? '#fff' : '#0d1f08', 0);
+    pxRect(ctx, x - 4 + (f > 0 ? 1 : 0), y - 7, 1, 1, flash ? '#fff' : '#eaffb0');
+    pxRect(ctx, x + 2 + (f > 0 ? 1 : 0), y - 7, 1, 1, flash ? '#fff' : '#eaffb0');
+
+    // spout, with acid beading at the tip
+    const sa = f > 0 ? -0.5 : Math.PI + 0.5;
+    limbInk(ctx, x + f * 6, y - 12 - breathe, sa, 7, 4, d, ink);
+    const px2 = x + f * 6 + Math.cos(sa) * 7;
+    const py2 = y - 12 - breathe + Math.sin(sa) * 7;
+    const drip = (t * 0.6) % 1;
+    pxRect(ctx, px2, py2 + drip * 5, 2, 2, rgba(tint, 0.8 * (1 - drip)));
+    if (charge > 0) glowDot(ctx, px2, py2, 6 + charge * 8, tint, 0.2 + charge * 0.5);
   }
 
   drawShardling(ctx, t, flash) {
-    const c = flash ? '#ffffff' : ENEMY_TINT.shardling;
+    const tint = ENEMY_TINT.shardling;
+    const c = flash ? '#ffffff' : tint;
     const dark = flash ? '#ffffff' : '#3a2a58';
+    const ink = flash ? '#ffffff' : inkFor(tint);
     const plate = flash ? '#ffffff' : '#cfc0ff';
     const x = Math.round(this.x);
     const y = Math.round(this.y - this.h / 2 + Math.sin(this.hover * 1.6) * 1.5);
@@ -980,36 +1100,42 @@ export class Enemy {
     const winding = this.telegraph > 0;
     const k = winding ? 1 - this.telegraph / this.def.windUp : 0;
 
-    // orbiting debris
+    // orbiting debris, drawn as turning shards rather than dots
     for (let i = 0; i < 3; i++) {
       const a = t * 1.6 + i * (TAU / 3);
       const r = 13 + Math.sin(t * 2 + i) * 2;
-      pxRect(ctx, x + Math.cos(a) * r, y + Math.sin(a) * r * 0.6, 2, 2, dark);
+      const ox = x + Math.cos(a) * r, oy = y + Math.sin(a) * r * 0.6;
+      const sp = 1 + (Math.sin(t * 3 + i) > 0.4 ? 1 : 0);
+      pxSolid(ctx, ox - sp, oy - sp, sp * 2, sp * 2, dark, { ink: null, light: plate, dark: null });
+      if ((i + Math.floor(t * 2)) % 3 === 0) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        glowDot(ctx, ox, oy, 5, plate, 0.35);
+        ctx.restore();
+      }
     }
 
+    glowDot(ctx, x, y, 12 + k * 12, tint, 0.25 + k * 0.45);
     // core
-    glowDot(ctx, x, y, 12 + k * 12, ENEMY_TINT.shardling, 0.25 + k * 0.45);
-    pxRect(ctx, x - 5, y - 6, 10, 12, c);
+    pxSolid(ctx, x - 5, y - 6, 10, 12, c, { ink, rim: true, rimSide: f });
     pxRect(ctx, x - 5, y - 6, 10, 2, plate);
-    pxRect(ctx, x - 2, y - 2, 4, 4, flash ? '#fff' : Theme.eye);
+    glowEye(ctx, x - 2, y - 2, 4, 4, flash ? '#fff' : Theme.eye, 0.34);
 
-    // the front plate: a slab of golem armour, angled
+    // the front plate: a slab of golem armour, bevelled and riveted
     const px = x + f * 6;
-    pxRect(ctx, px - 1, y - 9, 4, 18, dark);
+    pxSolid(ctx, px - 1, y - 9, 4, 18, dark, { ink, light: null, dark: null });
     pxRect(ctx, px + f * 1, y - 8, 3, 16, plate);
     pxRect(ctx, px + f * 2, y - 5, 2, 10, flash ? '#fff' : '#8f7fd0');
-    if (this.guardFlash > 0) {
-      glowDot(ctx, px + f * 2, y, 16, '#ffffff', this.guardFlash * 2);
-    }
+    for (const ry of [-6, 0, 6]) pxRect(ctx, px + f * 1, y + ry, 1, 1, flash ? '#fff' : '#f0e8ff');
+    if (this.guardFlash > 0) glowDot(ctx, px + f * 2, y, 16, '#ffffff', this.guardFlash * 2);
     // brace arms holding the plate on
-    limb(ctx, x + f * 3, y - 4, f > 0 ? -0.5 : Math.PI + 0.5, 5, 2, dark);
-    limb(ctx, x + f * 3, y + 4, f > 0 ? 0.5 : Math.PI - 0.5, 5, 2, dark);
+    limbInk(ctx, x + f * 3, y - 4, f > 0 ? -0.5 : Math.PI + 0.5, 5, 2, dark, ink);
+    limbInk(ctx, x + f * 3, y + 4, f > 0 ? 0.5 : Math.PI - 0.5, 5, 2, dark, ink);
     if (winding) {
       const a = this.aimAngle ?? 0;
-      // a thin sight line showing exactly where it will go
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      ctx.strokeStyle = rgba(ENEMY_TINT.shardling, 0.15 + k * 0.4);
+      ctx.strokeStyle = rgba(tint, 0.15 + k * 0.4);
       ctx.lineWidth = 1;
       ctx.setLineDash([2, 4]);
       ctx.beginPath();
@@ -1023,9 +1149,11 @@ export class Enemy {
   // A lantern of cold light with a slow rotating shell and a tether to every
   // ally it is feeding.
   drawWisp(ctx, t, flash) {
-    const c = flash ? '#ffffff' : ENEMY_TINT.wisp;
+    const tint = ENEMY_TINT.wisp;
+    const c = flash ? '#ffffff' : tint;
     const x = this.cx, y = this.cy;
     const pulse = 0.6 + 0.4 * Math.sin(t * 4);
+    const ink = flash ? '#ffffff' : inkFor(tint);
 
     // tethers first, under the body
     if (this.auraLinks && this.auraLinks.length) {
@@ -1034,8 +1162,8 @@ export class Enemy {
       for (const e of this.auraLinks) {
         if (!e || e.dead) continue;
         const g = ctx.createLinearGradient(x, y, e.cx, e.cy);
-        g.addColorStop(0, rgba(ENEMY_TINT.wisp, 0.55 * pulse));
-        g.addColorStop(1, rgba(ENEMY_TINT.wisp, 0.06));
+        g.addColorStop(0, rgba(tint, 0.55 * pulse));
+        g.addColorStop(1, rgba(tint, 0.06));
         ctx.strokeStyle = g;
         ctx.lineWidth = 1;
         ctx.setLineDash([2, 3]);
@@ -1045,7 +1173,6 @@ export class Enemy {
         ctx.lineTo(e.cx, e.cy);
         ctx.stroke();
         ctx.setLineDash([]);
-        // a bead running down the tether
         const k = (t * 0.8 + e.uid * 0.13) % 1;
         pxRect(ctx, lerp(x, e.cx, k) - 1, lerp(y, e.cy, k) - 1, 2, 2, rgba('#ffffff', 0.7));
       }
@@ -1053,9 +1180,20 @@ export class Enemy {
     }
 
     glowDot(ctx, x, y, 22 + pulse * 10, c, 0.4);
-    // rotating shell
+    // shafts of light thrown off the core
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 6; i++) {
+      const a = t * 0.7 + i * (TAU / 6);
+      const len = 8 + Math.sin(t * 3 + i) * 4;
+      ctx.strokeStyle = rgba(tint, 0.16 * pulse);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(a) * 5, y + Math.sin(a) * 5);
+      ctx.lineTo(x + Math.cos(a) * (5 + len), y + Math.sin(a) * (5 + len));
+      ctx.stroke();
+    }
+    // rotating shell
     for (let i = 0; i < 3; i++) {
       const a = t * (1.4 + i * 0.5) + i * 2.1;
       const r = 7 + i;
@@ -1066,29 +1204,59 @@ export class Enemy {
       ctx.stroke();
     }
     ctx.restore();
+    // the lantern: a cage with a cap and a base, lit from inside
+    const lx = Math.round(x), ly = Math.round(y);
+    pxSolid(ctx, lx - 4, ly - 7, 8, 2, flash ? '#fff' : '#2b6f66', { ink, dark: null });
+    pxSolid(ctx, lx - 4, ly + 5, 8, 2, flash ? '#fff' : '#2b6f66', { ink, light: null });
+    pxRect(ctx, lx - 4, ly - 5, 1, 10, flash ? '#fff' : '#2b6f66');
+    pxRect(ctx, lx + 3, ly - 5, 1, 10, flash ? '#fff' : '#2b6f66');
     // core
-    pxRect(ctx, x - 3, y - 3, 6, 6, c);
-    pxRect(ctx, x - 2, y - 2, 4, 4, '#ffffff');
-    pxRect(ctx, x - 1, y - 5 - pulse, 2, 2, rgba('#ffffff', 0.8));
+    pxRect(ctx, lx - 3, ly - 4, 6, 8, rgba(c, 0.55));
+    pxRect(ctx, lx - 2, ly - 3, 4, 6, c);
+    pxRect(ctx, lx - 1, ly - 2, 2, 4, '#ffffff');
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    glowDot(ctx, lx, ly, 9 * pulse, '#ffffff', 0.35);
+    ctx.restore();
   }
 
   drawStinger(ctx, t, flash) {
-    const c = flash ? '#ffffff' : Theme.enemyStinger;
+    const tint = Theme.enemyStinger;
+    const c = flash ? '#ffffff' : tint;
     const d = flash ? '#ffffff' : Theme.enemyDark;
+    const ink = flash ? '#ffffff' : inkFor(tint);
     const x = Math.round(this.x), y = Math.round(this.y - 6 + Math.sin(this.hover) * 1.5);
     const wing = Math.sin(t * 34) * 4;
+    const f = this.facing;
+
+    // wings: a blurred fan rather than one stick, so they read as beating
     ctx.save();
-    ctx.globalAlpha = 0.65;
-    limb(ctx, x - 3, y - 4, -0.6 + wing * 0.12, 9, 4, flash ? '#fff' : '#bffff0');
-    limb(ctx, x + 3, y - 4, Math.PI + 0.6 - wing * 0.12, 9, 4, flash ? '#fff' : '#bffff0');
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 3; i++) {
+      ctx.globalAlpha = 0.42 - i * 0.11;
+      const off = wing * 0.12 - i * 0.16;
+      limb(ctx, x - 3, y - 4, -0.6 + off, 9 - i, 4, flash ? '#fff' : '#bffff0');
+      limb(ctx, x + 3, y - 4, Math.PI + 0.6 - off, 9 - i, 4, flash ? '#fff' : '#bffff0');
+    }
     ctx.restore();
-    pxRect(ctx, x - 5, y - 4, 10, 8, c);
+
+    // thorax and a striped abdomen
+    pxSolid(ctx, x - 5, y - 4, 10, 8, c, { ink, rim: true, rimSide: f });
     pxRect(ctx, x - 5, y - 4, 10, 2, flash ? '#fff' : '#9dffe0');
-    pxRect(ctx, x - 3, y + 4, 6, 3, d);
-    pxRect(ctx, x + (this.facing > 0 ? 1 : -3), y - 2, 3, 2, flash ? '#fff' : Theme.eye);
-    // stinger tail
-    limb(ctx, x - this.facing * 5, y + 2, this.facing > 0 ? Math.PI - 0.4 : 0.4, 7, 2, d);
-    glowDot(ctx, x, y, 12, Theme.enemyStinger, 0.16);
+    pxSolid(ctx, x - 3, y + 4, 6, 3, d, { ink, light: null });
+    pxRect(ctx, x - 3, y + 5, 6, 1, flash ? '#fff' : '#7ad7ff');
+    glowEye(ctx, x + (f > 0 ? 1 : -3), y - 2, 3, 2, flash ? '#fff' : Theme.eye, 0.30);
+
+    // the sting, tipped with a bead of venom
+    const ta = f > 0 ? Math.PI - 0.4 : 0.4;
+    limbInk(ctx, x - f * 5, y + 2, ta, 7, 2, d, ink);
+    const sx2 = x - f * 5 + Math.cos(ta) * 7, sy2 = y + 2 + Math.sin(ta) * 7;
+    pxRect(ctx, sx2 - 1, sy2 - 1, 2, 2, flash ? '#fff' : '#eaffff');
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    glowDot(ctx, sx2, sy2, 5, tint, 0.4 + 0.2 * Math.sin(t * 6));
+    ctx.restore();
+    glowDot(ctx, x, y, 12, tint, 0.16);
   }
 }
 

@@ -718,6 +718,24 @@ export class CeilingBoss {
     }
     ctx.stroke();
     ctx.restore();
+
+    // the shadow the mass throws down into the room. Without it the slab
+    // floats; with it, the whole ceiling reads as weight hanging overhead.
+    const edge = (x) => this.slabBottom(x) + Math.sin(x * 0.09 + this.pulse) * 2;
+    const lip = edge(VIEW_W / 2);
+    ctx.save();
+    const sg = ctx.createLinearGradient(0, lip, 0, lip + 24);
+    sg.addColorStop(0, rgba('#0a0308', 0.50));
+    sg.addColorStop(1, rgba('#0a0308', 0));
+    ctx.fillStyle = sg;
+    ctx.beginPath();
+    for (let x = -8; x <= VIEW_W + 8; x += 5) {
+      if (x === -8) ctx.moveTo(x, edge(x)); else ctx.lineTo(x, edge(x));
+    }
+    for (let x = VIEW_W + 8; x >= -8; x -= 5) ctx.lineTo(x, edge(x) + 24);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
   }
 
   drawStrands(ctx, t) {

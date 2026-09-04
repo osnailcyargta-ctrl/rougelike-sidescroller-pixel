@@ -5,7 +5,7 @@
 import { clamp, lerp, rand, randInt, choice, dist, sign, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
 import {
-  Camera, burst, spawnParticle, impactRing, dropShadow, limb, pxRect, glowDot,
+  Camera, burst, spawnParticle, impactRing, dropShadow, limb, limbInk, pxRect, pxSolid, glowDot, glowEye,
 } from './gfx.js';
 import { Sfx } from './audio.js';
 import { VIEW_W, VIEW_H, GROUND_Y, BOSS_TYPES, ROOM_SCALING, BOSS_ROOM_INTERVAL } from './config.js';
@@ -453,17 +453,23 @@ export class WormBoss {
     const C = (c) => (flash ? '#ffffff' : c);
     const px = Math.round(x), py = Math.round(y);
     const ringPulse = Math.sin(t * 6 - i * 0.6) * 0.5 + 0.5;
+    const INK = flash ? '#ffffff' : '#170d16';
+    // bristles go down first so the plate sits on top of their roots
+    const spread = 0.5 + ringPulse * 0.2;
+    limbInk(ctx, px, py, ang + Math.PI / 2 + spread, r + 4, 2, C(TINT.shellDark), INK);
+    limbInk(ctx, px, py, ang - Math.PI / 2 - spread, r + 4, 2, C(TINT.shellDark), INK);
     // plated ring
-    pxRect(ctx, px - r, py - r, r * 2, r * 2, C(TINT.shell));
+    pxSolid(ctx, px - r, py - r, r * 2, r * 2, C(TINT.shell), { ink: INK, light: null, dark: null });
     pxRect(ctx, px - r + 1, py - r - 1, r * 2 - 2, 2, C(TINT.shellLight));
     pxRect(ctx, px - r, py - r, 2, r * 2, C(TINT.shellDark));
     pxRect(ctx, px + r - 2, py - r, 2, r * 2, C(TINT.shellDark));
-    // soft belly stripe
+    // soft belly stripe, lit from inside so the body reads as segmented meat
     pxRect(ctx, px - r + 3, py - 2, r * 2 - 6, 4, C(TINT.belly));
-    // bristles
-    const spread = 0.5 + ringPulse * 0.2;
-    limb(ctx, px, py, ang + Math.PI / 2 + spread, r + 4, 2, C(TINT.shellDark));
-    limb(ctx, px, py, ang - Math.PI / 2 - spread, r + 4, 2, C(TINT.shellDark));
+    pxRect(ctx, px - r + 3, py - 2, r * 2 - 6, 1, C(TINT.shellLight));
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    glowDot(ctx, px, py, r * 1.6, TINT.belly, 0.10 + ringPulse * 0.10);
+    ctx.restore();
   }
 
   drawHead(ctx, flash, t) {
@@ -478,28 +484,32 @@ export class WormBoss {
     ctx.translate(x, y);
     ctx.rotate(ang);
 
+    const INK = flash ? '#ffffff' : '#170d16';
+    // mandibles first, so the skull overlaps their hinges
+    const gape = this.airborne ? 1 : 0.55;
+    const openK = (0.7 + 0.3 * Math.sin(t * 9)) * gape;
+    limbInk(ctx, r - 4, -r + 1, -0.5 - openK * 0.35, 11, 4, C(TINT.shellDark), INK);
+    limbInk(ctx, r - 4, r - 1, 0.5 + openK * 0.35, 11, 4, C(TINT.shellDark), INK);
     // skull
-    pxRect(ctx, -r, -r, r * 2, r * 2, C(TINT.shell));
+    pxSolid(ctx, -r, -r, r * 2, r * 2, C(TINT.shell), { ink: INK, light: null, dark: null });
     pxRect(ctx, -r + 2, -r - 2, r * 2 - 4, 3, C(TINT.shellLight));
     pxRect(ctx, -r, -r, 3, r * 2, C(TINT.shellDark));
+    // a ridge of plates over the crown
+    for (let i = 0; i < 3; i++) {
+      pxRect(ctx, -r + 4 + i * 5, -r - 3, 3, 2, C(TINT.shellDark));
+    }
 
     // maw: a ring of teeth around a dark throat, chewing as it flies
-    const gape = this.airborne ? 1 : 0.55;
-    const open = (0.7 + 0.3 * Math.sin(t * 9)) * gape;
     pxRect(ctx, r - 6, -r + 2, 8, r * 2 - 4, C(TINT.maw));
     pxRect(ctx, r - 3, -r + 4, 4, r * 2 - 8, C(TINT.gum));
     for (let i = 0; i < 6; i++) {
       const ty = -r + 3 + i * ((r * 2 - 6) / 5);
-      const bite = (i % 2 ? 1 : -1) * open * 2;
+      const bite = (i % 2 ? 1 : -1) * openK * 2;
       pxRect(ctx, r - 2 + bite, ty, 4, 3, C(TINT.tooth));
     }
-    // mandibles
-    limb(ctx, r - 4, -r + 1, -0.5 - open * 0.35, 11, 4, C(TINT.shellDark));
-    limb(ctx, r - 4, r - 1, 0.5 + open * 0.35, 11, 4, C(TINT.shellDark));
-
     // eyes down the side of the head
     for (const sy of [-1, 1]) {
-      pxRect(ctx, -2, sy * (r - 5) - 1, 5, 3, C(TINT.eye));
+      glowEye(ctx, -2, sy * (r - 5) - 1, 5, 3, C(TINT.eye), 0.30);
       pxRect(ctx, 0, sy * (r - 5), 2, 1, '#000000');
     }
     ctx.restore();

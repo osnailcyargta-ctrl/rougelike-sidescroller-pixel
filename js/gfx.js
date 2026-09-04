@@ -1,6 +1,6 @@
 // Camera shake, particle system, floating combat text and the shared
 // pixel-drawing helpers used by every entity.
-import { clamp, lerp, rand, randInt, rgba, TAU } from './util.js';
+import { clamp, lerp, rand, randInt, rgba, TAU, mixHex } from './util.js';
 import { Theme } from './theme.js';
 import { Options } from './settings.js';
 
@@ -489,4 +489,93 @@ export function strokeBolt(ctx, pts, color, width, alpha = 1) {
   for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
   ctx.stroke();
   ctx.restore();
+}
+
+
+// --- sprite shading -------------------------------------------------------
+// A flat pixel rectangle reads as a flat pixel rectangle. These give a block
+// the three things that make it read as a solid object instead: a dark edge
+// that cuts it out of the background, a lit top face, and a shaded underside.
+// Every enemy and boss is built from them, so the whole cast shades alike.
+
+const INK_CACHE = new Map();
+
+// The near-black an object is outlined in: its own colour taken almost all
+// the way down, so a red thing gets a red-black edge and not a grey one.
+export function inkFor(hex) {
+  let v = INK_CACHE.get(hex);
+  if (v === undefined) {
+    v = mixHex(hex, '#05030a', 0.76);
+    if (INK_CACHE.size > 200) INK_CACHE.clear();
+    INK_CACHE.set(hex, v);
+  }
+  return v;
+}
+
+export function litFor(hex) {
+  const k = 'L' + hex;
+  let v = INK_CACHE.get(k);
+  if (v === undefined) {
+    v = mixHex(hex, '#ffffff', 0.42);
+    INK_CACHE.set(k, v);
+  }
+  return v;
+}
+
+export function shadeFor(hex) {
+  const k = 'S' + hex;
+  let v = INK_CACHE.get(k);
+  if (v === undefined) {
+    v = mixHex(hex, '#05030a', 0.38);
+    INK_CACHE.set(k, v);
+  }
+  return v;
+}
+
+// A body block: outline, fill, lit top row, shaded bottom row. Pass a flash
+// colour and the whole thing goes white without losing its shape.
+export function pxSolid(ctx, x, y, w, h, fill, opts = {}) {
+  x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
+  if (w <= 0 || h <= 0) return;
+  const ink = opts.ink === undefined ? inkFor(fill) : opts.ink;
+  if (ink) {
+    ctx.fillStyle = ink;
+    ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+  }
+  ctx.fillStyle = fill;
+  ctx.fillRect(x, y, w, h);
+  const inset = opts.inset ?? 0;
+  const iw = w - inset * 2;
+  if (iw > 0) {
+    const light = opts.light === undefined ? litFor(fill) : opts.light;
+    if (light && h >= 2) { ctx.fillStyle = light; ctx.fillRect(x + inset, y, iw, 1); }
+    const dark = opts.dark === undefined ? shadeFor(fill) : opts.dark;
+    if (dark && h >= 3) { ctx.fillStyle = dark; ctx.fillRect(x + inset, y + h - 1, iw, 1); }
+  }
+  // a single lit column down the side the light comes from
+  if (opts.rim) {
+    ctx.fillStyle = opts.rim === true ? litFor(fill) : opts.rim;
+    const rx = opts.rimSide >= 0 ? x + w - 1 : x;
+    ctx.fillRect(rx, y + 1, 1, Math.max(0, h - 2));
+  }
+}
+
+// A limb with the same dark edge around it.
+export function limbInk(ctx, x, y, angle, len, thick, color, ink, taper = 0) {
+  if (ink) {
+    limb(ctx, x - Math.cos(angle), y - Math.sin(angle), angle, len + 2, thick + 2, ink, taper);
+  }
+  limb(ctx, x, y, angle, len, thick, color, taper);
+}
+
+// An eye that actually reads as lit: the pixel, plus a bloom over it.
+export function glowEye(ctx, x, y, w, h, color, glow = 0.55) {
+  ctx.fillStyle = color;
+  ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+  if (glow > 0) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    glowDot(ctx, Math.round(x) + w / 2, Math.round(y) + h / 2, Math.max(w, h) * 1.9, color, glow);
+    ctx.restore();
+  }
 }

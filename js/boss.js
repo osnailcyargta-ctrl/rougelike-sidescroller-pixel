@@ -3,7 +3,7 @@
 // test, status effect and perk works on them unchanged.
 import { clamp, lerp, rand, randInt, choice, dist, distToSegment, sign, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
-import { Camera, burst, floatText, spawnParticle, impactRing, limb, pxRect, glowDot, boltPath, strokeBolt, screenFlash } from './gfx.js';
+import { Camera, burst, floatText, spawnParticle, impactRing, limb, limbInk, pxRect, pxSolid, glowDot, glowEye, boltPath, strokeBolt, screenFlash } from './gfx.js';
 import { Sfx } from './audio.js';
 import { VIEW_W, VIEW_H, GRAVITY, GROUND_Y, BOSS_TYPES, ROOM_SCALING, BOSS_ROOM_INTERVAL, FINAL_ROOM, CEILING_ROOM } from './config.js';
 import { Enemy, Projectile } from './entities.js';
@@ -773,32 +773,38 @@ export class GolemBoss {
     const charging = this.state === 'beam' || this.state === 'beamShort' || this.state === 'small';
     const core = 0.5 + 0.5 * Math.sin(t * 4);
 
+    const INK = flash ? '#ffffff' : '#120e22';
     // legs
     const stance = this.slamming ? 7 : 0;
-    limb(ctx, x - 12, y - 20 + stance, Math.PI / 2 - 0.12, 21 - stance, 12, C('#3a3358'));
-    limb(ctx, x + 12, y - 20 + stance, Math.PI / 2 + 0.12, 21 - stance, 12, C('#3a3358'));
-    pxRect(ctx, x - 19, y - 4, 13, 4, C('#2a2444'));
-    pxRect(ctx, x + 6, y - 4, 13, 4, C('#2a2444'));
+    limbInk(ctx, x - 12, y - 20 + stance, Math.PI / 2 - 0.12, 21 - stance, 12, C('#3a3358'), INK);
+    limbInk(ctx, x + 12, y - 20 + stance, Math.PI / 2 + 0.12, 21 - stance, 12, C('#3a3358'), INK);
+    pxSolid(ctx, x - 19, y - 4, 13, 4, C('#2a2444'), { ink: INK });
+    pxSolid(ctx, x + 6, y - 4, 13, 4, C('#2a2444'), { ink: INK });
 
-    // torso slab
-    pxRect(ctx, x - w / 2, y - h + 10, w, h - 30, C('#4a3f78'));
+    // torso slab, with plate seams down it
+    pxSolid(ctx, x - w / 2, y - h + 10, w, h - 30, C('#4a3f78'), { ink: INK });
     pxRect(ctx, x - w / 2, y - h + 10, w, 5, C('#6a5aa8'));
     pxRect(ctx, x - w / 2 + 4, y - h + 19, w - 8, 4, C('#2a2444'));
+    for (let i = 1; i < 4; i++) {
+      pxRect(ctx, x - w / 2 + (w / 4) * i, y - h + 24, 1, h - 46, C('#2a2444'));
+    }
     // shoulders
-    pxRect(ctx, x - w / 2 - 7, y - h + 13, 8, 17, C('#3a3358'));
-    pxRect(ctx, x + w / 2 - 1, y - h + 13, 8, 17, C('#3a3358'));
+    pxSolid(ctx, x - w / 2 - 7, y - h + 13, 8, 17, C('#3a3358'), { ink: INK });
+    pxSolid(ctx, x + w / 2 - 1, y - h + 13, 8, 17, C('#3a3358'), { ink: INK });
     // arms
     const swing = Math.sin(t * 2) * 0.14 + (this.dashT > 0 ? 0.7 : 0);
-    limb(ctx, x - w / 2 - 3, y - h + 24, Math.PI / 2 + swing, 24, 10, C('#4a3f78'));
-    limb(ctx, x + w / 2 + 3, y - h + 24, Math.PI / 2 - swing, 24, 10, C('#4a3f78'));
-    // fists
+    limbInk(ctx, x - w / 2 - 3, y - h + 24, Math.PI / 2 + swing, 24, 10, C('#4a3f78'), INK);
+    limbInk(ctx, x + w / 2 + 3, y - h + 24, Math.PI / 2 - swing, 24, 10, C('#4a3f78'), INK);
+    // fists, with a lit knuckle ridge
     const fy = y - h + 24 + Math.cos(swing) * 24;
-    pxRect(ctx, x - w / 2 - 8, fy - 5, 11, 10, C('#2a2444'));
-    pxRect(ctx, x + w / 2 - 2, fy - 5, 11, 10, C('#2a2444'));
+    pxSolid(ctx, x - w / 2 - 8, fy - 5, 11, 10, C('#2a2444'), { ink: INK });
+    pxSolid(ctx, x + w / 2 - 2, fy - 5, 11, 10, C('#2a2444'), { ink: INK });
+    pxRect(ctx, x - w / 2 - 8, fy - 5, 11, 1, C('#6a5aa8'));
+    pxRect(ctx, x + w / 2 - 2, fy - 5, 11, 1, C('#6a5aa8'));
 
     // core
     const cy = y - h + 28;
-    glowDot(ctx, x, cy, 14 + core * 7, Theme.lightning, 0.35 + core * 0.25);
+    glowDot(ctx, x, cy, 13 + core * 6, Theme.lightning, 0.22 + core * 0.16);
     pxRect(ctx, x - 6, cy - 6, 12, 12, C(Theme.lightning));
     pxRect(ctx, x - 3, cy - 3, 6, 6, '#ffffff');
 
@@ -807,21 +813,22 @@ export class GolemBoss {
     if (this.phase === 1 && !this.headFall) {
       // head fused to the shoulders
       const hy = y - h - 6;
-      pxRect(ctx, x - 16, hy, 32, 21, C('#54487f'));
+      pxSolid(ctx, x - 16, hy, 32, 21, C('#54487f'), { ink: INK });
       pxRect(ctx, x - 16, hy, 32, 5, C('#7a68bd'));
       pxRect(ctx, x - 11, hy + 8, 22, 7, C('#1d1836'));
       const eye = charging ? 1 : 0.45 + 0.3 * Math.sin(t * 5);
-      pxRect(ctx, x - 9, hy + 9, 7, 4, rgba(charging ? Theme.hp : Theme.lightning, eye));
-      pxRect(ctx, x + 3, hy + 9, 7, 4, rgba(charging ? Theme.hp : Theme.lightning, eye));
-      glowDot(ctx, x, hy + 10, charging ? 24 : 13, charging ? Theme.hp : Theme.lightning, 0.3 * eye + 0.15);
+      const ec = charging ? Theme.hp : Theme.lightning;
+      glowEye(ctx, x - 9, hy + 9, 7, 4, rgba(ec, eye), 0.30 * eye);
+      glowEye(ctx, x + 3, hy + 9, 7, 4, rgba(ec, eye), 0.30 * eye);
+      glowDot(ctx, x, hy + 10, charging ? 24 : 13, ec, 0.3 * eye + 0.15);
       // crown horns
-      pxRect(ctx, x - 19, hy - 7, 5, 10, C('#3a3358'));
-      pxRect(ctx, x + 14, hy - 7, 5, 10, C('#3a3358'));
+      pxSolid(ctx, x - 19, hy - 7, 5, 10, C('#3a3358'), { ink: INK });
+      pxSolid(ctx, x + 14, hy - 7, 5, 10, C('#3a3358'), { ink: INK });
     } else {
       // open neck socket, arcing where the head used to sit
       const ny = y - h + 5;
-      pxRect(ctx, x - 13, ny, 26, 8, C('#2a2444'));
-      pxRect(ctx, x - 9, ny - 3, 18, 4, C('#1d1836'));
+      pxSolid(ctx, x - 13, ny, 26, 8, C('#2a2444'), { ink: INK });
+      pxSolid(ctx, x - 9, ny - 3, 18, 4, C('#1d1836'), { ink: INK });
       glowDot(ctx, x, ny, 18, Theme.lightning, 0.35 + core * 0.2);
       const pts = boltPath(x - 11, ny, x + 11, ny - 5, 5, 5, this.game.time * 20);
       strokeBolt(ctx, pts, Theme.lightning, 1, 0.7);
@@ -861,16 +868,18 @@ export class GolemBoss {
     ctx.restore();
     }
 
-    pxRect(ctx, x - 16, y - 13, 32, 21, C('#54487f'));
+    const HINK = flash ? '#ffffff' : '#120e22';
+    pxSolid(ctx, x - 16, y - 13, 32, 21, C('#54487f'), { ink: HINK });
     pxRect(ctx, x - 16, y - 13, 32, 5, C('#7a68bd'));
     pxRect(ctx, x - 11, y - 5, 22, 7, C('#1d1836'));
     const eye = charging ? 1 : 0.5 + 0.3 * Math.sin(t * 6);
-    pxRect(ctx, x - 9, y - 4, 7, 4, rgba(eyeCol, eye));
-    pxRect(ctx, x + 3, y - 4, 7, 4, rgba(eyeCol, eye));
-    pxRect(ctx, x - 19, y - 19, 5, 10, C('#3a3358'));
-    pxRect(ctx, x + 14, y - 19, 5, 10, C('#3a3358'));
-    // jaw
-    pxRect(ctx, x - 12, y + 8, 24, 5, C('#3a3358'));
+    glowEye(ctx, x - 9, y - 4, 7, 4, rgba(eyeCol, eye), 0.30 * eye);
+    glowEye(ctx, x + 3, y - 4, 7, 4, rgba(eyeCol, eye), 0.30 * eye);
+    pxSolid(ctx, x - 19, y - 19, 5, 10, C('#3a3358'), { ink: HINK });
+    pxSolid(ctx, x + 14, y - 19, 5, 10, C('#3a3358'), { ink: HINK });
+    // jaw, with a row of teeth
+    pxSolid(ctx, x - 12, y + 8, 24, 5, C('#3a3358'), { ink: HINK });
+    for (let i = 0; i < 6; i++) pxRect(ctx, x - 10 + i * 4, y + 8, 2, 2, C('#cdc4ee'));
     ctx.restore();
     glowDot(ctx, x, y, charging ? 28 : 17, eyeCol, (0.3 + 0.25 * eye) * (this.headAlpha ?? 1));
   }
