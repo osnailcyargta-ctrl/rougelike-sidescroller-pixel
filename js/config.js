@@ -152,6 +152,37 @@ export const ANVIL = { everyRooms: 2, w: 20, h: 14, reach: 46 };
 
 // Shardgun: one shell, five shards, and a second act. The shards stop dead at
 // their range, hang there, then re-form as splinters that chase the cursor.
+// A thrust, not a swing: the whole reach is a narrow line in front of you, and
+// every enemy it skewers sprouts a burrowing spawn from the tip.
+export const WORM_SPEAR = {
+  range: 4 * BLOCK, damage: 24, cooldown: 0.62,
+  arc: 0.30,                       // narrow: this is a stab, not an arc
+  thrustTime: 0.18,
+  spawnPerHit: 1,                  // one spawn per enemy skewered
+  dropFromBoss: 0.05,              // Big Dude
+  dropFromSmall: 0.02,             // Small Dude
+};
+
+// The spawn the spear leaves behind: a knee-high worm that crawls forward and
+// spits at whatever comes near it.
+export const SPEARLING = {
+  life: 8,
+  speed: 2 * BLOCK,                // two blocks a second
+  range: 3 * BLOCK,                // how far it will shoot
+  damage: 5,
+  interval: 1.0,                   // one shot a second
+  shotSpeed: 150,
+  hp: 1,
+};
+
+// Darts, not arrows - which is why lightning never touches them.
+export const STINGER_GUN = {
+  range: 7 * BLOCK, damage: 20, ammo: 3, reload: 1.4, cooldown: 0.34,
+  speed: 330,
+  poisonFromMutant: 0.02,          // Mutant Stinger's chance to leave one
+  poisonFromStinger: 0.0021,       // and a plain Stinger's
+};
+
 export const SHARDGUN = {
   range: 5 * BLOCK, damage: 20, ammo: 1, reload: 1.5, cooldown: 0.45,
   pellets: 5, speed: 400, spread: 0.30,
@@ -205,6 +236,8 @@ export const ENEMY_TYPES = {
   stinger: {
     id: 'stinger', name: 'Stinger', hp: 80, speed: 60, damage: 10, w: 13, h: 12,
     attackCooldown: 1.8, attackRange: 150, flying: true, projectileSpeed: 150,
+    // a hundredth of the Mutant's chance: the gun is really the Mutant's
+    dropId: 'stingergun', dropChance: 0.0021,
   },
   // Stalks just out of reach, then commits to a long telegraphed lunge.
   lurker: {
@@ -236,6 +269,34 @@ export const ENEMY_TYPES = {
     standOff: 92, windUp: 0.55, chargeSpeed: 395, chargeTime: 0.34,
     frontGuard: 0.25,          // fraction of damage that gets through the plate
     dropId: 'shardgun', dropChance: 0.10,   // at the spot where it broke
+  },
+  // Big Dude's brood: two blocks of worm that tunnels under the floor and
+  // comes up beneath you, sometimes spitting on the way out.
+  smalldude: {
+    id: 'smalldude', name: 'Small Dude', hp: 90, speed: 0, damage: 18, w: 30, h: 13,
+    attackCooldown: 2.6, attackRange: 999, ai: 'smalldude',
+    knockback: 150,
+    burrowDepth: 30, burrowSpeed: 140,
+    buriedTime: 1.5, surfaceTime: 1.4,
+    leapUp: 330, leapGravity: 900,
+    spitChance: 0.5, spitCount: 3, spitDamage: 10, spitSpeed: 190, spitSpread: 0.55,
+    dropId: 'wormspear', dropChance: 0.02,
+  },
+  // From room 10 the plain Stinger stops turning up and this comes instead:
+  // bigger, slower to fire, and it leaves an egg behind.
+  mutantstinger: {
+    id: 'mutantstinger', name: 'Mutant Stinger', hp: 150, speed: 52, damage: 14, w: 20, h: 18,
+    attackCooldown: 2.6, attackRange: 170, flying: true, projectileSpeed: 145,
+    ai: 'mutantstinger', shots: 2, shotSpread: 0.26, shotGap: 0.16,
+    dropId: 'stingergun', dropChance: 0.02,
+  },
+  // What a Mutant Stinger leaves where it fell. It does nothing but sit there
+  // and count down - but what it is counting down to is two more Stingers.
+  stingeregg: {
+    id: 'stingeregg', name: 'Stinger Egg', hp: 60, speed: 0, damage: 0, w: 12, h: 15,
+    attackCooldown: 99, attackRange: 0, ai: 'egg',
+    noContact: true, noScale: true,
+    hatchTime: 5.0, hatchCount: 2, brokenHatchChance: 0.5,
   },
   // The ones Alphads calls up. Same AI, same sprite, different bookkeeping:
   // only these count against the summon cap, and they leave nothing behind.
@@ -375,6 +436,12 @@ export const PERK = {
   markDuration: 5.0,
   chainCooldown: 0.75,
   chainDamage: 8,
+  // Poison is the burn and the slime at once: it ticks like fire and drags
+  // like slime, and the Stinger Gun carries it without a perk.
+  poisonDuration: 4.0,
+  poisonTick: 0.5,
+  poisonTickDamage: 3,
+  poisonSlow: 0.35,
   electrifiedDuration: 4.5,
   electrifiedDamage: 10,
   electrifiedIntervalMin: 1.2,

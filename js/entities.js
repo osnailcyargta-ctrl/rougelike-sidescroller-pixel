@@ -6,8 +6,7 @@ import {
 } from './gfx.js';
 import { Sfx } from './audio.js';
 import {
-  VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, SHARDGUN, TWINDAGGER, ORIGAMI, NUKERANG, GRAPPLE, ARMOR, BLOCK,
-  ENEMY_TYPES, PERK, ROOM_SCALING, roomScaleSteps,
+  VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, SHARDGUN, TWINDAGGER, ORIGAMI, NUKERANG, GRAPPLE, ARMOR, BLOCK, ENEMY_TYPES, PERK, ROOM_SCALING, roomScaleSteps, WORM_SPEAR, SPEARLING, STINGER_GUN,
 } from './config.js';
 import { ITEMS, Inventory } from './items.js';
 import { Binds, Input } from './input.js';
@@ -83,6 +82,7 @@ export class Status {
     this.slow = 0; this.slowAmount = 0;
     this.mark = 0;
     this.electrified = 0; this.elecTick = 0; this.elecInterval = 1.3;
+    this.poison = 0; this.poisonTick = 0;
   }
   get slowFactor() { return this.slow > 0 ? 1 - this.slowAmount : 1; }
 }
@@ -158,6 +158,9 @@ export const ENEMY_TINT = {
   get aetherShardling() { return '#a98cff'; },
   get wisp() { return '#7bf0d8'; },
   get spitter() { return '#a8e04a'; },
+  get smalldude() { return '#c86a4a'; },
+  get mutantstinger() { return '#7ad7a0'; },
+  get stingeregg() { return '#bffff0'; },
   get golemBody() { return Theme.enemyBrute; },
   get golemHead() { return Theme.lightning; },
 };
@@ -179,8 +182,10 @@ export class Enemy {
     // Base stats until room 6, then one step up every two rooms.
     const room = Math.max(1, game?.roomIndex ?? 1);
     const steps = roomScaleSteps(room);
-    this.hpScale = 1 + ROOM_SCALING.hpPerStep * steps;
-    this.dmgScale = 1 + ROOM_SCALING.damagePerStep * steps;
+    // a fixed-HP prop like the egg is the same everywhere, so the room
+    // scaling never touches it
+    this.hpScale = def.noScale ? 1 : 1 + ROOM_SCALING.hpPerStep * steps;
+    this.dmgScale = def.noScale ? 1 : 1 + ROOM_SCALING.damagePerStep * steps;
     this.maxHp = Math.round(def.hp * this.hpScale);
     this.hp = this.maxHp;
     this.dmg = Math.round(def.damage * this.dmgScale);
@@ -202,6 +207,11 @@ export class Enemy {
     // bosses shrug off the whole lightning package: no marks, no electrified,
     // and the arc passes through them
     this.immuneLightning = !!def.boss;
+    // The contact check reads this off the instance, so a def that declares it
+    // has to be copied across or the flag does nothing. The Wisp got away with
+    // it only because it is flying and the check short-circuits on that first.
+    this.noContact = !!def.noContact;
+    this.untargetable = false;
   }
 
   get cx() { return this.x; }
@@ -294,12 +304,26 @@ export class Enemy {
     impactRing(this.cx, this.cy, { color: '#ffffff', r0: 2, r1: 22, life: 0.26, width: 2 });
     Camera.punch(1.4);
     if (this.def.dropId) this.game.rollEnemyDrop(this);
+    // A Mutant Stinger leaves an egg where it fell; an egg that is broken
+    // open early only sometimes has anything left alive inside it.
+    if (this.type === 'mutantstinger') this.layEgg();
+    else if (this.ai === 'egg' && !this.hatched) {
+      if (Math.random() < this.def.brokenHatchChance) this.spawnBrood(1, 'broken');
+    }
     this.game.onEnemyKilled(this);
   }
 
   applyBurn() {
     if (this.st.burn <= 0) this.st.burnTick = 0;
     this.st.burn = PERK.burnDuration;   // refresh, never stacks
+  }
+
+  // Poison is fire and slime at once: it ticks damage like a burn and drags
+  // like slime, on one timer, and it never stacks with itself.
+  applyPoison() {
+    if (this.st.poison <= 0) this.st.poisonTick = 0;
+    this.st.poison = PERK.poisonDuration;
+    this.applySlow(PERK.poisonSlow, PERK.poisonDuration);
   }
 
   applyMark() {
@@ -331,6 +355,22 @@ export class Enemy {
             x: this.cx + rand(-this.w / 2, this.w / 2), y: this.cy + rand(-6, 6),
             vx: rand(-12, 12), vy: rand(-46, -18), life: rand(0.25, 0.5), size: randInt(1, 2),
             color: Theme.fireHot, color2: Theme.fire, gravity: -40, kind: 'shrink',
+          });
+        }
+        if (this.dead) return;
+      }
+    }
+    if (st.poison > 0) {
+      st.poison -= dt;
+      st.poisonTick += dt;
+      while (st.poisonTick >= PERK.poisonTick) {
+        st.poisonTick -= PERK.poisonTick;
+        this.applyRawDamage(PERK.poisonTickDamage);
+        if (Math.random() < 0.6) {
+          spawnParticle({
+            x: this.cx + rand(-this.w / 2, this.w / 2), y: this.cy + rand(-6, 6),
+            vx: rand(-10, 10), vy: rand(-30, -6), life: rand(0.3, 0.6), size: randInt(1, 2),
+            color: '#a8e04a', color2: '#5a8a2a', gravity: 20, kind: 'shrink',
           });
         }
         if (this.dead) return;
@@ -395,7 +435,9 @@ export class Enemy {
     this.attackTimer -= dt;
     this.stateT += dt;
 
-    if (this.def.flying) this.updateFlyer(dt, p, slow);
+    if (this.ai === 'smalldude') this.updateSmallDude(dt, p, slow);
+    else if (this.ai === 'egg') this.updateEgg(dt);
+    else if (this.def.flying) this.updateFlyer(dt, p, slow);
     else this.updateWalker(dt, p, slow);
   }
 
@@ -464,6 +506,143 @@ export class Enemy {
     }
     moveAndCollide(this, dt, { ignorePlatforms: true });
     this.y = clamp(this.y, 30, GROUND_Y - 6);
+  }
+
+  // --- Small Dude --------------------------------------------------------
+  // Big Dude's brood, and it inherits the one thing that made Big Dude
+  // frightening: you cannot hit what is under the floor. It has no walking
+  // state at all. It tracks you along the underside, and comes up where you
+  // are standing - sometimes spitting a fan on the way out.
+  updateSmallDude(dt, p, slow) {
+    const d = this.def;
+    if (this.sdState === undefined) {
+      this.sdState = 'under';
+      this.sdT = 0;
+      this.y = GROUND_Y + d.burrowDepth;
+      this.untargetable = true;
+      this.noContact = true;
+    }
+    this.sdT += dt;
+    const target = p && !p.dead ? p : null;
+
+    if (this.sdState === 'under') {
+      // nothing to hit and nothing to touch while it is buried
+      this.untargetable = true;
+      this.noContact = true;
+      this.vy = 0;
+      this.y = GROUND_Y + d.burrowDepth;
+      if (target) {
+        const dx = target.x - this.x;
+        const step = d.burrowSpeed * dt * slow;
+        this.x = clamp(this.x + sign(dx) * Math.min(Math.abs(dx), step), 14, VIEW_W - 14);
+        this.facing = sign(dx) || this.facing;
+      }
+      // a seam of disturbed floor tracking along above it
+      if (Math.random() < dt * 30) {
+        spawnParticle({
+          x: this.x + rand(-9, 9), y: GROUND_Y, vx: rand(-16, 16), vy: rand(-34, -8),
+          life: rand(0.2, 0.5), size: randInt(1, 2), color: Theme.groundEdge,
+          gravity: 110, kind: 'smoke', glow: false,
+        });
+      }
+      if (this.sdT >= d.buriedTime && target && Math.abs(target.x - this.x) < 20) this.surface(target);
+      return;
+    }
+
+    // out in the open: it arcs up and falls back into its own hole
+    this.untargetable = false;
+    this.noContact = false;
+    this.vy += d.leapGravity * dt;
+    this.y += this.vy * dt;
+    if (this.spitPending && this.sdT >= 0.26) {
+      this.spitPending = false;
+      this.spitFan(target);
+    }
+    if (this.vy > 0 && this.y >= GROUND_Y + d.burrowDepth) {
+      this.y = GROUND_Y + d.burrowDepth;
+      this.sdState = 'under';
+      this.sdT = 0;
+      // flip the flags with the state, not a frame after it
+      this.untargetable = true;
+      this.noContact = true;
+    }
+  }
+
+  surface(target) {
+    const d = this.def;
+    this.sdState = 'out';
+    this.sdT = 0;
+    this.vy = -d.leapUp;
+    // hittable the instant it breaks the surface, not a frame later
+    this.untargetable = false;
+    this.noContact = false;
+    this.spitPending = Math.random() < d.spitChance;
+    Sfx.slam();
+    Camera.add(2);
+    burst(this.x, GROUND_Y, 16, {
+      color: Theme.groundEdge, kind: 'smoke', speedMin: 30, speedMax: 130,
+      lifeMin: 0.25, lifeMax: 0.65, sizeMin: 1, sizeMax: 3, gravity: 130,
+      glow: false, angle: -Math.PI / 2, spread: 1.1,
+    });
+    impactRing(this.x, GROUND_Y, { color: Theme.groundEdge, r0: 3, r1: 32, life: 0.35, width: 2 });
+  }
+
+  spitFan(target) {
+    const d = this.def;
+    const base = target ? Math.atan2(target.cy - this.cy, target.x - this.cx) : -Math.PI / 2;
+    for (let i = 0; i < d.spitCount; i++) {
+      const a = base + (i - (d.spitCount - 1) / 2) * d.spitSpread;
+      this.game.projectiles.push(new Projectile({
+        x: this.cx, y: this.cy,
+        vx: Math.cos(a) * d.spitSpeed, vy: Math.sin(a) * d.spitSpeed,
+        damage: Math.round(d.spitDamage * this.dmgScale),
+        team: 'enemy', kind: 'bolt', life: 3, game: this.game,
+      }));
+    }
+    Sfx.bow();
+  }
+
+  // --- Stinger Egg -------------------------------------------------------
+  // It does nothing but sit there and count down. Breaking it early is a real
+  // choice: it is 60 HP you did not have to spend, but leaving it is two more
+  // Stingers, and breaking it still only works half the time.
+  updateEgg(dt) {
+    const d = this.def;
+    this.eggT = (this.eggT ?? 0) + dt;
+    this.vx = 0;
+    moveAndCollide(this, dt);
+    if (Math.random() < dt * 6) {
+      spawnParticle({
+        x: this.cx + rand(-4, 4), y: this.cy + rand(-5, 5), vx: rand(-6, 6), vy: rand(-14, -4),
+        life: rand(0.3, 0.7), size: 1, color: '#bffff0', gravity: -8, kind: 'shrink',
+      });
+    }
+    if (this.eggT >= d.hatchTime) {
+      this.hatched = true;
+      this.spawnBrood(d.hatchCount, 'hatch');
+      this.dead = true;          // it opened rather than died: no kill credit
+    }
+  }
+
+  spawnBrood(n, how) {
+    for (let i = 0; i < n; i++) {
+      const e = new Enemy('stinger', clamp(this.cx + rand(-10, 10), 16, VIEW_W - 16), this.y, this.game);
+      e.spawnT = 0.3;
+      this.game.enemies.push(e);
+    }
+    const c = ENEMY_TINT.stinger;
+    burst(this.cx, this.cy, how === 'hatch' ? 22 : 12, {
+      color: c, color2: '#ffffff', speedMin: 30, speedMax: 150,
+      lifeMin: 0.25, lifeMax: 0.7, sizeMax: 3, gravity: 220,
+    });
+    impactRing(this.cx, this.cy, { color: c, r0: 2, r1: 30, life: 0.4, width: 2 });
+    Sfx.die();
+  }
+
+  layEgg() {
+    const e = new Enemy('stingeregg', clamp(this.cx, 16, VIEW_W - 16), Math.min(this.cy + 6, GROUND_Y), this.game);
+    e.spawnT = 0.3;
+    this.game.enemies.push(e);
   }
 
   // Wisp: never attacks. It hangs off the far side of the pack from you and
@@ -742,13 +921,20 @@ export class Enemy {
 
   shoot(target) {
     const a = Math.atan2((target.y - target.h / 2) - this.cy, target.x - this.cx);
-    this.game.projectiles.push(new Projectile({
-      x: this.cx, y: this.cy,
-      vx: Math.cos(a) * this.def.projectileSpeed,
-      vy: Math.sin(a) * this.def.projectileSpeed,
-      damage: this.dmg,
-      team: 'enemy', kind: 'bolt', life: 3, game: this.game,
-    }));
+    // most shooters send one; the Mutant Stinger sends a spread, and pays for
+    // it with a much longer wait between volleys
+    const n = this.def.shots ?? 1;
+    const spread = this.def.shotSpread ?? 0;
+    for (let i = 0; i < n; i++) {
+      const ang = a + (i - (n - 1) / 2) * spread;
+      this.game.projectiles.push(new Projectile({
+        x: this.cx, y: this.cy,
+        vx: Math.cos(ang) * this.def.projectileSpeed,
+        vy: Math.sin(ang) * this.def.projectileSpeed,
+        damage: this.dmg,
+        team: 'enemy', kind: 'bolt', life: 3, game: this.game,
+      }));
+    }
     Sfx.bow();
     this.state = 'shoot';
     this.stateT = 0;
@@ -820,6 +1006,9 @@ export class Enemy {
     else if (this.type === 'spitter') this.drawSpitter(ctx, t, flash);
     else if (this.ai === 'shardling') this.drawShardling(ctx, t, flash);
     else if (this.ai === 'wisp') this.drawWisp(ctx, t, flash);
+    else if (this.ai === 'smalldude') this.drawSmallDude(ctx, t, flash);
+    else if (this.ai === 'egg') this.drawEgg(ctx, t, flash);
+    else if (this.type === 'mutantstinger') this.drawMutantStinger(ctx, t, flash);
     else this.drawStinger(ctx, t, flash);
     ctx.restore();
 
@@ -857,6 +1046,7 @@ export class Enemy {
       glowDot(ctx, this.x, y + 3, 7, Theme.lightning, 0.25 * a);
     }
     if (st.burn > 0) glowDot(ctx, this.cx, this.cy, 14, Theme.fire, 0.22);
+    if (st.poison > 0) glowDot(ctx, this.cx, this.cy, 13, '#a8e04a', 0.20);
     if (st.electrified > 0) {
       const pts = boltPath(this.x - this.w / 2, this.cy + rand(-6, 6), this.x + this.w / 2, this.cy + rand(-6, 6), 4, 4, t * 30);
       strokeBolt(ctx, pts, Theme.lightning, 1, 0.7);
@@ -1220,6 +1410,140 @@ export class Enemy {
     ctx.restore();
   }
 
+  // Two blocks of worm: plated rings and a ring of teeth, the same shape as
+  // the thing that spawned it, at a tenth of the size.
+  drawSmallDude(ctx, t, flash) {
+    const tint = ENEMY_TINT.smalldude;
+    const c = flash ? '#ffffff' : tint;
+    const dark = flash ? '#ffffff' : '#5a2418';
+    const ink = flash ? '#ffffff' : inkFor(tint);
+    const x = Math.round(this.x);
+    // buried: all you get is the seam it is dragging along under the floor
+    if (this.sdState === 'under') {
+      const w = 13 + Math.sin(t * 9) * 3;
+      pxSolid(ctx, x - w / 2, GROUND_Y - 2, w, 3, dark, { ink: null, light: null, dark: null });
+      pxRect(ctx, x - w / 2, GROUND_Y - 3, w, 1, flash ? '#fff' : Theme.groundEdge);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      glowDot(ctx, x, GROUND_Y - 1, 12, tint, 0.14 + 0.06 * Math.sin(t * 8));
+      ctx.restore();
+      return;
+    }
+    // out: it points the way it is travelling, so it reads as launched
+    const ang = Math.atan2(this.vy, 0.0001) > 0 ? 0.5 : -0.5;
+    ctx.save();
+    ctx.translate(x, Math.round(this.cy));
+    ctx.rotate(ang * (this.vy > 0 ? 1 : -1) * 0.35);
+    // body rings, tail to head
+    for (let i = 3; i >= 0; i--) {
+      const r = 4 + (3 - i) * 0.8;
+      const oy = i * 7 - 10;
+      pxSolid(ctx, -r, oy - r, r * 2, r * 2, c, { ink, light: null, dark: null });
+      pxRect(ctx, -r + 1, oy - r, r * 2 - 2, 1, flash ? '#fff' : '#e08a68');
+      pxRect(ctx, -r, oy - r + 2, 1, r * 2 - 3, dark);
+    }
+    // the maw at the leading end
+    const hr = 6;
+    pxSolid(ctx, -hr, -16 - hr + 6, hr * 2, hr * 2, c, { ink, light: null, dark: null });
+    pxRect(ctx, -hr + 1, -16 - hr + 6, hr * 2 - 2, 2, flash ? '#fff' : '#e08a68');
+    pxRect(ctx, -3, -14, 6, 4, flash ? '#fff' : '#2a0e10');
+    const bite = 0.5 + 0.5 * Math.sin(t * 14);
+    for (let i = 0; i < 3; i++) {
+      pxRect(ctx, -3 + i * 2.5, -14 - bite, 1, 2, flash ? '#fff' : '#ffe9c0');
+      pxRect(ctx, -3 + i * 2.5, -11 + bite, 1, 2, flash ? '#fff' : '#ffe9c0');
+    }
+    glowEye(ctx, -5, -18, 2, 2, flash ? '#fff' : '#fff3b0', 0.28);
+    glowEye(ctx, 3, -18, 2, 2, flash ? '#fff' : '#fff3b0', 0.28);
+    ctx.restore();
+  }
+
+  // A Stinger that kept growing. Same silhouette, heavier everywhere, with a
+  // second pair of wings and a swollen egg sac it is carrying.
+  drawMutantStinger(ctx, t, flash) {
+    const tint = ENEMY_TINT.mutantstinger;
+    const c = flash ? '#ffffff' : tint;
+    const d = flash ? '#ffffff' : '#1d4a38';
+    const ink = flash ? '#ffffff' : inkFor(tint);
+    const x = Math.round(this.x), y = Math.round(this.y - 9 + Math.sin(this.hover) * 2);
+    const wing = Math.sin(t * 26) * 5;
+    const f = this.facing;
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 3; i++) {
+      ctx.globalAlpha = 0.34 - i * 0.09;
+      const off = wing * 0.1 - i * 0.15;
+      for (const sy of [-1, 1]) {
+        limb(ctx, x - 5, y - 6 + sy * 3, -0.7 + off + sy * 0.25, 13 - i, 5, flash ? '#fff' : '#cfffe8');
+        limb(ctx, x + 5, y - 6 + sy * 3, Math.PI + 0.7 - off - sy * 0.25, 13 - i, 5, flash ? '#fff' : '#cfffe8');
+      }
+    }
+    ctx.restore();
+
+    // thorax, then the sac hanging under it
+    pxSolid(ctx, x - 8, y - 6, 16, 11, c, { ink, rim: true, rimSide: f });
+    pxRect(ctx, x - 8, y - 6, 16, 3, flash ? '#fff' : '#b6ffdc');
+    pxSolid(ctx, x - 5, y + 5, 10, 7, d, { ink, light: null });
+    for (let i = 0; i < 3; i++) pxRect(ctx, x - 4, y + 6 + i * 2, 8, 1, flash ? '#fff' : '#7ad7a0');
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    glowDot(ctx, x, y + 8, 11, '#bffff0', 0.16 + 0.08 * Math.sin(t * 3));
+    ctx.restore();
+    // a plated brow with four eyes under it
+    pxSolid(ctx, x - 7, y - 9, 14, 4, d, { ink, dark: null });
+    for (const ox of [-5, -2, 1, 4]) glowEye(ctx, x + ox, y - 4, 2, 2, flash ? '#fff' : '#ffe066', 0.22);
+    // horns
+    pxSolid(ctx, x - 8, y - 13, 3, 5, d, { ink, dark: null });
+    pxSolid(ctx, x + 5, y - 13, 3, 5, d, { ink, dark: null });
+    // the sting, longer and dripping
+    const ta = f > 0 ? Math.PI - 0.35 : 0.35;
+    limbInk(ctx, x - f * 7, y + 8, ta, 11, 3, d, ink);
+    const sx = x - f * 7 + Math.cos(ta) * 11, sy = y + 8 + Math.sin(ta) * 11;
+    pxRect(ctx, sx - 1, sy - 1, 3, 3, flash ? '#fff' : '#eaffff');
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    glowDot(ctx, sx, sy, 7, tint, 0.4 + 0.2 * Math.sin(t * 5));
+    ctx.restore();
+  }
+
+  // The egg. It swells as it gets closer, and starts to split.
+  drawEgg(ctx, t, flash) {
+    const tint = ENEMY_TINT.stingeregg;
+    const c = flash ? '#ffffff' : '#dff7ef';
+    const ink = flash ? '#ffffff' : '#1d3a34';
+    const x = Math.round(this.cx), y = Math.round(this.cy);
+    const k = clamp((this.eggT ?? 0) / this.def.hatchTime, 0, 1);
+    const beat = 1 + Math.sin(t * (3 + k * 12)) * (0.04 + k * 0.10);
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(beat, 2 - beat);
+    pxSolid(ctx, -5, -7, 10, 14, c, { ink, light: '#ffffff', dark: '#9ecfc2' });
+    pxRect(ctx, -4, -8, 8, 1, c);
+    pxRect(ctx, -4, 7, 8, 1, '#9ecfc2');
+    // veins, and cracks that open as it comes due
+    for (let i = 0; i < 3; i++) {
+      pxRect(ctx, -3 + i * 3, -4 + i, 1, 6, flash ? '#fff' : '#7ad7a0');
+    }
+    if (k > 0.55) {
+      const cracks = Math.floor((k - 0.55) / 0.15) + 1;
+      for (let i = 0; i < cracks; i++) {
+        pxRect(ctx, -4 + i * 3, -5 + (i % 2) * 7, 3, 1, flash ? '#fff' : '#2a0e10');
+        pxRect(ctx, -2 + i * 3, -4 + (i % 2) * 7, 1, 2, flash ? '#fff' : '#2a0e10');
+      }
+    }
+    ctx.restore();
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    glowDot(ctx, x, y, 12 + k * 10, tint, 0.12 + k * 0.28);
+    ctx.restore();
+    // the shape inside, showing through near the end
+    if (k > 0.75) {
+      const a = (k - 0.75) / 0.25;
+      pxRect(ctx, x - 2, y - 1, 4, 3, rgba('#2a0e10', 0.5 * a));
+    }
+  }
+
   drawStinger(ctx, t, flash) {
     const tint = Theme.enemyStinger;
     const c = flash ? '#ffffff' : tint;
@@ -1281,6 +1605,7 @@ export class Projectile {
 
   update(dt) {
     this.t += dt;
+    if (this.kind === 'spearling') { this.updateSpearling(dt); return; }
     if (this.kind === 'nukerang') { this.updateNukerang(dt); return; }
     if (this.kind === 'shard') { this.updateShard(dt); return; }
     if (this.kind === 'origami') { this.updateOrigami(dt); return; }
@@ -1543,6 +1868,65 @@ export class Projectile {
   }
 
   // Out five blocks, then home back to the hand that threw it.
+  // What the Worm Spear leaves in an enemy: a hand-sized worm that crawls off
+  // along the floor and spits at whatever comes within a few blocks. It is a
+  // projectile only in that the projectile list is where it lives - it never
+  // collides with anything itself.
+  updateSpearling(dt) {
+    const cfg = SPEARLING;
+    this.spent = true;                 // it is not a bullet; it never hits
+    // it returns before the generic life check below, so it has to expire here
+    if (this.t >= this.life) {
+      this.dead = true;
+      burst(this.x, this.y, 6, {
+        color: '#c86a4a', speedMin: 10, speedMax: 60, lifeMin: 0.2, lifeMax: 0.45,
+        gravity: 180, kind: 'shrink',
+      });
+      return;
+    }
+    this.vy += 620 * dt;
+    this.x += this.vx * dt;
+    this.y += this.vy * dt;
+    // ride the floor, and turn around at the walls
+    const floor = surfaceBelow(this.x, this.y - 2);
+    if (this.y >= floor) { this.y = floor; this.vy = 0; }
+    if (this.x < 8) { this.x = 8; this.vx = Math.abs(this.vx); }
+    if (this.x > VIEW_W - 8) { this.x = VIEW_W - 8; this.vx = -Math.abs(this.vx); }
+
+    this.shotT = (this.shotT ?? cfg.interval * 0.4) + dt;
+    if (this.shotT >= cfg.interval) {
+      this.shotT = 0;
+      // nearest enemy inside its reach, if any
+      let best = null, bestD = cfg.range;
+      for (const e of this.game.enemies) {
+        if (e.dead || e.spawnT > 0 || e.untargetable) continue;
+        const d = dist(this.x, this.y - 3, e.cx, e.cy);
+        if (d < bestD) { bestD = d; best = e; }
+      }
+      if (best) {
+        const a = Math.atan2(best.cy - (this.y - 3), best.cx - this.x);
+        this.game.projectiles.push(new Projectile({
+          x: this.x, y: this.y - 3,
+          vx: Math.cos(a) * cfg.shotSpeed, vy: Math.sin(a) * cfg.shotSpeed,
+          damage: cfg.damage, kind: 'bolt', team: 'player',
+          maxDist: cfg.range + 8, life: 1.6, owner: this.owner, game: this.game,
+        }));
+        this.facing = sign(Math.cos(a)) || 1;
+        burst(this.x, this.y - 3, 3, {
+          color: '#e08a68', speedMin: 10, speedMax: 50, lifeMin: 0.1, lifeMax: 0.25,
+          angle: a, spread: 0.5, gravity: 0,
+        });
+      }
+    }
+    if (Math.random() < dt * 8) {
+      spawnParticle({
+        x: this.x + rand(-3, 3), y: this.y, vx: rand(-8, 8), vy: rand(-16, -4),
+        life: rand(0.2, 0.45), size: 1, color: Theme.groundEdge, gravity: 80,
+        kind: 'smoke', glow: false,
+      });
+    }
+  }
+
   updateNukerang(dt) {
     const o = this.owner;
     this.wobble += dt;
@@ -1694,6 +2078,13 @@ export class Projectile {
         target.damage(this.damage, { angle: this.angle, spread: 0.9, knockback: 30, dir: sign(this.vx) });
         if (this.game?.player) this.game.player.registerHit();
         if (this.mark) target.applyMark();
+        if (this.poison && !target.dead) {
+          target.applyPoison();
+          burst(this.x, this.y, 9, {
+            color: '#a8e04a', color2: '#eaffb0', speedMin: 20, speedMax: 100,
+            lifeMin: 0.2, lifeMax: 0.55, gravity: 140,
+          });
+        }
       }
     } else {
       target.hurt(this.damage, this.x);
@@ -1703,7 +2094,38 @@ export class Projectile {
 
   draw(ctx) {
     ctx.save();
-    if (this.kind === 'slime') {
+    if (this.kind === 'spearling') {
+      // a grub humping along the floor, head up when it is about to spit
+      const f = this.facing ?? sign(this.vx) ?? 1;
+      const hump = Math.abs(Math.sin(this.t * 9)) * 2;
+      const x = Math.round(this.x), y = Math.round(this.y);
+      const ink = inkFor('#c86a4a');
+      pxSolid(ctx, x - 5, y - 4 - hump, 4, 4, '#c86a4a', { ink, light: null, dark: null });
+      pxSolid(ctx, x - 1, y - 5, 4, 5, '#c86a4a', { ink, light: '#e08a68', dark: null });
+      pxRect(ctx, x + f * 2, y - 4, 2, 2, '#2a0e10');
+      glowEye(ctx, x + f * 2, y - 5, 1, 1, '#fff3b0', 0.2);
+      const charge = clamp((this.shotT ?? 0) / SPEARLING.interval, 0, 1);
+      if (charge > 0.75) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        glowDot(ctx, x + f * 3, y - 4, 5 * (charge - 0.75) * 4, '#e08a68', 0.4);
+        ctx.restore();
+      }
+    } else if (this.kind === 'dart') {
+      // a needle with a wet green bead behind the point
+      ctx.translate(Math.round(this.x), Math.round(this.y));
+      ctx.rotate(this.angle);
+      for (let i = 0; i < this.trail.length; i += 2) {
+        const k = i / this.trail.length;
+        pxRect(ctx, -6 - i, -0.5, 2, 1, rgba('#a8e04a', k * 0.35 * Theme.trail));
+      }
+      pxRect(ctx, -6, -1, 10, 2, Theme.steelDark);
+      pxRect(ctx, 2, -1, 5, 2, '#eef4ff');
+      pxRect(ctx, -2, -1, 4, 2, '#a8e04a');
+      pxRect(ctx, -7, -2, 3, 4, '#5a8a2a');
+      ctx.globalCompositeOperation = 'lighter';
+      glowDot(ctx, 0, 0, 7, '#a8e04a', 0.35);
+    } else if (this.kind === 'slime') {
       const wob = Math.sin(this.t * 22) * 1;
       glowDot(ctx, this.x, this.y, 8, Theme.slime, 0.35);
       pxRect(ctx, this.x - 3, this.y - 2 + wob, 6, 5, Theme.slime);
@@ -2229,6 +2651,52 @@ export class Player {
     if (!before && this.onGround) this.onLand();
   }
 
+  // A stab, not an arc: everything in a narrow line ahead is skewered at
+  // once, and each one skewered sprouts a worm from the spear tip.
+  doThrust() {
+    const a = this.aim;
+    const cfg = WORM_SPEAR;
+    const reach = cfg.range + (this.armorBuff?.meleeRange ?? 0) * BLOCK;
+    const dmg = Math.round(this.boosted(cfg.damage, 'melee') * (1 + (this.armorBuff?.meleeDamage ?? 0)));
+    this.swing = { t: 0, angle: a, kind: 'thrust', range: reach, arc: cfg.arc };
+    Sfx.swing();
+    const fiery = this.inventory.has('fireyblade');
+    for (const e of this.game.enemies) {
+      if (e.dead || e.spawnT > 0 || e.untargetable) continue;
+      const nx = clamp(this.x, e.cx - e.w / 2, e.cx + e.w / 2);
+      const ny = clamp(this.cy, e.cy - e.h / 2, e.cy + e.h / 2);
+      const d = dist(this.x, this.cy, nx, ny);
+      if (d > reach) continue;
+      const ang = Math.atan2(ny - this.cy, nx - this.x);
+      if (d > 2 && Math.abs(shortAngle(a, ang)) > cfg.arc) continue;
+      this.registerHit();
+      const burned = fiery && Math.random() < PERK.burnChance;
+      e.damage(dmg, {
+        knockback: 90, fromX: this.x, angle: ang, spread: 0.4,
+        color: burned ? Theme.fire : '#ffffff', shake: 3,
+      });
+      if (burned && !e.dead) e.applyBurn();
+      // the spawn comes off the tip, not out of the enemy
+      for (let i = 0; i < cfg.spawnPerHit; i++) this.spawnSpearling(a);
+    }
+    burst(this.x + Math.cos(a) * reach * 0.7, this.cy + Math.sin(a) * reach * 0.7, 8, {
+      color: '#e08a68', color2: '#ffffff', speedMin: 30, speedMax: 120,
+      lifeMin: 0.12, lifeMax: 0.3, angle: a, spread: 0.5, gravity: 60,
+    });
+  }
+
+  spawnSpearling(a) {
+    const cfg = WORM_SPEAR;
+    const tipX = this.x + Math.cos(a) * cfg.range;
+    const tipY = this.cy + Math.sin(a) * cfg.range;
+    this.game.projectiles.push(new Projectile({
+      x: clamp(tipX, 8, VIEW_W - 8), y: Math.min(tipY, GROUND_Y - 4),
+      vx: Math.cos(a) >= 0 ? SPEARLING.speed : -SPEARLING.speed, vy: 0,
+      damage: 0, kind: 'spearling', team: 'player',
+      life: SPEARLING.life, owner: this, game: this.game,
+    }));
+  }
+
   releaseNukerang() {
     const a = this.throwAim;
     const pr = new Projectile({
@@ -2587,6 +3055,7 @@ export class Player {
     if (!weapon) return null;
     if (weapon.weapon === 'bow') return BOW;
     if (weapon.weapon === 'shardgun') return SHARDGUN;
+    if (weapon.weapon === 'stingergun') return STINGER_GUN;
     return null;
   }
 
@@ -2695,6 +3164,28 @@ export class Player {
         this.doSwing(SWORD.range + reach,
                      Math.round(this.boosted(SWORD.damage, 'melee') * dmgMult), SWORD.arc);
       }
+    } else if (weapon.weapon === 'spear') {
+      this.attackCd = WORM_SPEAR.cooldown * (1 + (this.armorBuff?.meleeCooldown ?? 0));
+      this.doThrust();
+    } else if (weapon.weapon === 'stingergun') {
+      if (this.reloadT > 0) return;
+      if (this.ammo <= 0) { this.startReload(); return; }
+      this.attackCd = STINGER_GUN.cooldown;
+      this.ammo--;
+      const a = this.aim;
+      this.game.projectiles.push(new Projectile({
+        x: this.x + Math.cos(a) * 10, y: this.cy + Math.sin(a) * 10,
+        vx: Math.cos(a) * STINGER_GUN.speed, vy: Math.sin(a) * STINGER_GUN.speed,
+        damage: this.boosted(STINGER_GUN.damage, 'bow'), kind: 'dart', team: 'player',
+        maxDist: STINGER_GUN.range, life: 3, poison: true, game: this.game,
+      }));
+      this.swing = { t: 0, angle: a, kind: 'bow' };
+      Sfx.bow();
+      Camera.add(1.4);
+      burst(this.x + Math.cos(a) * 12, this.cy + Math.sin(a) * 12, 5, {
+        color: '#a8e04a', color2: '#eaffb0', speedMin: 20, speedMax: 90,
+        lifeMin: 0.1, lifeMax: 0.3, angle: a, spread: 0.4, gravity: 0,
+      });
     } else if (weapon.weapon === 'paper') {
       // paper never fires directly: it opens the fold wheel and waits
       this.game.openFoldWheel();
@@ -2733,7 +3224,8 @@ export class Player {
     this.attackCd = C.cooldown;
     this.ammo--;
     const a = this.aim;
-    const mark = this.inventory.has('lightningarrow');
+    // Lightning Arrow is exactly that - an arrow perk. Shards are not arrows,
+    // so they never carry the mark.
     const game = this.game;
     const aimAt = () => ({ x: Input.mouse.x, y: Input.mouse.y });
     for (let i = 0; i < C.pellets; i++) {
@@ -2745,7 +3237,7 @@ export class Player {
         vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
         damage: this.boosted(C.damage, 'shardgun'), baseDamage: this.boosted(C.damage, 'shardgun'),
         kind: 'shard', shardPhase: 'fly',
-        team: 'player', life: 6, mark, splinterAim: aimAt, game,
+        team: 'player', life: 6, splinterAim: aimAt, game,
       }));
     }
     this.swing = { t: 0, angle: a, kind: 'bow' };

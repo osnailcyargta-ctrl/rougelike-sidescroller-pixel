@@ -101,6 +101,18 @@ export const ITEMS = {
     desc: ['+50% damage with your own class\'s', 'weapons while it is held.',
            'Costs you 5 max HP.'],
   },
+  stingergun: {
+    id: 'stingergun', name: 'Stinger Gun', rarity: 'rare', stack: 1, weapon: 'stingergun',
+    desc: ['Ranged weapon. 3 darts, 1.4s reload.', '20 damage, and every dart poisons:',
+           'it burns and drags at once.',
+           'Darts are not arrows - lightning', 'never touches them.'],
+  },
+  wormspear: {
+    id: 'wormspear', name: 'Worm Spear', rarity: 'rare', stack: 1, weapon: 'spear',
+    desc: ['Melee. 4 block thrust, 24 damage.', 'Stabs in a line instead of swinging.',
+           'Every enemy it skewers sprouts a', 'worm from the tip, which crawls off',
+           'and spits at whatever it passes.'],
+  },
   shardgun: {
     id: 'shardgun', name: 'Shardgun', rarity: 'rare', stack: 1, weapon: 'shardgun',
     desc: ['Ranged weapon. 1 shell, 1.5s reload.', 'Fires 5 shards over 5 blocks; they',
@@ -454,6 +466,31 @@ export function drawItemIcon(ctx, id, x, y, s = 12, t = 0) {
         P(2, 10 + lift, 3, 1, dark);
         P(7, 10 + lift, 3, 1, dark);
       }
+      break;
+    }
+    case 'stingergun': {
+      // a slim dart gun: barrel, grip, and a green bead venting at the muzzle
+      P(1, 6, 7, 2, Theme.steelDark);
+      P(1, 5, 6, 1, Theme.steel);
+      P(2, 8, 2, 3, '#3a5a2a');
+      P(8, 5, 3, 3, Theme.steel);
+      const pulse = 0.5 + 0.5 * Math.sin(t * 6);
+      P(10, 6, 2, 1, '#a8e04a');
+      P(11 + Math.sin(t * 5) * 0.5, 5.5, 1, 1, pulse > 0.5 ? '#eaffb0' : '#a8e04a');
+      P(4, 3, 1, 2, '#a8e04a');
+      break;
+    }
+    case 'wormspear': {
+      // a long shaft with a barbed head, and a grub coiled at the base
+      P(2, 9, 8, 1, '#6a4a2a');
+      P(3, 8, 7, 1, '#8a6238');
+      P(9, 6, 3, 3, Theme.steel);
+      P(10, 7, 2, 1, '#ffffff');
+      P(8, 8, 2, 1, Theme.steelDark);
+      const wig = Math.sin(t * 4) * 0.6;
+      P(1, 6 + wig, 3, 2, '#c86a4a');
+      P(2, 5.5 + wig, 2, 1, '#e08a68');
+      P(1, 6 + wig, 1, 1, '#2a1018');
       break;
     }
     case 'shardgun': {

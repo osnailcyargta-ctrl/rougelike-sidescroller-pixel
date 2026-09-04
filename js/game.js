@@ -11,7 +11,7 @@ import { PostFX, parseShaderPack, DEFAULT_COMPOSITE } from './postfx.js';
 import {
   VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, DROP_POINT, PERK, WAVES, PLAYER as PCFG,
   BOSS_ROOM_INTERVAL, NUKERANG, FINAL_ROOM, SHARDGUN, TWINDAGGER, SWORD, BOW, ORIGAMI,
-  ARMOR, PAPER_SHIELD, ANVIL, GRAPPLE,
+  ARMOR, PAPER_SHIELD, ANVIL, GRAPPLE, WORM_SPEAR,
 } from './config.js';
 import { Player, Enemy, Projectile, SHARD_TINT, INK, doodleShape, doodleLine } from './entities.js';
 import { makeBoss } from './boss.js';
@@ -363,6 +363,7 @@ export class Game {
   // Called by a boss the moment its pool empties.
   onBossDefeated(boss) {
     if (this.screen !== 'playing') return;
+    this.rollBossDrop(boss);
     this.cutscene.play('outro', boss);
   }
 
@@ -928,20 +929,32 @@ export class Game {
   // A regular enemy leaving a weapon behind: it drops where the body broke and
   // falls to whatever is under it, ready to be picked up.
   rollEnemyDrop(enemy) {
-    const id = enemy.def.dropId;
+    this.rollWeaponDrop(enemy.def.dropId, enemy.def.dropChance ?? 0.1, enemy.cx, enemy.cy);
+  }
+
+  // Bosses do not carry a dropId, so Big Dude's spear is rolled by hand when
+  // its pool empties.
+  rollBossDrop(boss) {
+    if (!boss || boss.def.id !== 'bigdude') return;
+    const x = clamp(boss.hx ?? VIEW_W / 2, 20, VIEW_W - 20);
+    const y = Math.min(boss.hy ?? GROUND_Y - 20, GROUND_Y - 20);
+    this.rollWeaponDrop('wormspear', WORM_SPEAR.dropFromBoss, x, y);
+  }
+
+  rollWeaponDrop(id, chance, x, y) {
     if (!id || !ITEMS[id]) return;
     if (this.player && this.player.inventory.has(id)) return;   // one is enough
-    if (Math.random() >= (enemy.def.dropChance ?? 0.1)) return;
-    const pk = new Pickup(id, enemy.cx, enemy.cy, null, {
+    if (Math.random() >= chance) return;
+    const pk = new Pickup(id, x, y, null, {
       falling: true, vx: rand(-40, 40), vy: rand(-150, -70),
     });
     this.pickups.push(pk);
     const col = RARITY[ITEMS[id].rarity].color;
-    burst(enemy.cx, enemy.cy, 22, {
+    burst(x, y, 22, {
       color: col, color2: '#ffffff', speedMin: 40, speedMax: 190,
       lifeMin: 0.25, lifeMax: 0.7, sizeMax: 3, gravity: 180, drag: 0.9,
     });
-    impactRing(enemy.cx, enemy.cy, { color: col, r0: 2, r1: 46, life: 0.45, width: 2 });
+    impactRing(x, y, { color: col, r0: 2, r1: 46, life: 0.45, width: 2 });
     Sfx.pickup();
   }
 

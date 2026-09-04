@@ -654,12 +654,15 @@ const EARLY_WAVE_COUNTS = { 1: [1, 2], 2: [2, 3] };
 
 export function buildWave(roomIndex, waveIndex) {
   const pool = ['grunt'];
-  if (roomIndex >= 2 || waveIndex === 2) pool.push('stinger');
+  // From room 10 the plain Stinger stops turning up at all: what comes out of
+  // the dark instead is the Mutant, and what it leaves behind is more of them.
+  if (roomIndex >= 2 || waveIndex === 2) pool.push(roomIndex >= 10 ? 'mutantstinger' : 'stinger');
   if (roomIndex >= 2) pool.push('brute');
   if (roomIndex >= 3) pool.push('lurker');
   if (roomIndex >= 4) pool.push('spitter');
   if (roomIndex >= 6) pool.push('shardling');   // golem wreckage, post room 5
   if (roomIndex >= 6) pool.push('wisp');        // and its lamplighter
+  if (roomIndex >= 11) pool.push('smalldude');  // Big Dude's brood, past its room
   // Past room 12 the enemies stop getting stronger, so the rooms get fuller
   // instead. A wave never sends more than the cap, however deep you are.
   const base = 3 + Math.floor((roomIndex - 1) / 2) + Math.max(0, roomIndex - 12);
