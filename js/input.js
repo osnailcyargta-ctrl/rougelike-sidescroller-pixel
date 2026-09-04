@@ -71,6 +71,12 @@ export const Input = {
   time: 0,
   enabled: true,
   _view: null,
+  // --- mobile touch input ---
+  touches: new Map(),      // touch id -> { x, y, sx, sy, startX, startY, startTime }
+  leftJoystick: { x: 0, y: 0, active: false, touchId: null },
+  rightJoystick: { x: 0, y: 0, active: false, touchId: null },
+  mobileButtons: new Map(), // button id -> { pressed, justPressed, touchId, sx, sy, r }
+  mobileSwipes: [],        // { direction, time }
 };
 
 // view = { canvas, toWorld(sx, sy) -> {x, y} }
@@ -145,6 +151,41 @@ export function initInput(view) {
     e.preventDefault();
     Input.wheel += Math.sign(e.deltaY);
   }, { passive: false });
+
+  // --- touch events for mobile ---
+  el.addEventListener('touchstart', (e) => {
+    for (const touch of e.touches) {
+      const r = el.getBoundingClientRect();
+      const sx = touch.clientX - r.left;
+      const sy = touch.clientY - r.top;
+      const w = view.toWorld(sx, sy);
+      Input.touches.set(touch.identifier, {
+        x: w.x, y: w.y, sx, sy, startX: w.x, startY: w.y, startTime: Input.time,
+      });
+    }
+  }, { passive: true });
+
+  el.addEventListener('touchmove', (e) => {
+    for (const touch of e.touches) {
+      const r = el.getBoundingClientRect();
+      const sx = touch.clientX - r.left;
+      const sy = touch.clientY - r.top;
+      const w = view.toWorld(sx, sy);
+      const t = Input.touches.get(touch.identifier);
+      if (t) {
+        t.x = w.x;
+        t.y = w.y;
+        t.sx = sx;
+        t.sy = sy;
+      }
+    }
+  }, { passive: true });
+
+  el.addEventListener('touchend', (e) => {
+    for (const touch of e.changedTouches) {
+      Input.touches.delete(touch.identifier);
+    }
+  }, { passive: true });
 }
 
 export function inputTick(dt) { Input.time += dt; }
@@ -157,6 +198,93 @@ export function inputEndFrame() {
   Input.mouseDown.left = Input.mouseDown.right = false;
   Input.mouseUp.left = Input.mouseUp.right = false;
   Input.wheel = 0;
+  // clear mobile button presses
+  for (const btn of Input.mobileButtons.values()) btn.justPressed = false;
+}
+
+export function initMobileButtons(buttons) {
+  for (const b of buttons) {
+    Input.mobileButtons.set(b.id, { pressed: false, justPressed: false, touchId: null, sx: b.sx, sy: b.sy, r: b.r });
+  }
+}
+
+export function updateMobileInput(canvas) {
+  if (!canvas) return;
+  const r = canvas.getBoundingClientRect();
+
+  // update joystick states based on active touches
+  Input.leftJoystick.active = false;
+  Input.rightJoystick.active = false;
+  Input.leftJoystick.x = 0;
+  Input.leftJoystick.y = 0;
+  Input.rightJoystick.x = 0;
+  Input.rightJoystick.y = 0;
+
+  // mark all buttons as not pressed, but preserve touchId for touch continuation
+  const buttons = Array.from(Input.mobileButtons.values());
+  for (const btn of buttons) {
+    const wasPressed = btn.pressed;
+    btn.pressed = false;
+    btn.justPressed = false;
+    // if button was pressed with a touch that no longer exists, clear touchId
+    if (btn.touchId && !Input.touches.has(btn.touchId)) {
+      btn.touchId = null;
+    }
+  }
+
+  // process touches
+  for (const [tid, touch] of Input.touches) {
+    // check which joystick/button this touch is affecting
+    let hitButton = false;
+    for (const btn of buttons) {
+      const dx = touch.sx - btn.sx;
+      const dy = touch.sy - btn.sy;
+      if (Math.hypot(dx, dy) <= btn.r) {
+        btn.pressed = true;
+        if (!btn.touchId) {
+          btn.justPressed = true;
+          btn.touchId = tid;
+        }
+        hitButton = true;
+        break;
+      }
+    }
+
+    if (!hitButton) {
+      // check joysticks - left is canvas left third, right is canvas right third
+      const canvasW = r.width;
+      if (touch.sx < canvasW / 3) {
+        // left joystick
+        Input.leftJoystick.active = true;
+        Input.leftJoystick.touchId = tid;
+        Input.leftJoystick.x = (touch.x - touch.startX) / 30;
+        Input.leftJoystick.y = (touch.y - touch.startY) / 30;
+      } else if (touch.sx > (2 * canvasW) / 3) {
+        // right joystick
+        Input.rightJoystick.active = true;
+        Input.rightJoystick.touchId = tid;
+        Input.rightJoystick.x = (touch.x - touch.startX) / 30;
+        Input.rightJoystick.y = (touch.y - touch.startY) / 30;
+      }
+    }
+  }
+
+  // detect double-swipes for dash
+  const now = Input.time;
+  const swipeThreshold = 0.2; // 200ms window for double swipe
+  Input.mobileSwipes = Input.mobileSwipes.filter((s) => now - s.time < swipeThreshold);
+}
+
+export function detectMobileSwipe(direction) {
+  const now = Input.time;
+  const existing = Input.mobileSwipes.filter((s) => s.direction === direction && now - s.time < 0.2);
+  if (existing.length > 0) {
+    // double swipe detected
+    Input.mobileSwipes = Input.mobileSwipes.filter((s) => s.direction !== direction);
+    return true;
+  }
+  Input.mobileSwipes.push({ direction, time: now });
+  return false;
 }
 
 export const key = (k) => Input.keys.has(k);

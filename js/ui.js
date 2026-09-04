@@ -842,3 +842,113 @@ export function drawDebugMenu(ctx, game) {
   drawTextShadow(ctx, 'CTRL+M', x + w - 8, y + 6, Theme.uiDim, 1, 'right');
   if (UI.tooltip) drawTooltip(ctx, UI.tooltip);
 }
+
+export function drawMobileControls(ctx, game) {
+  const JOYSTICK_R = 32;
+  const BUTTON_R = 18;
+  const MARGIN = 16;
+
+  // draw left joystick (movement)
+  const ljx = MARGIN + JOYSTICK_R;
+  const ljy = VIEW_H - MARGIN - JOYSTICK_R;
+  ctx.fillStyle = rgba(Theme.uiAccent, 0.15);
+  ctx.beginPath();
+  ctx.arc(ljx, ljy, JOYSTICK_R, 0, TAU);
+  ctx.fill();
+  ctx.strokeStyle = rgba(Theme.uiAccent, 0.5);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  if (Input.leftJoystick.active) {
+    ctx.fillStyle = rgba(Theme.uiAccent, 0.4);
+    ctx.beginPath();
+    ctx.arc(
+      ljx + Input.leftJoystick.x * 20,
+      ljy + Input.leftJoystick.y * 20,
+      8,
+      0,
+      TAU,
+    );
+    ctx.fill();
+  } else {
+    ctx.fillStyle = rgba(Theme.uiAccent, 0.3);
+    ctx.beginPath();
+    ctx.arc(ljx, ljy, 6, 0, TAU);
+    ctx.fill();
+  }
+
+  // draw right joystick (aiming)
+  const rjx = VIEW_W - MARGIN - JOYSTICK_R;
+  const rjy = VIEW_H - MARGIN - JOYSTICK_R;
+  ctx.fillStyle = rgba(Theme.ui, 0.15);
+  ctx.beginPath();
+  ctx.arc(rjx, rjy, JOYSTICK_R, 0, TAU);
+  ctx.fill();
+  ctx.strokeStyle = rgba(Theme.ui, 0.5);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  if (Input.rightJoystick.active) {
+    ctx.fillStyle = rgba(Theme.ui, 0.4);
+    ctx.beginPath();
+    ctx.arc(
+      rjx + Input.rightJoystick.x * 20,
+      rjy + Input.rightJoystick.y * 20,
+      8,
+      0,
+      TAU,
+    );
+    ctx.fill();
+  } else {
+    ctx.fillStyle = rgba(Theme.ui, 0.3);
+    ctx.beginPath();
+    ctx.arc(rjx, rjy, 6, 0, TAU);
+    ctx.fill();
+  }
+
+  // draw buttons
+  // right side buttons: grapple (top), shoot (middle), interact (bottom)
+  const rbx = VIEW_W - MARGIN - BUTTON_R;
+  const rbTop = MARGIN + BUTTON_R;
+  const rbMid = VIEW_H / 2;
+  const rbBot = VIEW_H - MARGIN - BUTTON_R;
+
+  // left side buttons: auto-attack (top), inventory (bottom)
+  const lbx = MARGIN + BUTTON_R;
+  const lbTop = VIEW_H / 2 + 12;
+  const lbBot = VIEW_H - MARGIN - BUTTON_R;
+
+  // pause button (left top)
+  const pbx = MARGIN + BUTTON_R;
+  const pby = MARGIN + BUTTON_R;
+
+  const buttons = [
+    { id: 'grapple', sx: rbx, sy: rbTop, r: BUTTON_R, label: 'G' },
+    { id: 'shoot', sx: rbx, sy: rbMid, r: BUTTON_R, label: 'S' },
+    { id: 'interact', sx: rbx, sy: rbBot, r: BUTTON_R, label: 'I' },
+    { id: 'autoAttack', sx: lbx, sy: lbTop, r: BUTTON_R, label: 'A' },
+    { id: 'inventory', sx: lbx, sy: lbBot, r: BUTTON_R, label: 'E' },
+    { id: 'pause', sx: pbx, sy: pby, r: BUTTON_R, label: 'P' },
+  ];
+
+  // initialize buttons if not done
+  if (Input.mobileButtons.size === 0) {
+    for (const b of buttons) {
+      Input.mobileButtons.set(b.id, {
+        pressed: false, justPressed: false, touchId: null, sx: b.sx, sy: b.sy, r: b.r,
+      });
+    }
+  }
+
+  // draw each button
+  for (const b of buttons) {
+    const btn = Input.mobileButtons.get(b.id);
+    const color = b.id === 'pause' ? Theme.uiDim : (b.id.includes('Left') || b.id === 'autoAttack' || b.id === 'inventory' ? Theme.uiAccent : Theme.platformGlow);
+    ctx.fillStyle = rgba(color, btn?.pressed ? 0.4 : 0.15);
+    ctx.beginPath();
+    ctx.arc(b.sx, b.sy, BUTTON_R, 0, TAU);
+    ctx.fill();
+    ctx.strokeStyle = rgba(color, btn?.pressed ? 0.8 : 0.5);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    drawText(ctx, b.label, b.sx, b.sy - 2, color, 0.8, 'center');
+  }
+}

@@ -5,7 +5,7 @@ import {
   Camera, updateFx, drawParticles, drawTexts, drawRings, clearFx, burst, floatText,
   spawnParticle, impactRing, boltPath, strokeBolt, glowDot, pxRect, screenFlash, drawFlash,
 } from './gfx.js';
-import { Input, initInput, inputTick, inputEndFrame, Binds } from './input.js';
+import { Input, initInput, inputTick, inputEndFrame, updateMobileInput, initMobileButtons, detectMobileSwipe, Binds } from './input.js';
 import { Sfx, resumeAudio, setVolume, AudioCfg } from './audio.js';
 import { PostFX, parseShaderPack, DEFAULT_COMPOSITE } from './postfx.js';
 import {
@@ -18,7 +18,7 @@ import { makeBoss } from './boss.js';
 import { Cutscene } from './cutscene.js';
 import { drawBackground, drawArena, drawLightShafts, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal, Anvil } from './world.js';
 import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
-import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, drawForge, panel, button } from './ui.js';
+import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, drawForge, drawMobileControls, panel, button } from './ui.js';
 import { drawText, drawTextShadow } from './font.js';
 import { Options, loadOptions, saveOptions, applyVisualOptions, captureShaderBase, saveShader, loadShader } from './settings.js';
 import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, drawControls, drawVictory } from './screens.js';
@@ -919,6 +919,8 @@ export class Game {
     let dt = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
     inputTick(dt);
+    if (Options.mobileControls) updateMobileInput(this.display);
+    this.processMobileInput();
     uiBeginFrame(dt);
     this.time += dt;
     if (this.hintT > 0) this.hintT -= dt;
@@ -979,6 +981,56 @@ export class Game {
     } else if (this.screen === 'settings' || this.screen === 'controls' || this.screen === 'classSelect') {
       this.screen = this.returnScreen || 'menu';
       this.returnScreen = null;
+    }
+  }
+
+  processMobileInput() {
+    if (!Options.mobileControls || this.screen !== 'playing') return;
+    const p = this.player;
+    if (!p || p.dead) return;
+
+    // clear joystick keys from previous frame
+    Input.keys.delete(Binds.left);
+    Input.keys.delete(Binds.right);
+    Input.keys.delete(Binds.jump);
+    Input.keys.delete(Binds.down);
+
+    // left joystick to movement keys
+    if (Input.leftJoystick.active) {
+      if (Input.leftJoystick.x < -0.3) Input.keys.add(Binds.left);
+      if (Input.leftJoystick.x > 0.3) Input.keys.add(Binds.right);
+      if (Input.leftJoystick.y < -0.3) Input.keys.add(Binds.jump);
+      if (Input.leftJoystick.y > 0.3) Input.keys.add(Binds.down);
+    }
+
+    // right joystick to aim (update mouse position)
+    if (Input.rightJoystick.active) {
+      Input.mouse.x = p.x + Input.rightJoystick.x * 80;
+      Input.mouse.y = p.cy + Input.rightJoystick.y * 80;
+    }
+
+    // mobile buttons
+    const grappleBtn = Input.mobileButtons.get('grapple');
+    const shootBtn = Input.mobileButtons.get('shoot');
+    const autoAttackBtn = Input.mobileButtons.get('autoAttack');
+    const inventoryBtn = Input.mobileButtons.get('inventory');
+    const interactBtn = Input.mobileButtons.get('interact');
+    const pauseBtn = Input.mobileButtons.get('pause');
+
+    if (grappleBtn?.justPressed) Input.pressed.add(Binds.grapple);
+    if (shootBtn?.pressed) Input.mouse.left = true;
+    if (autoAttackBtn?.pressed && Input.leftJoystick.active) Input.mouse.left = true;
+    if (inventoryBtn?.justPressed) Input.pressed.add(Binds.inventory);
+    if (interactBtn?.justPressed) Input.mouse.right = true;
+    if (pauseBtn?.justPressed) Input.pressed.add('Escape');
+
+    // detect double-swipe for dash (left swipe: move left joystick from center to left quickly)
+    if (Input.leftJoystick.active && Math.abs(Input.leftJoystick.y) < 0.3) {
+      if (Input.leftJoystick.x < -0.7 && detectMobileSwipe('left')) {
+        Input.doubleTap.add(Binds.left);
+      } else if (Input.leftJoystick.x > 0.7 && detectMobileSwipe('right')) {
+        Input.doubleTap.add(Binds.right);
+      }
     }
   }
 
@@ -1332,6 +1384,7 @@ export class Game {
     if (this.forge) drawForge(ctx, this);
     if (this.invOpen) drawInventory(ctx, this);
     else if (UI.tooltip) drawTooltip(ctx, UI.tooltip);
+    if (Options.mobileControls && this.screen === 'playing') drawMobileControls(ctx, this);
 
     if (this.screen === 'paused') drawPause(ctx, this, this.time);
     if (this.screen === 'gameover') drawGameOver(ctx, this, this.time);

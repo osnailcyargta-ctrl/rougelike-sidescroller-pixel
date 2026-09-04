@@ -190,7 +190,8 @@ export function drawMainMenu(ctx, game, t) {
 const TABS = [
   { id: 'indicator', label: 'INDICATORS' },
   { id: 'visual', label: 'VISUALS' },
-  { id: 'binds', label: 'CONTROLS' },
+  { id: 'controls', label: 'CONTROLS' },
+  { id: 'binds', label: 'KEY BINDS' },
 ];
 
 export function drawSettings(ctx, game, t) {
@@ -214,6 +215,7 @@ export function drawSettings(ctx, game, t) {
 
   if (UI.tab === 'binds') drawBindsTab(ctx, game, t);
   else if (UI.tab === 'visual') drawVisualTab(ctx, game, t);
+  else if (UI.tab === 'controls') drawControlsTab(ctx, game, t);
   else drawIndicatorTab(ctx, game, t);
 
   if (button(ctx, 'back', VIEW_W / 2 - 45, VIEW_H - 20, 90, 15, 'BACK')) {
@@ -221,6 +223,20 @@ export function drawSettings(ctx, game, t) {
     game.screen = game.returnScreen || 'menu';
     game.returnScreen = null;
   }
+}
+
+// Input settings tab - mobile controls toggle
+function drawControlsTab(ctx, game, t) {
+  const x = 40, y = 50;
+  const on = !!Options.mobileControls;
+  drawText(ctx, 'MOBILE CONTROLS', x, y + 4, on ? Theme.ui : Theme.uiDim, 1);
+  if (button(ctx, 'optMobileControls', x + 186 - 38, y, 38, 13, on ? 'ON' : 'OFF', { selected: on })) {
+    Options.mobileControls = !on;
+    saveOptions();
+    Sfx.ui();
+  }
+  drawText(ctx, 'ENABLES ON-SCREEN JOYSTICKS AND BUTTONS FOR TOUCH DEVICES',
+           VIEW_W / 2, VIEW_H - 36, rgba(Theme.uiDim, 0.75), 1, 'center');
 }
 
 // Two columns of switches. Nothing here changes the game, only what it is

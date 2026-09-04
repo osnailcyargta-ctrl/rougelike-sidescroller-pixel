@@ -10,6 +10,9 @@ const SHADER_KEY = 'aether.shader.v1';
 
 // name -> { label, group, type, default, min, max, help }
 export const OPTION_DEFS = [
+  // --- controls
+  { id: 'mobileControls', label: 'MOBILE CONTROLS', group: 'control', type: 'bool', def: false },
+
   // --- indicators
   { id: 'showFps', label: 'SHOW FPS', group: 'indicator', type: 'bool', def: false },
   { id: 'showRange', label: 'SHOW WEAPON RANGE', group: 'indicator', type: 'bool', def: false },
