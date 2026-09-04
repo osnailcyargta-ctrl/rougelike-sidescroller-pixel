@@ -190,8 +190,8 @@ export function drawMainMenu(ctx, game, t) {
 const TABS = [
   { id: 'indicator', label: 'INDICATORS' },
   { id: 'visual', label: 'VISUALS' },
-  { id: 'controls', label: 'CONTROLS' },
-  { id: 'binds', label: 'KEY BINDS' },
+  { id: 'binds', label: 'KEYS' },
+  { id: 'touch', label: 'TOUCH' },
 ];
 
 export function drawSettings(ctx, game, t) {
@@ -215,7 +215,7 @@ export function drawSettings(ctx, game, t) {
 
   if (UI.tab === 'binds') drawBindsTab(ctx, game, t);
   else if (UI.tab === 'visual') drawVisualTab(ctx, game, t);
-  else if (UI.tab === 'controls') drawControlsTab(ctx, game, t);
+  else if (UI.tab === 'touch') drawTouchTab(ctx, game, t);
   else drawIndicatorTab(ctx, game, t);
 
   if (button(ctx, 'back', VIEW_W / 2 - 45, VIEW_H - 20, 90, 15, 'BACK')) {
@@ -225,18 +225,75 @@ export function drawSettings(ctx, game, t) {
   }
 }
 
-// Input settings tab - mobile controls toggle
-function drawControlsTab(ctx, game, t) {
-  const x = 40, y = 50;
+// The on-screen pad: one switch to raise it, two dials to fit it to the hand,
+// and a legend, because nothing on the pad is labelled with a key name.
+function drawTouchTab(ctx, game, t) {
   const on = !!Options.mobileControls;
-  drawText(ctx, 'MOBILE CONTROLS', x, y + 4, on ? Theme.ui : Theme.uiDim, 1);
-  if (button(ctx, 'optMobileControls', x + 186 - 38, y, 38, 13, on ? 'ON' : 'OFF', { selected: on })) {
+  drawText(ctx, 'TWO THUMBS, NO KEYBOARD', VIEW_W / 2, 50, Theme.uiDim, 1, 'center');
+
+  // left column: the switches. Sliders share one column so the readouts line
+  // up and stay clear of the legend on the right.
+  const x = 34, ctl = x + 120, read = x + 206;
+  let y = 64;
+  drawText(ctx, 'ON-SCREEN CONTROLS', x, y + 4, on ? Theme.ui : Theme.uiDim, 1);
+  if (button(ctx, 'opt-mobile', ctl, y, 44, 14, on ? 'ON' : 'OFF', { selected: on })) {
     Options.mobileControls = !on;
     saveOptions();
     Sfx.ui();
   }
-  drawText(ctx, 'ENABLES ON-SCREEN JOYSTICKS AND BUTTONS FOR TOUCH DEVICES',
-           VIEW_W / 2, VIEW_H - 36, rgba(Theme.uiDim, 0.75), 1, 'center');
+  y += 22;
+
+  for (const d of optionsIn('touch')) {
+    if (d.type !== 'range') continue;
+    const max = d.max ?? 1;
+    const cur = clamp((Options[d.id] ?? d.def) / max, 0, 1);
+    drawText(ctx, d.label, x, y + 2, on ? Theme.ui : Theme.uiDim, 1);
+    const next = slider(ctx, 'ts-' + d.id, ctl, y + 1, 44, cur);
+    if (Math.abs(next - cur) > 0.0005) {
+      Options[d.id] = next * max;
+      saveOptions();
+    }
+    drawText(ctx, `${Math.round((Options[d.id] ?? 0) * 100)}%`, read, y + 2, Theme.uiDim, 1, 'right');
+    y += 16;
+  }
+
+  const gy = y + 10;
+  drawText(ctx, 'GESTURES', x, gy, Theme.platformGlow, 1);
+  const gest = [
+    'FLICK THE MOVE STICK LEFT',
+    'OR RIGHT TWICE TO DASH.',
+    '',
+    'FLICK IT DOWN TWICE IN',
+    'THE AIR TO GROUND SLAM.',
+    '',
+    'TAP A HOTBAR SLOT TO',
+    'SWAP WEAPON.',
+  ];
+  let ggy = gy + 13;
+  for (const line of gest) {
+    if (line) drawText(ctx, line, x, ggy, on ? Theme.uiDim : rgba(Theme.uiDim, 0.55), 1);
+    ggy += 10;
+  }
+
+  // right column: what each control does, since none of them carry a key name
+  const lx = 250, vx = lx + 72;
+  drawText(ctx, 'THE PAD', lx, 64, Theme.platformGlow, 1);
+  const legend = [
+    ['LEFT STICK', 'MOVE / JUMP / DROP'],
+    ['RIGHT STICK', 'AIM'],
+    ['FIRE', 'ATTACK (HOLD)'],
+    ['HOOK', 'GRAPPLE'],
+    ['USE', 'INTERACT'],
+    ['AUTO', 'FIRE WHILE AIMING'],
+    ['BAG', 'INVENTORY'],
+    ['PAUSE', 'TOP LEFT CORNER'],
+  ];
+  let ly = 78;
+  for (const [k, v] of legend) {
+    drawText(ctx, k, lx, ly, on ? Theme.uiAccent : Theme.uiDim, 1);
+    drawText(ctx, v, vx, ly, Theme.uiDim, 1);
+    ly += 11;
+  }
 }
 
 // Two columns of switches. Nothing here changes the game, only what it is

@@ -71,15 +71,55 @@ export const Input = {
   time: 0,
   enabled: true,
   _view: null,
-  // --- mobile touch input ---
-  touches: new Map(),      // touch id -> { x, y, sx, sy, startX, startY, startTime }
-  leftJoystick: { x: 0, y: 0, active: false, touchId: null },
-  rightJoystick: { x: 0, y: 0, active: false, touchId: null },
-  mobileButtons: new Map(), // button id -> { pressed, justPressed, touchId, sx, sy, r }
-  mobileSwipes: [],        // { direction, time }
+  // --- touch ---
+  // Every touch is queued as an event and drained once per frame, so a tap
+  // that begins and ends between two frames is still seen. touchLive carries
+  // the latest sample of each finger still on the glass.
+  touchQueue: [],
+  touchLive: new Map(),
+  touchSeen: false,        // sticky: this device has produced a touch at all
 };
 
-// view = { canvas, toWorld(sx, sy) -> {x, y} }
+// A key press from a source other than the keyboard (the on-screen pad) walks
+// exactly the same path a real key does, so double taps, holds and releases
+// behave identically no matter where they came from.
+function pressKey(k, typed) {
+  if (Input.keys.has(k)) return;
+  Input.keys.add(k);
+  Input.pressed.add(k);
+  if (typed) {
+    if (k.length === 1) Input.typed.push(k);
+    else if (k === 'Backspace' || k === 'Enter') Input.typed.push(k);
+  }
+  const now = Input.time;
+  const lastDown = Input.lastTap.get(k) ?? -99;
+  const lastUp = Input.lastUp.get(k) ?? -99;
+  // The key really came back up. Equal stamps count: a tap fast enough to
+  // land its press and release inside one frame shares a timestamp with them,
+  // and that is a real double tap, not a held key.
+  const released = lastUp >= lastDown;
+  if (released && now - lastDown < DOUBLE_TAP_WINDOW) {
+    Input.doubleTap.add(k);
+    Input.lastTap.set(k, -99);   // a third tap needs a fresh pair
+  } else {
+    Input.lastTap.set(k, now);
+  }
+}
+
+function releaseKey(k) {
+  if (!Input.keys.has(k)) return;
+  Input.keys.delete(k);
+  Input.released.add(k);
+  Input.lastUp.set(k, Input.time);
+}
+
+export function virtualKeyDown(k) { pressKey(k, false); }
+export function virtualKeyUp(k) { releaseKey(k); }
+// A press and release inside one frame: for buttons that only ever fire an
+// edge, so nothing is left held if the finger is lost.
+export function virtualKeyTap(k) { pressKey(k, false); releaseKey(k); }
+
+// view = { canvas, toWorld(sx, sy) -> {x, y}, toView(sx, sy) -> {x, y} }
 export function initInput(view) {
   loadBinds();
   Input._view = view;
@@ -96,28 +136,13 @@ export function initInput(view) {
       if (!e.repeat) Input.pressed.add('ctrl+m');
       return;
     }
-    if (e.repeat || Input.keys.has(k)) return;
-    Input.keys.add(k);
-    Input.pressed.add(k);
-    if (k.length === 1) Input.typed.push(k);
-    else if (k === 'Backspace' || k === 'Enter') Input.typed.push(k);
-    const now = Input.time;
-    const lastDown = Input.lastTap.get(k) ?? -99;
-    const lastUp = Input.lastUp.get(k) ?? -99;
-    const released = lastUp > lastDown;   // the key really came back up
-    if (released && now - lastDown < DOUBLE_TAP_WINDOW) {
-      Input.doubleTap.add(k);
-      Input.lastTap.set(k, -99);   // a third tap needs a fresh pair
-    } else {
-      Input.lastTap.set(k, now);
-    }
+    if (e.repeat) return;
+    pressKey(k, true);
   });
 
   addEventListener('keyup', (e) => {
     const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-    Input.keys.delete(k);
-    Input.released.add(k);
-    Input.lastUp.set(k, Input.time);
+    releaseKey(k);
   });
 
   addEventListener('blur', () => {
@@ -152,40 +177,39 @@ export function initInput(view) {
     Input.wheel += Math.sign(e.deltaY);
   }, { passive: false });
 
-  // --- touch events for mobile ---
-  el.addEventListener('touchstart', (e) => {
-    for (const touch of e.touches) {
-      const r = el.getBoundingClientRect();
-      const sx = touch.clientX - r.left;
-      const sy = touch.clientY - r.top;
-      const w = view.toWorld(sx, sy);
-      Input.touches.set(touch.identifier, {
-        x: w.x, y: w.y, sx, sy, startX: w.x, startY: w.y, startTime: Input.time,
-      });
-    }
-  }, { passive: true });
+  // --- touch ---------------------------------------------------------------
+  // Sampled in three spaces at once: sx/sy are CSS pixels inside the canvas,
+  // vx/vy are the 480x270 pixel grid the pad is laid out on, and wx/wy are
+  // world coordinates so a touch can stand in for the mouse on the menus.
+  const sample = (t) => {
+    const r = el.getBoundingClientRect();
+    const sx = t.clientX - r.left;
+    const sy = t.clientY - r.top;
+    const v = view.toView(sx, sy);
+    const w = view.toWorld(sx, sy);
+    return { id: t.identifier, sx, sy, vx: v.x, vy: v.y, wx: w.x, wy: w.y };
+  };
 
-  el.addEventListener('touchmove', (e) => {
-    for (const touch of e.touches) {
-      const r = el.getBoundingClientRect();
-      const sx = touch.clientX - r.left;
-      const sy = touch.clientY - r.top;
-      const w = view.toWorld(sx, sy);
-      const t = Input.touches.get(touch.identifier);
-      if (t) {
-        t.x = w.x;
-        t.y = w.y;
-        t.sx = sx;
-        t.sy = sy;
-      }
+  const push = (type) => (e) => {
+    // preventDefault keeps the browser from scrolling, zooming, or firing a
+    // second round of synthetic mouse events on top of every tap
+    e.preventDefault();
+    Input.touchSeen = true;
+    for (const t of e.changedTouches) {
+      const s = sample(t);
+      if (type === 'end') Input.touchLive.delete(s.id);
+      else Input.touchLive.set(s.id, s);
+      Input.touchQueue.push({ type, ...s });
     }
-  }, { passive: true });
+    // the pad drains this every frame; the cap is only here so a stalled
+    // frame cannot let a dragging finger grow the queue without bound
+    if (Input.touchQueue.length > 512) Input.touchQueue.splice(0, Input.touchQueue.length - 512);
+  };
 
-  el.addEventListener('touchend', (e) => {
-    for (const touch of e.changedTouches) {
-      Input.touches.delete(touch.identifier);
-    }
-  }, { passive: true });
+  el.addEventListener('touchstart', push('start'), { passive: false });
+  el.addEventListener('touchmove', push('move'), { passive: false });
+  el.addEventListener('touchend', push('end'), { passive: false });
+  el.addEventListener('touchcancel', push('end'), { passive: false });
 }
 
 export function inputTick(dt) { Input.time += dt; }
@@ -198,93 +222,6 @@ export function inputEndFrame() {
   Input.mouseDown.left = Input.mouseDown.right = false;
   Input.mouseUp.left = Input.mouseUp.right = false;
   Input.wheel = 0;
-  // clear mobile button presses
-  for (const btn of Input.mobileButtons.values()) btn.justPressed = false;
-}
-
-export function initMobileButtons(buttons) {
-  for (const b of buttons) {
-    Input.mobileButtons.set(b.id, { pressed: false, justPressed: false, touchId: null, sx: b.sx, sy: b.sy, r: b.r });
-  }
-}
-
-export function updateMobileInput(canvas) {
-  if (!canvas) return;
-  const r = canvas.getBoundingClientRect();
-
-  // update joystick states based on active touches
-  Input.leftJoystick.active = false;
-  Input.rightJoystick.active = false;
-  Input.leftJoystick.x = 0;
-  Input.leftJoystick.y = 0;
-  Input.rightJoystick.x = 0;
-  Input.rightJoystick.y = 0;
-
-  // mark all buttons as not pressed, but preserve touchId for touch continuation
-  const buttons = Array.from(Input.mobileButtons.values());
-  for (const btn of buttons) {
-    const wasPressed = btn.pressed;
-    btn.pressed = false;
-    btn.justPressed = false;
-    // if button was pressed with a touch that no longer exists, clear touchId
-    if (btn.touchId && !Input.touches.has(btn.touchId)) {
-      btn.touchId = null;
-    }
-  }
-
-  // process touches
-  for (const [tid, touch] of Input.touches) {
-    // check which joystick/button this touch is affecting
-    let hitButton = false;
-    for (const btn of buttons) {
-      const dx = touch.sx - btn.sx;
-      const dy = touch.sy - btn.sy;
-      if (Math.hypot(dx, dy) <= btn.r) {
-        btn.pressed = true;
-        if (!btn.touchId) {
-          btn.justPressed = true;
-          btn.touchId = tid;
-        }
-        hitButton = true;
-        break;
-      }
-    }
-
-    if (!hitButton) {
-      // check joysticks - left is canvas left third, right is canvas right third
-      const canvasW = r.width;
-      if (touch.sx < canvasW / 3) {
-        // left joystick
-        Input.leftJoystick.active = true;
-        Input.leftJoystick.touchId = tid;
-        Input.leftJoystick.x = (touch.x - touch.startX) / 30;
-        Input.leftJoystick.y = (touch.y - touch.startY) / 30;
-      } else if (touch.sx > (2 * canvasW) / 3) {
-        // right joystick
-        Input.rightJoystick.active = true;
-        Input.rightJoystick.touchId = tid;
-        Input.rightJoystick.x = (touch.x - touch.startX) / 30;
-        Input.rightJoystick.y = (touch.y - touch.startY) / 30;
-      }
-    }
-  }
-
-  // detect double-swipes for dash
-  const now = Input.time;
-  const swipeThreshold = 0.2; // 200ms window for double swipe
-  Input.mobileSwipes = Input.mobileSwipes.filter((s) => now - s.time < swipeThreshold);
-}
-
-export function detectMobileSwipe(direction) {
-  const now = Input.time;
-  const existing = Input.mobileSwipes.filter((s) => s.direction === direction && now - s.time < 0.2);
-  if (existing.length > 0) {
-    // double swipe detected
-    Input.mobileSwipes = Input.mobileSwipes.filter((s) => s.direction !== direction);
-    return true;
-  }
-  Input.mobileSwipes.push({ direction, time: now });
-  return false;
 }
 
 export const key = (k) => Input.keys.has(k);

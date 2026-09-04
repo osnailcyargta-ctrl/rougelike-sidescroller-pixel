@@ -10,8 +10,10 @@ const SHADER_KEY = 'aether.shader.v1';
 
 // name -> { label, group, type, default, min, max, help }
 export const OPTION_DEFS = [
-  // --- controls
-  { id: 'mobileControls', label: 'MOBILE CONTROLS', group: 'control', type: 'bool', def: false },
+  // --- touch controls
+  { id: 'mobileControls', label: 'ON-SCREEN CONTROLS', group: 'touch', type: 'bool', def: false },
+  { id: 'touchScale', label: 'PAD SIZE', group: 'touch', type: 'range', def: 1.0, max: 1.5 },
+  { id: 'touchOpacity', label: 'PAD OPACITY', group: 'touch', type: 'range', def: 0.6, max: 1 },
 
   // --- indicators
   { id: 'showFps', label: 'SHOW FPS', group: 'indicator', type: 'bool', def: false },

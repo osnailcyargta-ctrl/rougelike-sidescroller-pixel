@@ -9,6 +9,7 @@ import { ENEMY_TINT } from './entities.js';
 import { Options } from './settings.js';
 import { ITEMS, RARITY, INV_COLS, INV_ROWS, INV_SIZE, HOTBAR_SIZE, ARMOR_SLOTS, Inventory, drawItemIcon } from './items.js';
 import { Input, Binds, BIND_ORDER, BIND_LABELS, bindLabel } from './input.js';
+import { hotbarSlotRect, hudInset } from './layout.js';
 import { Sfx } from './audio.js';
 
 export const UI = {
@@ -199,33 +200,36 @@ export function drawHUD(ctx, game) {
   if (!p) return;
   const t = UI.t;
 
-  // health
+  // health. The touch pad parks a pause button in the corner, so the whole
+  // block slides right to leave it clear.
   const bw = 118;
-  panel(ctx, 6, 6, bw + 10, 22, { alpha: 0.55 });
+  const px = hudInset();
+  const bx = px + 5;
+  panel(ctx, px, 6, bw + 10, 22, { alpha: 0.55 });
   // name what is in your hand, not the class you picked at the start
   const held = p.inventory.selectedWeapon();
   // long weapon names have to give way to the HP readout on the right
   const heldName = (held ? held.name.toUpperCase() : 'UNARMED').slice(0, 17);
-  drawText(ctx, heldName, 11, 9, Theme.uiDim, 1);
+  drawText(ctx, heldName, bx, 9, Theme.uiDim, 1);
   const hpFrac = clamp(p.hp / p.maxHp, 0, 1);
-  pxRect(ctx, 11, 18, bw, 5, Theme.hpBack);
-  const grad = ctx.createLinearGradient(11, 0, 11 + bw, 0);
+  pxRect(ctx, bx, 18, bw, 5, Theme.hpBack);
+  const grad = ctx.createLinearGradient(bx, 0, bx + bw, 0);
   grad.addColorStop(0, Theme.hp);
   grad.addColorStop(1, '#ff9ab0');
   ctx.fillStyle = grad;
-  ctx.fillRect(11, 18, Math.round(bw * hpFrac), 5);
+  ctx.fillRect(bx, 18, Math.round(bw * hpFrac), 5);
   if (hpFrac < 0.3) {
     ctx.fillStyle = rgba('#ffffff', 0.25 + 0.25 * Math.sin(t * 9));
-    ctx.fillRect(11, 18, Math.round(bw * hpFrac), 5);
+    ctx.fillRect(bx, 18, Math.round(bw * hpFrac), 5);
   }
   ctx.strokeStyle = rgba(Theme.uiDim, 0.8);
-  ctx.strokeRect(10.5, 17.5, bw + 1, 6);
-  drawTextShadow(ctx, `${Math.ceil(p.hp)}/${p.maxHp}`, 11 + bw, 9, Theme.ui, 1, 'right');
+  ctx.strokeRect(bx - 0.5, 17.5, bw + 1, 6);
+  drawTextShadow(ctx, `${Math.ceil(p.hp)}/${p.maxHp}`, bx + bw, 9, Theme.ui, 1, 'right');
   if (p.shieldMax > 0) {
     const sw = Math.round(bw * clamp(p.shield / p.shieldMax, 0, 1));
-    pxRect(ctx, 11, 24, bw, 2, rgba('#0b2438', 0.9));
-    pxRect(ctx, 11, 24, sw, 2, '#8fd8ff');
-    if (sw > 0) glowDot(ctx, 11 + sw, 25, 6, '#8fd8ff', 0.35);
+    pxRect(ctx, bx, 24, bw, 2, rgba('#0b2438', 0.9));
+    pxRect(ctx, bx, 24, sw, 2, '#8fd8ff');
+    if (sw > 0) glowDot(ctx, bx + sw, 25, 6, '#8fd8ff', 0.35);
   }
 
   // run status: where you are, which wave, how many are left
@@ -312,7 +316,7 @@ function drawHotbar(ctx, game) {
   const x0 = Math.round((VIEW_W - total) / 2);
   const y = VIEW_H - 26;
   for (let i = 0; i < HOTBAR_SIZE; i++) {
-    const x = x0 + i * (s + gap);
+    const x = hotbarSlotRect(i).x;
     slotBox(ctx, x, y, s, i === p.inventory.selected, p.inventory.slots[i], UI.t);
     drawText(ctx, i + 1, x + 2, y + 2, rgba(Theme.uiDim, 0.9), 1);
     if (inside(x, y, s, s) && p.inventory.slots[i]) UI.tooltip = { id: p.inventory.slots[i].id, x: x + s / 2, y: y - 4 };
@@ -841,115 +845,4 @@ export function drawDebugMenu(ctx, game) {
 
   drawTextShadow(ctx, 'CTRL+M', x + w - 8, y + 6, Theme.uiDim, 1, 'right');
   if (UI.tooltip) drawTooltip(ctx, UI.tooltip);
-}
-
-export function drawMobileControls(ctx, game) {
-  const JOYSTICK_R = 32;
-  const BUTTON_R = 18;
-  const MARGIN = 16;
-
-  // draw left joystick (movement)
-  const ljx = MARGIN + JOYSTICK_R;
-  const ljy = VIEW_H - MARGIN - JOYSTICK_R;
-  ctx.fillStyle = rgba(Theme.uiAccent, 0.15);
-  ctx.beginPath();
-  ctx.arc(ljx, ljy, JOYSTICK_R, 0, TAU);
-  ctx.fill();
-  ctx.strokeStyle = rgba(Theme.uiAccent, 0.5);
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  if (Input.leftJoystick.active) {
-    ctx.fillStyle = rgba(Theme.uiAccent, 0.4);
-    ctx.beginPath();
-    ctx.arc(
-      ljx + Input.leftJoystick.x * 20,
-      ljy + Input.leftJoystick.y * 20,
-      8,
-      0,
-      TAU,
-    );
-    ctx.fill();
-  } else {
-    ctx.fillStyle = rgba(Theme.uiAccent, 0.3);
-    ctx.beginPath();
-    ctx.arc(ljx, ljy, 6, 0, TAU);
-    ctx.fill();
-  }
-
-  // draw right joystick (aiming)
-  const rjx = VIEW_W - MARGIN - JOYSTICK_R;
-  const rjy = VIEW_H - MARGIN - JOYSTICK_R;
-  ctx.fillStyle = rgba(Theme.ui, 0.15);
-  ctx.beginPath();
-  ctx.arc(rjx, rjy, JOYSTICK_R, 0, TAU);
-  ctx.fill();
-  ctx.strokeStyle = rgba(Theme.ui, 0.5);
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  if (Input.rightJoystick.active) {
-    ctx.fillStyle = rgba(Theme.ui, 0.4);
-    ctx.beginPath();
-    ctx.arc(
-      rjx + Input.rightJoystick.x * 20,
-      rjy + Input.rightJoystick.y * 20,
-      8,
-      0,
-      TAU,
-    );
-    ctx.fill();
-  } else {
-    ctx.fillStyle = rgba(Theme.ui, 0.3);
-    ctx.beginPath();
-    ctx.arc(rjx, rjy, 6, 0, TAU);
-    ctx.fill();
-  }
-
-  // draw buttons
-  // right side buttons: grapple (top), shoot (middle), interact (bottom)
-  const rbx = VIEW_W - MARGIN - BUTTON_R;
-  const rbTop = MARGIN + BUTTON_R;
-  const rbMid = VIEW_H / 2;
-  const rbBot = VIEW_H - MARGIN - BUTTON_R;
-
-  // left side buttons: auto-attack (top), inventory (bottom)
-  const lbx = MARGIN + BUTTON_R;
-  const lbTop = VIEW_H / 2 + 12;
-  const lbBot = VIEW_H - MARGIN - BUTTON_R;
-
-  // pause button (left top)
-  const pbx = MARGIN + BUTTON_R;
-  const pby = MARGIN + BUTTON_R;
-
-  const buttons = [
-    { id: 'grapple', sx: rbx, sy: rbTop, r: BUTTON_R, label: 'G' },
-    { id: 'shoot', sx: rbx, sy: rbMid, r: BUTTON_R, label: 'S' },
-    { id: 'interact', sx: rbx, sy: rbBot, r: BUTTON_R, label: 'I' },
-    { id: 'autoAttack', sx: lbx, sy: lbTop, r: BUTTON_R, label: 'A' },
-    { id: 'inventory', sx: lbx, sy: lbBot, r: BUTTON_R, label: 'E' },
-    { id: 'pause', sx: pbx, sy: pby, r: BUTTON_R, label: 'P' },
-  ];
-
-  // initialize buttons if not done
-  if (Input.mobileButtons.size === 0) {
-    for (const b of buttons) {
-      Input.mobileButtons.set(b.id, {
-        pressed: false, justPressed: false, touchId: null, sx: b.sx, sy: b.sy, r: b.r,
-      });
-    }
-  }
-
-  // draw each button
-  for (const b of buttons) {
-    const btn = Input.mobileButtons.get(b.id);
-    const isLeftButton = b.id === 'autoAttack' || b.id === 'inventory' || b.id === 'pause';
-    const color = b.id === 'pause' ? Theme.uiDim : (isLeftButton ? Theme.uiAccent : Theme.platformGlow);
-    ctx.fillStyle = rgba(color, btn?.pressed ? 0.4 : 0.15);
-    ctx.beginPath();
-    ctx.arc(b.sx, b.sy, BUTTON_R, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = rgba(color, btn?.pressed ? 0.8 : 0.5);
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    drawText(ctx, b.label, b.sx, b.sy - 2, color, 0.8, 'center');
-  }
 }

@@ -5,7 +5,7 @@ import {
   Camera, updateFx, drawParticles, drawTexts, drawRings, clearFx, burst, floatText,
   spawnParticle, impactRing, boltPath, strokeBolt, glowDot, pxRect, screenFlash, drawFlash,
 } from './gfx.js';
-import { Input, initInput, inputTick, inputEndFrame, updateMobileInput, initMobileButtons, detectMobileSwipe, Binds } from './input.js';
+import { Input, initInput, inputTick, inputEndFrame, Binds } from './input.js';
 import { Sfx, resumeAudio, setVolume, AudioCfg } from './audio.js';
 import { PostFX, parseShaderPack, DEFAULT_COMPOSITE } from './postfx.js';
 import {
@@ -18,7 +18,8 @@ import { makeBoss } from './boss.js';
 import { Cutscene } from './cutscene.js';
 import { drawBackground, drawArena, drawLightShafts, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal, Anvil } from './world.js';
 import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
-import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, drawForge, drawMobileControls, panel, button } from './ui.js';
+import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, drawForge, panel, button } from './ui.js';
+import { updateTouchPad, drawTouchPad } from './touch.js';
 import { drawText, drawTextShadow } from './font.js';
 import { Options, loadOptions, saveOptions, applyVisualOptions, captureShaderBase, saveShader, loadShader } from './settings.js';
 import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, drawControls, drawVictory } from './screens.js';
@@ -86,7 +87,11 @@ export class Game {
 
     this.resize();
     addEventListener('resize', () => this.resize());
-    initInput({ canvas: this.display, toWorld: (sx, sy) => this.toWorld(sx, sy) });
+    initInput({
+      canvas: this.display,
+      toWorld: (sx, sy) => this.toWorld(sx, sy),
+      toView: (sx, sy) => this.toView(sx, sy),
+    });
     this.setupShaderInput(root);
 
     // and the shader pack the player was last using
@@ -121,6 +126,13 @@ export class Game {
     // undo the camera so aiming stays exact through shake and zoom punches
     const w = Camera.unproject(vx, vy);
     return { x: clamp(w.x, -40, VIEW_W + 40), y: clamp(w.y, -40, VIEW_H + 40) };
+  }
+
+  // Screen space, camera left in. The on-screen pad is bolted to the display,
+  // not to the world, so it must not move when the camera shakes.
+  toView(sx, sy) {
+    const r = this.display.getBoundingClientRect();
+    return { x: (sx / r.width) * VIEW_W, y: (sy / r.height) * VIEW_H };
   }
 
   setupShaderInput(root) {
@@ -919,8 +931,10 @@ export class Game {
     let dt = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
     inputTick(dt);
-    if (Options.mobileControls) updateMobileInput(this.display);
-    this.processMobileInput();
+    if (Input.touchSeen && !this.touchHinted) {
+      this.touchHinted = true;
+      if (!Options.mobileControls) this.toast('TOUCH DETECTED - TURN ON THE PAD IN SETTINGS');
+    }
     uiBeginFrame(dt);
     this.time += dt;
     if (this.hintT > 0) this.hintT -= dt;
@@ -939,6 +953,8 @@ export class Game {
 
     // One bad frame must never end the run: log it and keep the loop alive.
     try {
+      // the pad turns fingers into keys and cursor before anything reads them
+      updateTouchPad(this);
       this.handleGlobalKeys();
       if (this.debugOpen) {
         updateWorld(dt, true);
@@ -981,65 +997,6 @@ export class Game {
     } else if (this.screen === 'settings' || this.screen === 'controls' || this.screen === 'classSelect') {
       this.screen = this.returnScreen || 'menu';
       this.returnScreen = null;
-    }
-  }
-
-  processMobileInput() {
-    if (!Options.mobileControls || this.screen !== 'playing') return;
-    const p = this.player;
-    if (!p || p.dead) return;
-
-    // clear joystick keys from previous frame
-    Input.keys.delete(Binds.left);
-    Input.keys.delete(Binds.right);
-    Input.keys.delete(Binds.jump);
-    Input.keys.delete(Binds.down);
-
-    // left joystick to movement keys
-    if (Input.leftJoystick.active) {
-      if (Input.leftJoystick.x < -0.3) Input.keys.add(Binds.left);
-      if (Input.leftJoystick.x > 0.3) Input.keys.add(Binds.right);
-      if (Input.leftJoystick.y < -0.3) Input.keys.add(Binds.jump);
-      if (Input.leftJoystick.y > 0.3) Input.keys.add(Binds.down);
-    }
-
-    // right joystick to aim (update mouse position)
-    if (Input.rightJoystick.active) {
-      Input.mouse.x = p.x + Input.rightJoystick.x * 80;
-      Input.mouse.y = p.cy + Input.rightJoystick.y * 80;
-    }
-
-    // mobile buttons
-    const grappleBtn = Input.mobileButtons.get('grapple');
-    const shootBtn = Input.mobileButtons.get('shoot');
-    const autoAttackBtn = Input.mobileButtons.get('autoAttack');
-    const inventoryBtn = Input.mobileButtons.get('inventory');
-    const interactBtn = Input.mobileButtons.get('interact');
-    const pauseBtn = Input.mobileButtons.get('pause');
-
-    if (grappleBtn?.justPressed) Input.pressed.add(Binds.grapple);
-    // shoot button or auto-attack while moving aim
-    if (shootBtn?.pressed || (autoAttackBtn?.pressed && Input.leftJoystick.active)) {
-      Input.mouse.left = true;
-    } else {
-      Input.mouse.left = false;
-    }
-    if (inventoryBtn?.justPressed) Input.pressed.add(Binds.inventory);
-    if (interactBtn?.pressed) {
-      Input.mouse.right = true;
-      if (interactBtn.justPressed) Input.mouseDown.right = true;
-    } else {
-      Input.mouse.right = false;
-    }
-    if (pauseBtn?.justPressed) Input.pressed.add('Escape');
-
-    // detect double-swipe for dash (left swipe: move left joystick from center to left quickly)
-    if (Input.leftJoystick.active && Math.abs(Input.leftJoystick.y) < 0.3) {
-      if (Input.leftJoystick.x < -0.7 && detectMobileSwipe('left')) {
-        Input.doubleTap.add(Binds.left);
-      } else if (Input.leftJoystick.x > 0.7 && detectMobileSwipe('right')) {
-        Input.doubleTap.add(Binds.right);
-      }
     }
   }
 
@@ -1388,12 +1345,12 @@ export class Game {
 
     drawFlash(ctx, VIEW_W, VIEW_H);
     if (!this.cutscene.active && this.screen !== 'victory') drawHUD(ctx, this);
+    drawTouchPad(ctx, this);
     this.cutscene.draw(ctx);
     if (this.fold) drawFoldWheel(ctx, this);
     if (this.forge) drawForge(ctx, this);
     if (this.invOpen) drawInventory(ctx, this);
     else if (UI.tooltip) drawTooltip(ctx, UI.tooltip);
-    if (Options.mobileControls && this.screen === 'playing') drawMobileControls(ctx, this);
 
     if (this.screen === 'paused') drawPause(ctx, this, this.time);
     if (this.screen === 'gameover') drawGameOver(ctx, this, this.time);
