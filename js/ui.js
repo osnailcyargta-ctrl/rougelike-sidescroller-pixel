@@ -941,7 +941,8 @@ export function drawMobileControls(ctx, game) {
   // draw each button
   for (const b of buttons) {
     const btn = Input.mobileButtons.get(b.id);
-    const color = b.id === 'pause' ? Theme.uiDim : (b.id.includes('Left') || b.id === 'autoAttack' || b.id === 'inventory' ? Theme.uiAccent : Theme.platformGlow);
+    const isLeftButton = b.id === 'autoAttack' || b.id === 'inventory' || b.id === 'pause';
+    const color = b.id === 'pause' ? Theme.uiDim : (isLeftButton ? Theme.uiAccent : Theme.platformGlow);
     ctx.fillStyle = rgba(color, btn?.pressed ? 0.4 : 0.15);
     ctx.beginPath();
     ctx.arc(b.sx, b.sy, BUTTON_R, 0, TAU);

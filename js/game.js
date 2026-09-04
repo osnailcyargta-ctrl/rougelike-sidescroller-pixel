@@ -1018,10 +1018,19 @@ export class Game {
     const pauseBtn = Input.mobileButtons.get('pause');
 
     if (grappleBtn?.justPressed) Input.pressed.add(Binds.grapple);
-    if (shootBtn?.pressed) Input.mouse.left = true;
-    if (autoAttackBtn?.pressed && Input.leftJoystick.active) Input.mouse.left = true;
+    // shoot button or auto-attack while moving aim
+    if (shootBtn?.pressed || (autoAttackBtn?.pressed && Input.leftJoystick.active)) {
+      Input.mouse.left = true;
+    } else {
+      Input.mouse.left = false;
+    }
     if (inventoryBtn?.justPressed) Input.pressed.add(Binds.inventory);
-    if (interactBtn?.justPressed) Input.mouse.right = true;
+    if (interactBtn?.pressed) {
+      Input.mouse.right = true;
+      if (interactBtn.justPressed) Input.mouseDown.right = true;
+    } else {
+      Input.mouse.right = false;
+    }
     if (pauseBtn?.justPressed) Input.pressed.add('Escape');
 
     // detect double-swipe for dash (left swipe: move left joystick from center to left quickly)
