@@ -21,7 +21,7 @@ export function codexView(id, phase) {
   return v[Math.min(phase - 1, v.length - 1)];
 }
 
-export const CODEX_ORDER = ['golem', 'bigdude', 'ceiling', 'alphads', 'poitnus'];
+export const CODEX_ORDER = ['golem', 'bigdude', 'ceiling', 'poitnus', 'alphads'];
 
 // Everything the pages say that is not already in BOSS_TYPES. Damage lines are
 // worked out from the boss's own numbers rather than typed twice, so tuning a

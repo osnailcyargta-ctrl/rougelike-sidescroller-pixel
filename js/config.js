@@ -237,12 +237,19 @@ export const SEEDED_THROUGH_ROOM = 15;
 // is a "room", so the reward between them is the same choice of two perks a
 // boss room normally gives.
 export const BOSS_RUSH = {
-  order: ['golem', 'bigdude', 'ceiling', 'alphads'],
+  order: ['golem', 'bigdude', 'ceiling', 'poitnus', 'alphads'],
   // the room number each is fought at, so it arrives at the strength it would
   // have had in a full run rather than at its room-5 numbers
-  atRoom: { golem: 5, bigdude: 10, ceiling: 15, alphads: 20 },
+  atRoom: { golem: 5, bigdude: 10, ceiling: 15, poitnus: 18, alphads: 20 },
   // two on offer, one taken, from the class you picked
   weaponPicks: 2,
+  // and between bosses: three on offer, two taken, then a short countdown
+  rewardOffer: 3,
+  rewardTake: 2,
+  rewardCountdown: 3,
+  // and the one perk a rush opens with, spun for on a slot reel
+  slotSpin: 2.1,             // how long the reel runs before it settles
+  slotRerolls: 1,            // and how many times you may send it round again
   weapons: {
     melee: ['sword', 'twindagger', 'nukerang'],
     ranger: ['bow', 'shardgun', 'stingergun'],

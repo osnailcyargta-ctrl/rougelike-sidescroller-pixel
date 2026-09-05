@@ -22,7 +22,7 @@ import {
   loadUnlocks, checkBossRushUnlock,
 } from './codex.js';
 import { drawBackground, drawArena, drawLightShafts, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal, Anvil } from './world.js';
-import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
+import { ITEMS, RARITY, HOTBAR_SIZE, DROP_POOL, UNIQUE_ONCE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
 import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, drawForge, drawCodex, panel, button } from './ui.js';
 import { updateTouchPad, drawTouchPad, drawAimLeash, Pad } from './touch.js';
 import { Perf, perfTick, syncPerfOptions, TIERS } from './perf.js';
@@ -31,7 +31,7 @@ import { drawText, drawTextShadow } from './font.js';
 import { Options, loadOptions, saveOptions, applyVisualOptions, captureShaderBase, saveShader, loadShader } from './settings.js';
 import {
   drawMainMenu, drawSettings, drawClassSelect, drawModeSelect, drawWeaponSelect,
-  drawPause, drawGameOver, drawControls, drawVictory,
+  drawPerkSlot, drawRushReward, drawPause, drawGameOver, drawControls, drawVictory,
 } from './screens.js';
 
 // Health restored to the player after every cleared wave; clearing a room and
@@ -93,6 +93,9 @@ export class Game {
     this.mode = 'normal';    // or 'bossrush'
     this.pendingClass = null;   // chosen on one screen, started on another
     this.weaponPick = null;     // the two-weapon offer Boss Rush opens with
+    this.rushWeapon = null;     // and what was taken from it
+    this.perkSlot = null;       // the reel that hands over the opening perk
+    this.rushReward = null;     // the spoils screen between bosses
     this.boss = null;
     this.cutscene = new Cutscene(this);
     loadUnlocks();
@@ -290,7 +293,7 @@ export class Game {
 
   goClassSelect() { resumeAudio(); this.screen = 'classSelect'; }
 
-  startRun(classId, mode = 'normal', startWeapon = null) {
+  startRun(classId, mode = 'normal', startWeapon = null, startPerk = null) {
     resumeAudio();
     this.mode = mode;
     // an empty field means "surprise me", but the roll is still recorded so the
@@ -324,7 +327,64 @@ export class Game {
       if (i >= 0 && i < HOTBAR_SIZE) this.player.inventory.selected = i;
       this.player.recomputeStats();
     }
+    if (startPerk) {
+      this.player.inventory.add(startPerk, 1);
+      this.player.recomputeStats();
+    }
     this.startRoom(1);
+  }
+
+  // --- the spoils between bosses -------------------------------------------
+  // Three on the table, two taken, then a short count and the next one is on
+  // you. Weapons can turn up, but only ones your class can actually use.
+
+  rushRewardPool() {
+    const inv = this.player.inventory;
+    const cls = this.player.classId;
+    const weapons = (BOSS_RUSH.weapons[cls] ?? []).filter((id) => !inv.has(id));
+    const perks = DROP_POOL.filter((id) => !(UNIQUE_ONCE.has(id) && inv.has(id)));
+    return [...perks, ...weapons];
+  }
+
+  openRushReward() {
+    const pool = this.rushRewardPool();
+    const roll = streamFor(`rush:spoils:${this.roomIndex}`);
+    const offer = [];
+    const want = Math.min(BOSS_RUSH.rewardOffer, pool.length);
+    while (offer.length < want) offer.push(pool.splice(Math.floor(roll() * pool.length), 1)[0]);
+    this.rushReward = { offer, taken: [], countdown: null, t: 0 };
+    // With nothing left worth offering there is nothing to pick, so the clock
+    // starts straight away rather than waiting for a choice that cannot come.
+    if (!offer.length) this.rushReward.countdown = BOSS_RUSH.rewardCountdown;
+    this.screen = 'rushReward';
+    Sfx.pickup();
+  }
+
+  takeRushReward(id) {
+    const r = this.rushReward;
+    if (!r || r.countdown !== null || r.taken.includes(id)) return;
+    if (this.player.inventory.add(id, 1) > 0) { this.toast('NO ROOM FOR IT'); Sfx.ui(); return; }
+    r.taken.push(id);
+    this.player.recomputeStats();
+    Sfx.pickup();
+    if (r.taken.length >= Math.min(BOSS_RUSH.rewardTake, r.offer.length)) {
+      r.countdown = BOSS_RUSH.rewardCountdown;
+    }
+  }
+
+  updateRushReward(dt) {
+    const r = this.rushReward;
+    if (!r) { this.screen = 'playing'; return; }
+    r.t += dt;
+    if (r.countdown === null) return;
+    const was = Math.ceil(r.countdown);
+    r.countdown -= dt;
+    if (Math.ceil(r.countdown) !== was && r.countdown > 0) Sfx.ui();
+    if (r.countdown <= 0) {
+      this.rushReward = null;
+      this.screen = 'playing';
+      this.startRoom(this.roomIndex + 1);
+    }
   }
 
   // --- Boss Rush ----------------------------------------------------------
@@ -371,7 +431,78 @@ export class Game {
   }
 
   takeRushWeapon(id) {
-    this.startRun(this.weaponPick?.classId ?? 'melee', 'bossrush', id);
+    this.rushWeapon = id;
+    this.openPerkSlot();
+  }
+
+  // --- the opening perk -----------------------------------------------------
+  // A rush gives you one perk before it starts, won off a reel: it lands where
+  // it lands, and you may send it round once more before you have to take what
+  // is showing. This is the only one you are handed - there is no second.
+
+  openPerkSlot() {
+    this.perkSlot = {
+      pool: DROP_POOL.slice(),
+      reel: 0,               // position along the strip, in items
+      spin: 0,               // time left in this spin
+      landed: null,
+      rerolls: BOSS_RUSH.slotRerolls,
+      t: 0,
+    };
+    this.screen = 'perkSlot';
+    this.spinPerkSlot(true);
+  }
+
+  spinPerkSlot(first = false) {
+    const sl = this.perkSlot;
+    if (!sl) return;
+    if (!first && sl.rerolls <= 0) return;
+    if (!first) sl.rerolls--;
+    // The result is drawn now and the reel is simply made to stop on it - a
+    // reel that lands wherever it runs out would be a different distribution
+    // from the one the perk weights describe.
+    const roll = streamFor(`rush:slot:${sl.rerolls}`);
+    // A reroll that hands back what you just rejected reads as a broken
+    // button, so it draws from everything except that.
+    const draw = first ? sl.pool : sl.pool.filter((id) => id !== sl.landed);
+    sl.landed = null;
+    sl.result = draw[Math.floor(roll() * draw.length)] ?? sl.pool[0];
+    sl.spin = BOSS_RUSH.slotSpin;
+    sl.spinTotal = BOSS_RUSH.slotSpin;
+    sl.reelFrom = sl.reel;
+    // enough turns that it reads as a spin, ending exactly on the result
+    const idx = sl.pool.indexOf(sl.result);
+    const laps = 4;
+    sl.reelTo = Math.ceil(sl.reel / sl.pool.length) * sl.pool.length + laps * sl.pool.length + idx;
+    Sfx.ui();
+  }
+
+  updatePerkSlot(dt) {
+    const sl = this.perkSlot;
+    if (!sl) { this.screen = 'modeSelect'; return; }
+    sl.t += dt;
+    if (sl.spin > 0) {
+      sl.spin = Math.max(0, sl.spin - dt);
+      const k = 1 - sl.spin / sl.spinTotal;
+      const e = 1 - Math.pow(1 - k, 4);           // fast, then easing into place
+      const prev = Math.floor(sl.reel);
+      sl.reel = sl.reelFrom + (sl.reelTo - sl.reelFrom) * e;
+      if (Math.floor(sl.reel) !== prev && sl.spin > 0.35) Sfx.ui();
+      if (sl.spin <= 0) {
+        sl.reel = sl.reelTo;
+        sl.landed = sl.result;
+        Camera.punch(0.8);
+        Sfx.pickup();
+      }
+    }
+  }
+
+  takeSlotPerk() {
+    const sl = this.perkSlot;
+    if (!sl || !sl.landed) return;
+    const id = sl.landed;
+    this.perkSlot = null;
+    this.startRun(this.weaponPick?.classId ?? 'melee', 'bossrush', this.rushWeapon, id);
   }
 
   quitToMenu() {
@@ -730,6 +861,7 @@ export class Game {
     });
     if (this.boss && !this.boss.dead) return;
     this.boss = makeBoss(this, this.roomIndex, 'poitnus');
+    this.boss.summoned = true;   // a room already has a boss; this one borrows the slot
     this.boss.x = clamp(x, 60, VIEW_W - 60);
     this.boss.targetX = this.boss.x;
     this.boss.y = Math.max(50, y - 20);
@@ -1460,6 +1592,12 @@ export class Game {
       if (this.codex) {
         this.updateCodex(dt);
         updateWorld(dt, true);
+      } else if (this.screen === 'perkSlot') {
+        this.updatePerkSlot(dt);
+        updateWorld(dt, true);
+      } else if (this.screen === 'rushReward') {
+        this.updateRushReward(dt);
+        updateWorld(dt, true);
       } else if (this.debugOpen) {
         updateWorld(dt, true);
       } else if (this.screen === 'playing' || this.screen === 'gameover') {
@@ -1513,6 +1651,9 @@ export class Game {
       this.screen = 'classSelect';
     } else if (this.screen === 'weaponSelect') {
       this.screen = 'modeSelect';
+    } else if (this.screen === 'perkSlot') {
+      this.perkSlot = null;
+      this.screen = 'weaponSelect';
     } else if (this.screen === 'settings' || this.screen === 'controls' || this.screen === 'classSelect') {
       this.screen = this.returnScreen || 'menu';
       this.returnScreen = null;
@@ -1697,6 +1838,9 @@ export class Game {
     this.roomCleared = true;
     // The vault has no room past the god.
     if (this.roomIndex >= this.lastRoom) { this.finishRun(); return; }
+    // A rush has no room to walk around picking things up in: the spoils are
+    // offered on their own screen and the next boss follows on a timer.
+    if (this.mode === 'bossrush') { this.openRushReward(); return; }
     if (this.isBossRoom()) {
       // two offers on the centre platform, one pick
       const inv = this.player.inventory;
@@ -1813,6 +1957,7 @@ export class Game {
     if (this.screen === 'classSelect') { drawClassSelect(ctx, this, this.time); if (this.debugOpen) drawDebugMenu(ctx, this); this.drawToast(ctx); return; }
     if (this.screen === 'modeSelect') { drawModeSelect(ctx, this, this.time); if (this.debugOpen) drawDebugMenu(ctx, this); this.drawToast(ctx); return; }
     if (this.screen === 'weaponSelect') { drawWeaponSelect(ctx, this, this.time); if (this.debugOpen) drawDebugMenu(ctx, this); this.drawToast(ctx); return; }
+    if (this.screen === 'perkSlot') { drawPerkSlot(ctx, this, this.time); if (this.debugOpen) drawDebugMenu(ctx, this); this.drawToast(ctx); return; }
 
     ctx.save();
     Camera.apply(ctx);
@@ -1876,6 +2021,7 @@ export class Game {
     if (this.screen === 'paused') drawPause(ctx, this, this.time);
     if (this.screen === 'gameover') drawGameOver(ctx, this, this.time);
     if (this.screen === 'victory') drawVictory(ctx, this, this.time);
+    if (this.screen === 'rushReward') drawRushReward(ctx, this, this.time);
     // over the pause menu, since that is where a phone reaches it from
     if (this.codex) drawCodex(ctx, this);
     if (this.debugOpen) drawDebugMenu(ctx, this);

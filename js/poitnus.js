@@ -56,7 +56,9 @@ export class PoitnusBoss {
     this.title = def.title;
     this.kind = 'stinger';
     this.roomIndex = roomIndex;
-    this.summoned = true;      // not this room's boss: the room goes on without it
+    // Set only when it is hatched into a room that has its own boss slot to
+    // give back. In Boss Rush it IS the room's boss, so it keeps the slot.
+    this.summoned = false;
 
     // You chose to fight it, so it fights at its listed numbers, always.
     this.hpScale = 1;

@@ -170,8 +170,8 @@ export const DROP_POOL = [
   'graplinghook',
 ];
 // Things you only ever need one of.
-const UNIQUE = new Set(['graplinghook', 'nukerang', 'shardgun', 'twindagger',
-  'bookairplane', 'bookmissile', 'damagebooster']);
+export const UNIQUE_ONCE = new Set(['graplinghook', 'nukerang', 'shardgun', 'twindagger',
+  'bookairplane', 'bookmissile', 'damagebooster', 'stingergun']);
 const PERK_WEIGHTS = {
   lifecrystal: 3, fireyblade: 3, bloodstone: 3,
   lightningarrow: 2, wetslime: 2, aegis: 2,
@@ -181,7 +181,7 @@ const PERK_WEIGHTS = {
 // `roll` is the generator to draw from: a room's own seeded stream where the
 // seed is meant to decide the offer, or the loose one where it is not.
 function weightedPerk(inventory, roll = rng) {
-  const pool = DROP_POOL.filter((id) => !(UNIQUE.has(id) && inventory && inventory.has(id)));
+  const pool = DROP_POOL.filter((id) => !(UNIQUE_ONCE.has(id) && inventory && inventory.has(id)));
   let total = 0;
   for (const id of pool) total += PERK_WEIGHTS[id];
   let r = roll() * total;

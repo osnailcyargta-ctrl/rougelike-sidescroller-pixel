@@ -4,7 +4,7 @@ import { clamp, rand, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
 import { drawText, drawTextShadow, drawTextFit, textWidth } from './font.js';
 import { pxRect, glowDot, spawnParticle } from './gfx.js';
-import { VIEW_W, VIEW_H, FINAL_ROOM } from './config.js';
+import { VIEW_W, VIEW_H, FINAL_ROOM, BOSS_RUSH } from './config.js';
 import { Unlocks, BOSS_RUSH_ROOM } from './codex.js';
 import { panel, button, slider, textField, drawTooltip, UI } from './ui.js';
 import { Options, optionsIn, saveOptions, resetOptions, applyVisualOptions } from './settings.js';
@@ -604,6 +604,153 @@ export function drawWeaponSelect(ctx, game, t) {
     }
   }
   if (button(ctx, 'wpnback', 8, VIEW_H - 24, 60, 16, 'BACK')) game.screen = 'modeSelect';
+}
+
+// --- the opening reel -----------------------------------------------------
+// One perk, won off a slot machine. It lands where it lands and you may send
+// it round once more; after that you take what is showing.
+
+export function drawPerkSlot(ctx, game, t) {
+  drawMenuBackdrop(ctx, t);
+  const sl = game.perkSlot;
+  if (!sl) return;
+  drawTextShadow(ctx, 'ONE PERK', VIEW_W / 2, 14, Theme.uiAccent, 2, 'center');
+  drawText(ctx, 'THE ONLY ONE YOU ARE HANDED. THERE IS NO SECOND.',
+           VIEW_W / 2, 32, Theme.uiDim, 1, 'center');
+
+  // the cabinet
+  const w = 116, h = 96;
+  const x = Math.round((VIEW_W - w) / 2), y = 52;
+  panel(ctx, x, y, w, h, { accent: Theme.uiAccent, alpha: 0.9 });
+  const winX = x + 10, winY = y + 10, winW = w - 20, winH = 56;
+  pxRect(ctx, winX, winY, winW, winH, rgba('#05060c', 0.85));
+  ctx.strokeStyle = rgba(Theme.uiDim, 0.9);
+  ctx.strokeRect(winX + 0.5, winY + 0.5, winW - 1, winH - 1);
+
+  // the strip, drawn as three cells sliding through the window
+  const cellH = winH;
+  const pos = sl.reel;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(winX + 1, winY + 1, winW - 2, winH - 2);
+  ctx.clip();
+  const frac = pos - Math.floor(pos);
+  for (let k = -1; k <= 1; k++) {
+    const idx = ((Math.floor(pos) + k) % sl.pool.length + sl.pool.length) % sl.pool.length;
+    const id = sl.pool[idx];
+    const cy = winY + winH / 2 + (k + frac) * cellH;
+    if (cy < winY - cellH || cy > winY + winH + cellH) continue;
+    const near = 1 - Math.min(1, Math.abs(cy - (winY + winH / 2)) / cellH);
+    ctx.globalAlpha = 0.25 + near * 0.75;
+    ctx.save();
+    ctx.translate(winX + winW / 2, cy);
+    const sc = 2 + near * 1.4;
+    ctx.scale(sc, sc);
+    drawItemIcon(ctx, id, -6, -6, 12, t);
+    ctx.restore();
+    if (near > 0.85 && sl.landed) {
+      drawTextFit(ctx, ITEMS[id].name, winX + winW / 2, cy + 18,
+                  RARITY[ITEMS[id].rarity].color, winW - 6, 1, 'center');
+    }
+  }
+  // streaks across the glass while it is still running, so a spin reads as
+  // speed rather than as icons politely taking turns
+  if (sl.spin > 0) {
+    const blur = Math.min(1, sl.spin / (BOSS_RUSH.slotSpin * 0.6));
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < 5; i++) {
+      const ly = winY + 4 + ((t * 320 + i * 13) % (winH - 8));
+      ctx.fillStyle = rgba('#ffffff', 0.10 * blur);
+      ctx.fillRect(winX + 2, ly, winW - 4, 1);
+    }
+  }
+  ctx.restore();
+  // the line the reel stops against
+  pxRect(ctx, winX - 3, winY + winH / 2, 3, 1, Theme.uiAccent);
+  pxRect(ctx, winX + winW, winY + winH / 2, 3, 1, Theme.uiAccent);
+  // a soft light behind the glass once it has settled
+  if (sl.landed) glowDot(ctx, winX + winW / 2, winY + winH / 2, 40, Theme.uiAccent, 0.10);
+
+  const spinning = sl.spin > 0;
+  const canReroll = !spinning && sl.landed && sl.rerolls > 0;
+  const bw = 46;
+  if (button(ctx, 'slottake', x + 10, y + h - 22, bw, 16, 'TAKE IT', { disabled: spinning || !sl.landed })) {
+    game.takeSlotPerk();
+  }
+  if (button(ctx, 'slotspin', x + w - 10 - bw, y + h - 22, bw, 16,
+             sl.rerolls > 0 ? 'REROLL' : 'NO SPINS', { disabled: !canReroll })) {
+    game.spinPerkSlot();
+  }
+  drawText(ctx, sl.rerolls > 0 ? `${sl.rerolls} REROLL LEFT` : 'NO REROLLS LEFT',
+           VIEW_W / 2, y + h + 6, Theme.uiDim, 1, 'center');
+  // what it landed on, spelled out under the cabinet. The name is already in
+  // the window, so the card below is the only other place it needs to appear.
+  if (sl.landed) UI.tooltip = { id: sl.landed, x: VIEW_W / 2, y: y + h + 18, below: true };
+  if (UI.tooltip) { drawTooltip(ctx, UI.tooltip); UI.tooltip = null; }
+}
+
+// --- the spoils between bosses --------------------------------------------
+
+export function drawRushReward(ctx, game, t) {
+  const r = game.rushReward;
+  if (!r) return;
+  ctx.fillStyle = rgba('#05060c', 0.82);
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  const take = Math.min(BOSS_RUSH.rewardTake, r.offer.length);
+  drawTextShadow(ctx, 'SPOILS', VIEW_W / 2, 12, Theme.uiAccent, 2, 'center');
+  drawText(ctx, `TAKE ${take} OF ${r.offer.length}`, VIEW_W / 2, 30, Theme.uiDim, 1, 'center');
+
+  const cw = 132, ch = 150, gap = 10;
+  const totalW = r.offer.length * cw + (r.offer.length - 1) * gap;
+  for (let i = 0; i < r.offer.length; i++) {
+    const id = r.offer[i];
+    const def = ITEMS[id];
+    if (!def) continue;
+    const x = Math.round((VIEW_W - totalW) / 2) + i * (cw + gap);
+    const y = 44;
+    const gone = r.taken.includes(id);
+    const col = RARITY[def.rarity].color;
+    const hot = UI.hovered === 'spoil' + id && !gone;
+    panel(ctx, x, y, cw, ch, { accent: gone ? Theme.uiDim : col, alpha: gone ? 0.5 : (hot ? 0.95 : 0.8) });
+    ctx.save();
+    if (gone) ctx.globalAlpha = 0.4;
+    glowDot(ctx, x + cw / 2, y + 30, 26, col, gone ? 0.08 : (hot ? 0.32 : 0.16));
+    ctx.save();
+    ctx.translate(x + cw / 2, y + 30);
+    const sc = 2.6 + (hot ? 0.4 : 0) + Math.sin(t * 3 + i) * 0.08;
+    ctx.scale(sc, sc);
+    drawItemIcon(ctx, id, -6, -6, 12, t);
+    ctx.restore();
+    drawTextFit(ctx, def.name, x + cw / 2, y + 52, gone ? Theme.uiDim : col, cw - 12, 1, 'center');
+    const wrapped = [];
+    for (const line of def.desc) for (const part of wrapLine(line, cw - 14)) wrapped.push(part);
+    for (let k = 0; k < Math.min(wrapped.length, 6); k++) {
+      drawText(ctx, wrapped[k], x + cw / 2, y + 64 + k * 9, Theme.ui, 1, 'center');
+    }
+    ctx.restore();
+    if (gone) {
+      drawTextShadow(ctx, 'TAKEN', x + cw / 2, y + ch - 20, '#8ce88c', 1, 'center');
+    } else if (button(ctx, 'spoil' + id, x + 18, y + ch - 22, cw - 36, 16, 'TAKE',
+                      { disabled: r.countdown !== null })) {
+      game.takeRushReward(id);
+    }
+  }
+
+  if (r.countdown !== null) {
+    const n = Math.max(1, Math.ceil(r.countdown));
+    const k = 1 - (r.countdown % 1);
+    drawText(ctx, 'NEXT', VIEW_W / 2, VIEW_H - 50, Theme.uiDim, 1, 'center');
+    ctx.save();
+    ctx.translate(VIEW_W / 2, VIEW_H - 30);
+    const pop = 1 + (1 - k) * 0.5;
+    ctx.scale(pop, pop);
+    drawText(ctx, String(n), 1, 1, rgba('#000000', 0.8), 3, 'center');
+    drawText(ctx, String(n), 0, 0, Theme.uiAccent, 3, 'center');
+    ctx.restore();
+    glowDot(ctx, VIEW_W / 2, VIEW_H - 22, 40 * (1 - k) + 10, Theme.uiAccent, 0.2 * (1 - k));
+  } else {
+    drawText(ctx, `${r.taken.length}/${take} TAKEN`, VIEW_W / 2, VIEW_H - 30, Theme.uiDim, 1, 'center');
+  }
 }
 
 export function drawPause(ctx, game, t) {
