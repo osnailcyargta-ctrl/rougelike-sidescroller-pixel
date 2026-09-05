@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Black behind the canvas so the letterbox at the edges of the 480x270
+       frame matches the game rather than flashing white on launch. -->
+  <style name="Theme.AetherDescent" parent="android:Theme.Material.NoActionBar.Fullscreen">
+    <item name="android:windowBackground">@color/game_bg</item>
+    <item name="android:colorBackground">@color/game_bg</item>
+    <item name="android:navigationBarColor">@color/game_bg</item>
+    <item name="android:statusBarColor">@color/game_bg</item>
+  </style>
+</resources>

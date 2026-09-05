@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The game's own sigil: a struck diamond with two chevrons falling through
+     it. Kept inside the 72dp safe circle of the 108dp adaptive canvas so no
+     launcher shape can crop it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+  <!-- the diamond -->
+  <path
+      android:pathData="M54,26 L78,54 L54,82 L30,54 Z"
+      android:strokeColor="#FFB43C"
+      android:strokeWidth="4"
+      android:fillColor="#00000000" />
+
+  <!-- upper chevron, bright -->
+  <path
+      android:pathData="M42,48 L54,58 L66,48"
+      android:strokeColor="#FFFFFF"
+      android:strokeWidth="5"
+      android:strokeLineCap="round"
+      android:strokeLineJoin="round"
+      android:fillColor="#00000000" />
+
+  <!-- lower chevron, trailing -->
+  <path
+      android:pathData="M44,62 L54,70 L64,62"
+      android:strokeColor="#78E0FF"
+      android:strokeWidth="4"
+      android:strokeLineCap="round"
+      android:strokeLineJoin="round"
+      android:fillColor="#00000000" />
+</vector>

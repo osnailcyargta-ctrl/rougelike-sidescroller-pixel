@@ -1,0 +1,19 @@
+// Repositories are declared here rather than per-project so a stray build file
+// cannot quietly add one.
+pluginManagement {
+  repositories {
+    google()
+    mavenCentral()
+    gradlePluginPortal()
+  }
+}
+dependencyResolutionManagement {
+  repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+  repositories {
+    google()
+    mavenCentral()
+  }
+}
+
+rootProject.name = 'AetherDescent'
+include ':app'

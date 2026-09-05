@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <!-- No INTERNET permission on purpose. Everything the game needs is inside
+       the APK, so the app cannot phone home even if something tried to. -->
+
+  <uses-feature android:glEsVersion="0x00020000" android:required="true" />
+
+  <application
+      android:allowBackup="true"
+      android:icon="@mipmap/ic_launcher"
+      android:roundIcon="@mipmap/ic_launcher"
+      android:label="@string/app_name"
+      android:hardwareAccelerated="true"
+      android:supportsRtl="false"
+      android:theme="@style/Theme.AetherDescent">
+
+    <activity
+        android:name=".MainActivity"
+        android:exported="true"
+        android:screenOrientation="sensorLandscape"
+        android:launchMode="singleTask"
+        android:resizeableActivity="false"
+        android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|density|uiMode">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>

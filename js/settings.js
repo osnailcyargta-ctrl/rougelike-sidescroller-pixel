@@ -52,7 +52,18 @@ export const Options = { ...DEFAULTS };
 
 export function optionsIn(group) { return OPTION_DEFS.filter((d) => d.group === group); }
 
+// The packaged build loads index.html?app=1. It is a phone with no keyboard,
+// so the pad starts on there - but only as a DEFAULT: the moment the player
+// touches the setting their choice is saved and this stops applying.
+function packagedDefaults() {
+  try {
+    if (!location.search.includes('app=1')) return;
+    Options.mobileControls = true;
+  } catch { /* no location in this context; the plain defaults are fine */ }
+}
+
 export function loadOptions() {
+  packagedDefaults();
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {

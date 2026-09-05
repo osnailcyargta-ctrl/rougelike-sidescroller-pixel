@@ -1,0 +1,93 @@
+name: Build APK
+
+# The APK is a snapshot: whatever the game looks like at the ref it is told to
+# take, packaged so it runs with no network at all.
+on:
+  push:
+    branches: [ 'claude/android-apk' ]
+    paths: [ 'android/**', '.github/workflows/android.yml', 'js/**', 'css/**', 'shaders/**', 'index.html' ]
+  workflow_dispatch:
+    inputs:
+      game_ref:
+        description: 'Branch, tag or SHA of the game to package (blank = this branch)'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the app
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Lets you build an APK of any version of the game without having to
+      # merge it into this branch first.
+      - name: Take the game from another ref
+        if: inputs.game_ref != ''
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin "${{ inputs.game_ref }}"
+          git checkout FETCH_HEAD -- index.html js css shaders
+          echo "GAME_REF=${{ inputs.game_ref }}" >> "$GITHUB_ENV"
+          echo "GAME_SHA=$(git rev-parse --short FETCH_HEAD)" >> "$GITHUB_ENV"
+
+      - name: Work out the version
+        run: |
+          set -euo pipefail
+          SHA="${GAME_SHA:-$(git rev-parse --short HEAD)}"
+          CODE="$(git rev-list --count HEAD)"
+          echo "GAME_SHA=$SHA" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=$(date -u +%Y.%m.%d)-$SHA" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$CODE" >> "$GITHUB_ENV"
+
+      - name: Snapshot the game into the app
+        run: bash android/snapshot.sh
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build
+        working-directory: android
+        run: |
+          gradle --no-daemon assembleDebug assembleRelease \
+            -PgameVersion="$VERSION_NAME" \
+            -PgameCode="$VERSION_CODE"
+
+      - name: Name the outputs
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cp android/app/build/outputs/apk/debug/app-debug.apk \
+             "out/aether-descent-$VERSION_NAME-debug.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk \
+             "out/aether-descent-$VERSION_NAME.apk"
+          ls -lh out
+
+      # Proof the thing actually contains a playable game, not an empty shell.
+      - name: Check the bundle made it in
+        run: |
+          set -euo pipefail
+          APK="out/aether-descent-$VERSION_NAME.apk"
+          unzip -l "$APK" > /tmp/apk.txt
+          for f in assets/www/index.html assets/www/js/game.js assets/www/js/poitnus.js assets/www/css/style.css; do
+            grep -q "$f" /tmp/apk.txt || { echo "missing from the APK: $f"; exit 1; }
+          done
+          COUNT=$(grep -c 'assets/www/' /tmp/apk.txt)
+          echo "$COUNT game files packaged"
+          [ "$COUNT" -ge 25 ] || { echo "too few files packaged"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aether-descent-apk-${{ env.VERSION_NAME }}
+          path: out/*.apk
+          if-no-files-found: error
