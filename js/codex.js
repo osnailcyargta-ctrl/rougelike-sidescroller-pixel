@@ -82,7 +82,7 @@ export const CODEX = {
       ['CONTACT', d.contactDamage * k],
       ['STINGER', d.volley.damage * k],
     ],
-    drops: ['1-2 Soul'],
+    drops: ['1-2 Soul', 'Stident (melee)', 'Stinger Gun (others)'],
     phases: ['Three fans of five, then it', 'hangs still and lays. Never', 'more than 10 of its brood at once.'],
   },
 };

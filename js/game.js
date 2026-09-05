@@ -1435,11 +1435,27 @@ export class Game {
     // close, the gun to everyone else, since a Stident in an Origamist's bag
     // is a rock they cannot swing.
     if (boss.def.id === 'poitnus' && this.player) {
-      const id = this.player.classId === 'melee' ? 'stident' : 'stingergun';
-      const x = clamp(boss.x ?? VIEW_W / 2, 24, VIEW_W - 24);
-      const y = clamp((boss.y ?? 100) + 20, 30, GROUND_Y - 20);
-      if (!this.player.inventory.has(id)) {
-        this.pickups.push(new Pickup(id, x, y, null, { falling: true, vy: -140 }));
+      const inv = this.player.inventory;
+      const first = this.player.classId === 'melee' ? 'stident' : 'stingergun';
+      const other = first === 'stident' ? 'stingergun' : 'stident';
+      // A ranger who walked in already holding a Stinger Gun still earned
+      // something, so the other half of the hoard falls instead. Only when
+      // both are already in the bag does the kill leave no weapon.
+      const id = !inv.has(first) ? first : (!inv.has(other) ? other : null);
+      if (id) {
+        const x = clamp(boss.x ?? VIEW_W / 2, 24, VIEW_W - 24);
+        const y = clamp((boss.y ?? 100) + 20, 30, GROUND_Y - 20);
+        // A rush clears the floor the moment the spoils screen closes, so a
+        // dropped weapon would be swept up unheld. It goes straight in.
+        if (this.mode === 'bossrush') {
+          if (inv.add(id, 1) === 0) {
+            this.player.recomputeStats();
+            this.toast(`${ITEMS[id].name.toUpperCase()} TAKEN`);
+          }
+        } else {
+          this.pickups.push(new Pickup(id, x, y, null, { falling: true, vy: -140 }));
+          this.toast(`${ITEMS[id].name.toUpperCase()} DROPPED`);
+        }
         burst(x, y, 26, {
           color: RARITY[ITEMS[id].rarity].color, color2: '#ffffff',
           speedMin: 30, speedMax: 150, lifeMin: 0.3, lifeMax: 0.8, gravity: 140,
