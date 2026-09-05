@@ -24,12 +24,18 @@ On a **cold start** — first launch, or after the app was swiped out of recents
 
 - **Offline**: nothing is attempted. The game starts immediately from what is
   already installed.
-- **Online**: it fetches `webapp.json` from the release branch and compares
-  each file's SHA-256 against what is on the device. Only files that actually
-  differ are downloaded, into a staging directory. If every one arrives and
-  every hash matches, the staged set replaces the live one in a single rename;
-  if anything at all fails, the staging is thrown away and the copy already
-  installed is used.
+- **Online**: it asks GitHub for the file tree of the web branch
+  (`claude/roguelike-pixel-sidescroller-nmg0i5`), which already carries a hash
+  per file, and hashes what is on the device the same way git does. Only files
+  that actually differ are downloaded, into a staging directory. If every one
+  arrives and every hash matches, the staged set replaces the live one in a
+  single rename; if anything at all fails — no network, a rate limit, a bad
+  hash — the staging is thrown away and the copy already installed is used.
+
+Nothing about the update has to be maintained. There is no committed file list
+to keep in step: the branch's own tree is the list, so a module added to the
+game is picked up on the next launch, and the APK never needs rebuilding for a
+change to the web.
 
 Coming back from the background does **not** re-check — the activity is still
 alive and you are probably mid-run.
@@ -40,15 +46,19 @@ prefer the download and fall back to the package per file.
 
 ## What the build does
 
-1. `snapshot.sh` copies `index.html`, `js/`, `css/` and `shaders/` out of the
-   repository into `app/src/main/assets/www/`, writes a `build.json` recording
-   the commit and date, and regenerates `webapp.json` — the file list with
-   hashes that the installed app later compares against the web copy.
+1. CI checks the game files out of the **web branch** (not this one) and
+   `snapshot.sh` copies `index.html`, `js/`, `css/` and `shaders/` into
+   `app/src/main/assets/www/`, writing a `build.json` that records which commit
+   was taken. This bundle only has to be good enough to play offline on first
+   launch; after that the updater keeps the game current on its own.
 2. It then refuses to continue if anything in the bundle points at `http://`
    or `https://` — a single absolute reference would be a file the game could
    not load offline.
-3. Gradle packages that as the app's assets. `MainActivity` loads
-   `file:///android_asset/www/index.html?app=1`.
+3. Gradle packages that as the app's assets. `MainActivity` serves them
+   through `WebViewAssetLoader` at
+   `https://appassets.androidplatform.net/assets/www/index.html?app=1` — ES
+   modules loaded from `file://` have an opaque origin and are blocked by CORS,
+   which is what left the first build stuck on "click to start".
 
 The snapshot is **not** in git. It is generated, and a copy in the branch
 would sooner or later be the stale one that ships.

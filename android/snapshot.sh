@@ -27,12 +27,13 @@ for d in js css shaders; do
   fi
 done
 
-# The manifest travels with the bundle: it is what the updater compares the
-# web copy against to decide whether anything needs downloading.
-bash "$here/gen-webapp-manifest.sh" "$out/webapp.json" >/dev/null
-cp "$out/webapp.json" "$repo/webapp.json"
+# No file list travels with the bundle. The installed app asks GitHub for the
+# web branch's tree and hashes what it is holding, so this snapshot is only the
+# copy to play offline on first run - not a contract anyone has to keep current.
 
-sha="$(git -C "$repo" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+# In CI the game comes from the web branch, so name the bundle after that
+# commit rather than after whatever this branch happens to be on.
+sha="${GAME_SHA:-$(git -C "$repo" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
 date="$(date -u +%Y-%m-%d)"
 count="$(find "$out" -type f | wc -l | tr -d ' ')"
 

@@ -5,13 +5,19 @@ name: Build APK
 on:
   push:
     branches: [ 'claude/android-apk' ]
-    paths: [ 'android/**', '.github/workflows/android.yml', 'js/**', 'css/**', 'shaders/**', 'index.html' ]
+    paths: [ 'android/**', '.github/workflows/android.yml' ]
   workflow_dispatch:
     inputs:
       game_ref:
-        description: 'Branch, tag or SHA of the game to package (blank = this branch)'
+        description: 'Branch, tag or SHA of the game to package (blank = the web branch)'
         required: false
         default: ''
+
+env:
+  # Where the game itself lives. The app follows this branch at runtime, so the
+  # bundle inside the APK is packaged from it too - the two can never disagree
+  # about which game this is.
+  WEB_BRANCH: claude/roguelike-pixel-sidescroller-nmg0i5
 
 jobs:
   build:
@@ -25,15 +31,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Lets you build an APK of any version of the game without having to
-      # merge it into this branch first.
-      - name: Take the game from another ref
-        if: inputs.game_ref != ''
+      # The packaged copy always comes from the web branch, not from this one.
+      # Nothing has to be merged here for an APK to carry the current game.
+      - name: Take the game from the web branch
         run: |
           set -euo pipefail
-          git fetch --depth=1 origin "${{ inputs.game_ref }}"
+          REF="${{ inputs.game_ref }}"
+          [ -n "$REF" ] || REF="$WEB_BRANCH"
+          git fetch --depth=1 origin "$REF"
           git checkout FETCH_HEAD -- index.html js css shaders
-          echo "GAME_REF=${{ inputs.game_ref }}" >> "$GITHUB_ENV"
+          echo "GAME_REF=$REF" >> "$GITHUB_ENV"
           echo "GAME_SHA=$(git rev-parse --short FETCH_HEAD)" >> "$GITHUB_ENV"
 
       - name: Work out the version
@@ -44,23 +51,6 @@ jobs:
           echo "GAME_SHA=$SHA" >> "$GITHUB_ENV"
           echo "VERSION_NAME=$(date -u +%Y.%m.%d)-$SHA" >> "$GITHUB_ENV"
           echo "VERSION_CODE=$CODE" >> "$GITHUB_ENV"
-
-      # webapp.json is fetched over the network by the installed app, so a
-      # stale one would have it download a file list that no longer matches
-      # the game. Regenerate and compare rather than trusting anyone to
-      # remember.
-      - name: Check the web manifest is current
-        run: |
-          set -euo pipefail
-          cp webapp.json /tmp/webapp.committed.json 2>/dev/null || true
-          bash android/gen-webapp-manifest.sh /tmp/webapp.fresh.json
-          # the commit line differs by design between a local run and CI
-          strip() { grep -v '"commit"' "$1"; }
-          if ! diff <(strip /tmp/webapp.committed.json) <(strip /tmp/webapp.fresh.json); then
-            echo "webapp.json is stale. Run android/gen-webapp-manifest.sh and commit it."
-            exit 1
-          fi
-          echo "web manifest matches the tree"
 
       - name: Snapshot the game into the app
         run: bash android/snapshot.sh
@@ -105,8 +95,11 @@ jobs:
           COUNT=$(grep -c 'assets/www/' /tmp/apk.txt)
           echo "$COUNT game files packaged"
           [ "$COUNT" -ge 25 ] || { echo "too few files packaged"; exit 1; }
-          grep -q 'assets/www/webapp.json' /tmp/apk.txt \
-            || { echo "the update manifest is not in the APK"; exit 1; }
+          # The updater must follow the web branch, not this one: an APK that
+          # updates from its own branch stops seeing the game change.
+          grep -q 'claude/roguelike-pixel-sidescroller-nmg0i5' \
+            android/app/src/main/java/com/aetherdescent/game/GameUpdater.java \
+            || { echo "the updater is not pointed at the web branch"; exit 1; }
           # The game is ES modules. Loading them from file:// is blocked by
           # CORS, which is what left the first build stuck on "click to
           # start", so the app must not be pointed at file:// again.
