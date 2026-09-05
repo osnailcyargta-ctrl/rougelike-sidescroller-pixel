@@ -4,10 +4,11 @@ import { clamp, lerp, rand, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
 import { drawText, drawTextShadow, drawTextFit, textWidth, fitScale } from './font.js';
 import { pxRect, glowDot, Camera } from './gfx.js';
-import { VIEW_W, VIEW_H, BOW, SHARDGUN, STINGER_GUN, PLAYER, ENEMY_TYPES, BOSS_TYPES } from './config.js';
+import { VIEW_W, VIEW_H, BOW, SHARDGUN, STINGER_GUN, PLAYER, ENEMY_TYPES, BOSS_TYPES,
+  FINAL_ROOM, BOSS_ROOM_INTERVAL } from './config.js';
 import { ENEMY_TINT } from './entities.js';
 import { Options } from './settings.js';
-import { drawBossPreview } from './boss.js';
+import { drawBossPreview, bossIdForRoom } from './boss.js';
 import { SOUL_TINT } from './entities.js';
 import { ITEMS, RARITY, INV_COLS, INV_ROWS, INV_SIZE, HOTBAR_SIZE, ARMOR_SLOTS, Inventory, drawItemIcon } from './items.js';
 import { Input, Binds, BIND_ORDER, BIND_LABELS, bindLabel } from './input.js';
@@ -23,6 +24,7 @@ export const UI = {
   t: 0,
   dt: 0,
   dbgScroll: { items: 0, mobs: 0 },
+  dbgRoom: 1,              // the room the debug menu's teleport is pointed at
   fps: 0,
   tab: 'indicator',        // which settings tab is showing
 };
@@ -1016,7 +1018,7 @@ export function drawDebugMenu(ctx, game) {
   const mobsH = DEBUG_ROWS * (bh2 + bgap) - bgap;
 
   const w = 268;
-  const h = 60 + itemsH + 26 + mobsH + 24;
+  const h = 60 + itemsH + 26 + mobsH + 44;
   const x = Math.round((VIEW_W - w) / 2);
   const y = Math.round((VIEW_H - h) / 2);
   panel(ctx, x, y, w, h, { accent: '#8ce88c' });
@@ -1114,6 +1116,37 @@ export function drawDebugMenu(ctx, game) {
     if (live) pxRect(ctx, bx + 1, by + 1, 2, bh2 - 2, tint);
   }
   ctx.restore();
+
+  // --- drop straight into a room
+  const ry = by0 + mobsH + 14;
+  const maxRoom = live ? game.lastRoom : FINAL_ROOM;
+  UI.dbgRoom = clamp(Math.round(UI.dbgRoom ?? 1), 1, maxRoom);
+  drawText(ctx, 'GO TO ROOM', gx, ry - 10, live ? Theme.uiAccent : Theme.uiDim, 1);
+  if (button(ctx, 'dbg-room-less', gx, ry, 15, 15, '-', { disabled: !live || UI.dbgRoom <= 1 })) {
+    UI.dbgRoom = Math.max(1, UI.dbgRoom - 1);
+  }
+  // the number itself takes the wheel, so a long way up the tower is one flick
+  const nx = gx + 18, nw = 38;
+  pxRect(ctx, nx, ry, nw, 15, rgba('#000000', 0.5));
+  ctx.strokeStyle = rgba(live ? Theme.uiAccent : Theme.uiDim, 0.8);
+  ctx.strokeRect(nx + 0.5, ry + 0.5, nw - 1, 14);
+  drawText(ctx, `${UI.dbgRoom}/${maxRoom}`, nx + nw / 2, ry + 5, live ? Theme.ui : Theme.uiDim, 1, 'center');
+  if (live && inside(nx, ry, nw, 15) && Input.wheel !== 0) {
+    UI.dbgRoom = clamp(UI.dbgRoom - Math.sign(Input.wheel), 1, maxRoom);
+    Sfx.ui();
+  }
+  if (button(ctx, 'dbg-room-more', nx + nw + 3, ry, 15, 15, '+', { disabled: !live || UI.dbgRoom >= maxRoom })) {
+    UI.dbgRoom = Math.min(maxRoom, UI.dbgRoom + 1);
+  }
+  // where you would land, since a room number on its own says little
+  const bossAt = live && game.mode === 'bossrush'
+    ? (BOSS_TYPES[game.rushBossFor(UI.dbgRoom)] ?? null)
+    : (UI.dbgRoom % BOSS_ROOM_INTERVAL === 0 ? BOSS_TYPES[bossIdForRoom(UI.dbgRoom)] ?? null : null);
+  const note = bossAt ? (bossAt.short ?? bossAt.name).toUpperCase() : 'NORMAL WAVES';
+  drawTextFit(ctx, note, nx + nw + 24, ry + 5, live ? Theme.uiDim : rgba(Theme.uiDim, 0.5), 84, 1);
+  if (button(ctx, 'dbg-room-go', x + w - 84, ry, 72, 15, 'TELEPORT', { disabled: !live })) {
+    game.debugGoToRoom(UI.dbgRoom);
+  }
 
   // --- the row of actions, always inside the panel
   const ay = y + h - 20;

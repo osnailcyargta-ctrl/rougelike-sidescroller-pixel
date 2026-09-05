@@ -928,15 +928,23 @@ export function drawBossPreview(ctx, boss, t) {
   for (const p of boss.previewParts ?? []) if (p.draw) p.draw(ctx);
 }
 
-export function makeBoss(game, roomIndex, which = null) {
-  if (which === 'golem') return new GolemBoss(game, roomIndex);
-  if (which === 'bigdude') return new WormBoss(game, roomIndex);
-  if (which === 'alphads') return new AlphadsBoss(game, roomIndex);
-  if (which === 'ceiling') return new CeilingBoss(game, roomIndex);
-  if (which === 'poitnus') return new PoitnusBoss(game, roomIndex);
+// Whose room this is. Kept apart from makeBoss so anything that wants to say
+// what is waiting in a room - the debug teleport, for one - asks the same
+// question the fight itself answers.
+export function bossIdForRoom(roomIndex) {
   // the last room belongs to the god, whatever the rotation says
-  if (roomIndex >= FINAL_ROOM) return new AlphadsBoss(game, roomIndex);
-  if (roomIndex === CEILING_ROOM) return new CeilingBoss(game, roomIndex);
+  if (roomIndex >= FINAL_ROOM) return 'alphads';
+  if (roomIndex === CEILING_ROOM) return 'ceiling';
   const tier = Math.max(1, Math.round(roomIndex / BOSS_ROOM_INTERVAL));
-  return tier % 2 === 1 ? new GolemBoss(game, roomIndex) : new WormBoss(game, roomIndex);
+  return tier % 2 === 1 ? 'golem' : 'bigdude';
+}
+
+export function makeBoss(game, roomIndex, which = null) {
+  const id = which ?? bossIdForRoom(roomIndex);
+  if (id === 'golem') return new GolemBoss(game, roomIndex);
+  if (id === 'bigdude') return new WormBoss(game, roomIndex);
+  if (id === 'alphads') return new AlphadsBoss(game, roomIndex);
+  if (id === 'ceiling') return new CeilingBoss(game, roomIndex);
+  if (id === 'poitnus') return new PoitnusBoss(game, roomIndex);
+  return new GolemBoss(game, roomIndex);
 }

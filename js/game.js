@@ -288,6 +288,29 @@ export class Game {
     Camera.add(8);
   }
 
+  // Drop straight into a room, skipping everything between here and it. The
+  // room is built exactly as the run would build it, so what you land in is
+  // the real thing and not a debug approximation of it.
+  debugGoToRoom(n) {
+    if (!this.player) return;
+    const room = clamp(Math.round(n), 1, this.lastRoom);
+    // Whatever was mid-flight would otherwise land on top of the new room: a
+    // boss outro still running, a spoils screen waiting on a countdown, a
+    // stopped clock.
+    if (this.cutscene.active) this.cutscene.finish();
+    this.rushReward = null;
+    this.pendingSpawns.length = 0;
+    this.bolts.length = 0;
+    this.shockwaves.length = 0;
+    this.timeStopT = 0;
+    this.freezeT = 0;
+    this.invOpen = false;
+    this.debugOpen = false;
+    this.screen = 'playing';
+    this.startRoom(room);
+    this.toast(`ROOM ${room}`);
+  }
+
   hitstop(t) { this.freezeT = Math.max(this.freezeT, t); }
 
   // --- run flow ----------------------------------------------------------
