@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
   <string name="app_name">Aether Descent</string>
+  <string name="open_shader">Load shader pack</string>
 </resources>

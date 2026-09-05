@@ -29,6 +29,33 @@
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
+
+      <!-- Open a .shdr with the game. The name is matched rather than the
+           type, because a shader pack is plain text and offering this app for
+           every text file on the phone would be rude. A content:// URI does
+           not always carry the file name in its path; those come through the
+           share sheet below instead. -->
+      <intent-filter android:label="@string/open_shader">
+        <action android:name="android.intent.action.VIEW" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <category android:name="android.intent.category.BROWSABLE" />
+        <data android:scheme="file" />
+        <data android:scheme="content" />
+        <data android:mimeType="text/plain" />
+        <data android:mimeType="application/octet-stream" />
+        <data android:pathPattern=".*\\.shdr" />
+        <data android:pathPattern=".*\\..*\\.shdr" />
+        <data android:pathPattern=".*\\..*\\..*\\.shdr" />
+      </intent-filter>
+
+      <!-- Share a file to the game. Nothing is matched on the name here, so
+           this is the way in for a pack whose URI hides it. -->
+      <intent-filter android:label="@string/open_shader">
+        <action android:name="android.intent.action.SEND" />
+        <category android:name="android.intent.category.DEFAULT" />
+        <data android:mimeType="text/plain" />
+        <data android:mimeType="application/octet-stream" />
+      </intent-filter>
     </activity>
   </application>
 </manifest>

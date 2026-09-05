@@ -17,6 +17,24 @@ when the files underneath change.
 If the game object has not appeared a few seconds after the page loads, the
 loading screen says so instead of handing over a dead overlay.
 
+## Opening a .shdr with the game
+
+Tapping a `.shdr` in a file manager, or sharing one to Aether Descent, hands
+the pack straight to the game: it goes on the SHADERS shelf in settings and is
+switched on. Arriving mid-run does not interrupt anything.
+
+Two filters, because one cannot cover it. `VIEW` matches the file **name**, not
+the type - a shader pack is plain text, and offering this app for every text
+file on the phone would be rude - so it works wherever the URI carries the name.
+`SEND` (the share sheet) matches the type instead, which is the way in for a
+`content://` URI that hides the name behind an id.
+
+The activity is `singleTask`, so a second pack opened while the game is running
+arrives at `onNewIntent` rather than starting the game again. The file is read
+off the main thread, capped at 512KB, and handed to `window.__aetherOpenShader`
+once that door exists - opening a pack from a cold start gets there long before
+the page has booted, so it waits rather than firing into nothing.
+
 ## Updating
 
 On a **cold start** — first launch, or after the app was swiped out of recents

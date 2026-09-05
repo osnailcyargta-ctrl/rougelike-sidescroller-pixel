@@ -2,6 +2,10 @@ package com.aetherdescent.game;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.Intent;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.OpenableColumns;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.os.Build;
@@ -63,6 +67,9 @@ public class MainActivity extends Activity {
   private final Handler ui = new Handler(Looper.getMainLooper());
   private ExecutorService work;
   private boolean loaded;
+  /** A shader handed over by the system, waiting for the game to be up. */
+  private String shaderName;
+  private String shaderText;
 
   @SuppressLint("SetJavaScriptEnabled")
   @Override
@@ -88,6 +95,99 @@ public class MainActivity extends Activity {
     // A cold start is the only time this runs. Coming back from the background
     // does not re-check: the activity is still here and the game is mid-run.
     work.execute(this::startup);
+    // Opened by tapping a .shdr, or by sharing one to the game.
+    takeShaderFrom(getIntent());
+  }
+
+  @Override
+  protected void onNewIntent(Intent intent) {
+    super.onNewIntent(intent);
+    setIntent(intent);
+    // The activity is singleTask, so a second .shdr arrives here rather than
+    // starting the game again. The run in progress is not disturbed: the pack
+    // goes on the shelf and is switched on.
+    takeShaderFrom(intent);
+  }
+
+  // --- a shader handed over by the system ------------------------------------
+
+  /** No .shdr is anywhere near this big; anything that is, is not one. */
+  private static final int MAX_SHADER = 512 * 1024;
+
+  private void takeShaderFrom(Intent intent) {
+    if (intent == null || work == null) return;
+    Uri uri = null;
+    String action = intent.getAction();
+    if (Intent.ACTION_VIEW.equals(action)) uri = intent.getData();
+    else if (Intent.ACTION_SEND.equals(action)) uri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+    if (uri == null) return;
+    final Uri u = uri;
+    work.execute(() -> {
+      final String name = displayName(u);
+      final String text = readText(u);
+      if (text == null) {
+        say("COULD NOT READ THAT FILE", 0, 0);
+        return;
+      }
+      ui.post(() -> {
+        shaderName = name;
+        shaderText = text;
+        handShaderOver(0);
+      });
+    });
+  }
+
+  /**
+   * Hand it to the game, once there is a game to hand it to. Opening a .shdr
+   * from a cold start gets here long before the page has booted, so this waits
+   * for the door to exist rather than firing into nothing.
+   */
+  private void handShaderOver(int attempt) {
+    if (shaderText == null || web == null) return;
+    web.evaluateJavascript("(typeof window.__aetherOpenShader === 'function')", value -> {
+      if ("true".equals(value)) {
+        String js = "window.__aetherOpenShader("
+            + org.json.JSONObject.quote(shaderName) + ","
+            + org.json.JSONObject.quote(shaderText) + ")";
+        web.evaluateJavascript(js, null);
+        shaderName = null;
+        shaderText = null;
+      } else if (attempt < 60) {
+        ui.postDelayed(() -> handShaderOver(attempt + 1), 250);
+      } else {
+        shaderName = null;
+        shaderText = null;
+      }
+    });
+  }
+
+  private String displayName(Uri u) {
+    String name = null;
+    try (Cursor c = getContentResolver().query(u, null, null, null, null)) {
+      if (c != null && c.moveToFirst()) {
+        int i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+        if (i >= 0) name = c.getString(i);
+      }
+    } catch (Exception ignored) {
+      // a file:// URI has no provider to ask; the path is the name
+    }
+    if (name == null || name.isEmpty()) name = u.getLastPathSegment();
+    if (name == null || name.isEmpty()) return "SHARED";
+    int slash = name.lastIndexOf('/');
+    if (slash >= 0) name = name.substring(slash + 1);
+    if (name.toLowerCase().endsWith(".shdr")) name = name.substring(0, name.length() - 5);
+    return name.isEmpty() ? "SHARED" : name;
+  }
+
+  private String readText(Uri u) {
+    try (InputStream in = getContentResolver().openInputStream(u)) {
+      if (in == null) return null;
+      byte[] data = GameFiles.drain(in);
+      if (data.length == 0 || data.length > MAX_SHADER) return null;
+      return new String(data, "UTF-8");
+    } catch (Exception e) {
+      return null;
+    }
   }
 
   // --- the game view --------------------------------------------------------
