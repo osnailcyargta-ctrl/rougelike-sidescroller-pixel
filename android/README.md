@@ -18,6 +18,17 @@ it plays in flight mode.
 The snapshot is **not** in git. It is generated, and a copy in the branch
 would sooner or later be the stale one that ships.
 
+## Known good
+
+The first CI run built it in 48 seconds:
+
+```
+BUILD SUCCESSFUL in 48s
+aether-descent-2026.09.05-1402e6d-debug.apk   256K
+aether-descent-2026.09.05-1402e6d.apk         218K
+32 game files packaged
+```
+
 ## Getting an APK
 
 Push to `claude/android-apk`, or run **Build APK** from the Actions tab. The

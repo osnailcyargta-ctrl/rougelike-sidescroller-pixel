@@ -16,6 +16,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # The whole job takes about a minute and a half. Anything past ten means
+    # something is stuck, and a stuck job should fail rather than sit there.
+    timeout-minutes: 20
     steps:
       - name: Check out the app
         uses: actions/checkout@v4
