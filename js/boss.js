@@ -119,6 +119,14 @@ export class GolemBoss {
     if (this.hp <= 0) this.die();
   }
 
+  // Making the head is separate from tearing it off: the codex wants the
+  // shape without the earthquake that normally comes with it.
+  spawnHead(o) {
+    this.head = new BossPart('golemHead', o.x, o.y + this.def.headH / 2, this.game, this);
+    this.head.tilt = 0;
+    return this.head;
+  }
+
   enterPhase2() {
     this.phase = 2;
     this.hp = Math.max(1, this.hp);
@@ -133,9 +141,7 @@ export class GolemBoss {
       color: Theme.lightning, color2: '#ffffff', speedMin: 40, speedMax: 260,
       lifeMin: 0.3, lifeMax: 1.0, sizeMax: 3, gravity: 160,
     });
-    this.head = new BossPart('golemHead', o.x, o.y + this.def.headH / 2, this.game, this);
-    this.head.tilt = 0;
-    this.game.enemies.push(this.head);
+    this.game.enemies.push(this.spawnHead(o));
     // the head does not teleport to its perch: it wrenches loose, sags, then
     // climbs while the socket sprays arcs behind it
     this.detach = {
@@ -887,6 +893,41 @@ export class GolemBoss {
 }
 
 // `which` forces a specific boss; without it, boss rooms alternate.
+// A boss built to be looked at, not fought: its parts are pulled straight back
+// out of the room so nothing can hit them, nothing updates it, and phase two
+// is reached by hand rather than by the transition that shakes the screen.
+export function makeBossPreview(game, id, phase = 1) {
+  const before = game.enemies.length;
+  const boss = makeBoss(game, CODEX_ROOM[id] ?? 5, id);
+  boss.previewParts = game.enemies.splice(before);
+  boss.intro = 0;
+  if (boss.posePreview) boss.posePreview();
+  if (phase === 2 && boss.spawnHead) {
+    boss.phase = 2;
+    const head = boss.spawnHead(boss.headOrigin());
+    // In the fight it hovers most of the room above the body. A portrait that
+    // framed both would shrink each to nothing, so here it sits just clear of
+    // the socket: what the page has to show is that the head came off.
+    head.y = GROUND_Y - boss.def.bodyH - 14;
+    boss.previewParts.push(head);
+  }
+  return boss;
+}
+
+// Where each one turns up, which is also the order the codex lists them in.
+export const CODEX_ROOM = {
+  golem: 5, bigdude: 10, ceiling: CEILING_ROOM, alphads: FINAL_ROOM, poitnus: 0,
+};
+
+// Paint a preview at whatever transform the caller has set up. The Golem has
+// no draw() of its own - its parts carry the art - so both are tried.
+export function drawBossPreview(ctx, boss, t) {
+  if (!boss) return;
+  for (const p of boss.previewParts ?? []) p.anim = t;
+  if (boss.draw) boss.draw(ctx);
+  for (const p of boss.previewParts ?? []) if (p.draw) p.draw(ctx);
+}
+
 export function makeBoss(game, roomIndex, which = null) {
   if (which === 'golem') return new GolemBoss(game, roomIndex);
   if (which === 'bigdude') return new WormBoss(game, roomIndex);

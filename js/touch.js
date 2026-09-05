@@ -67,6 +67,7 @@ function hit(t, c) { return Math.hypot(t.vx - c.x, t.vy - c.y) <= c.r; }
 
 function claimFor(t, g, game) {
   if (hit(t, g.pause)) return 'btn:pause';
+  if (hit(t, g.book)) return 'btn:book';
   for (const b of g.buttons) if (hit(t, { x: b.x, y: b.y, r: b.r + 4 })) return 'btn:' + b.id;
   // the hotbar is the one piece of HUD you still need mid-fight
   for (let i = 0; i < HOTBAR_SIZE; i++) {
@@ -110,6 +111,8 @@ function drainTouches(game, g, active) {
         }
       } else if (claim === 'btn:pause') {
         virtualKeyTap('Escape');
+      } else if (claim === 'btn:book') {
+        virtualKeyTap(Binds.codex);
       } else if (claim === 'btn:autoFire') {
         Pad.autoFire = !Pad.autoFire;
         Sfx.ui();
@@ -354,6 +357,26 @@ export function drawTouchPad(ctx, game) {
   const bh = Math.round(q.r * 0.72), bw = Math.max(1, Math.round(q.r * 0.16));
   pxRect(ctx, q.x - bw * 2, q.y - bh / 2, bw, bh, rgba('#ffffff', 0.8 * a));
   pxRect(ctx, q.x + bw, q.y - bh / 2, bw, bh, rgba('#ffffff', 0.8 * a));
+
+  // the bestiary, under it: an open book rather than a word, since the label
+  // would not survive being shrunk to fit a 12px disc
+  const k = g.book;
+  const down = heldButton('book');
+  disc(ctx, k.x, k.y, k.r, '#000000', 0.34 * a);
+  disc(ctx, k.x, k.y, k.r, down ? Theme.uiAccent : Theme.uiDim, (down ? 0.3 : 0.16) * a);
+  ring(ctx, k.x, k.y, k.r, down ? Theme.uiAccent : Theme.uiDim, 0.62 * a);
+  const pw = Math.max(2, Math.round(k.r * 0.44));
+  const ph = Math.max(3, Math.round(k.r * 0.62));
+  const col = rgba('#ffffff', 0.85 * a);
+  const dim = rgba('#ffffff', 0.45 * a);
+  // two leaves and the spine between them
+  pxRect(ctx, k.x - pw - 1, k.y - ph / 2, pw, ph, col);
+  pxRect(ctx, k.x + 1, k.y - ph / 2, pw, ph, col);
+  pxRect(ctx, k.x, k.y - ph / 2 - 1, 1, ph + 2, dim);
+  for (let i = 1; i < 3; i++) {
+    pxRect(ctx, k.x - pw, k.y - ph / 2 + i * 2, pw - 1, 1, dim);
+    pxRect(ctx, k.x + 2, k.y - ph / 2 + i * 2, pw - 1, 1, dim);
+  }
 }
 
 // The edge of the aim's reach, drawn in world space with the reticle rather

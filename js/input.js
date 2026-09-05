@@ -9,14 +9,14 @@ const DOUBLE_TAP_WINDOW = 0.28;
 // --- key bindings -------------------------------------------------------
 // Actions are rebindable; everything in gameplay asks for an action, never a
 // literal key, so remapping is a single source of truth.
-export const BIND_ORDER = ['left', 'right', 'jump', 'down', 'inventory', 'reload', 'grapple'];
+export const BIND_ORDER = ['left', 'right', 'jump', 'down', 'inventory', 'reload', 'grapple', 'codex'];
 export const BIND_LABELS = {
   left: 'MOVE LEFT', right: 'MOVE RIGHT', jump: 'JUMP', down: 'DROP / SLAM',
-  inventory: 'INVENTORY', reload: 'RELOAD', grapple: 'GRAPPLE',
+  inventory: 'INVENTORY', reload: 'RELOAD', grapple: 'GRAPPLE', codex: 'BESTIARY',
 };
 export const DEFAULT_BINDS = {
   left: 'a', right: 'd', jump: 'w', down: 's',
-  inventory: 'e', reload: 'r', grapple: 'q',
+  inventory: 'e', reload: 'r', grapple: 'q', codex: 'Tab',
 };
 export const Binds = { ...DEFAULT_BINDS };
 const BIND_STORE = 'aether.binds';

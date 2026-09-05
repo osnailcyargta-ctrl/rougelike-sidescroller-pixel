@@ -14,14 +14,15 @@ import {
   ARMOR, PAPER_SHIELD, ANVIL, GRAPPLE, STINGER_GUN, BLOCK, DROPS, GIANT_EGG, FORGE_VISIBLE_ROWS,
 } from './config.js';
 import { Player, Enemy, Projectile, SHARD_TINT, INK, doodleShape, doodleLine } from './entities.js';
-import { makeBoss } from './boss.js';
+import { makeBoss, makeBossPreview } from './boss.js';
 import { Cutscene } from './cutscene.js';
+import { CODEX_ORDER, codexEntry, codexView, loadCodex, markBossDefeated } from './codex.js';
 import { drawBackground, drawArena, drawLightShafts, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal, Anvil } from './world.js';
 import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
-import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, drawForge, panel, button } from './ui.js';
+import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, drawForge, drawCodex, panel, button } from './ui.js';
 import { updateTouchPad, drawTouchPad, drawAimLeash, Pad } from './touch.js';
 import { Perf, perfTick, syncPerfOptions, TIERS } from './perf.js';
-import { forgeLayout, forgeRowRect, forgeListRect, closeRect, inRect } from './layout.js';
+import { forgeLayout, forgeRowRect, forgeListRect, closeRect, inRect, codexLayout, codexRowRect } from './layout.js';
 import { drawText, drawTextShadow } from './font.js';
 import { Options, loadOptions, saveOptions, applyVisualOptions, captureShaderBase, saveShader, loadShader } from './settings.js';
 import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, drawControls, drawVictory } from './screens.js';
@@ -81,8 +82,10 @@ export class Game {
     this.portal = null;
     this.anvil = null;
     this.forge = null;       // the crafting popup, open only while paused
+    this.codex = null;       // the bestiary, readable from anywhere
     this.boss = null;
     this.cutscene = new Cutscene(this);
+    loadCodex();
     this.roomIndex = 1;
     this.waveIndex = 1;
     this.roomCleared = false;
@@ -301,7 +304,7 @@ export class Game {
     this.startRoom(1);
   }
 
-  quitToMenu() { this.screen = 'menu'; this.player = null; clearFx(); }
+  quitToMenu() { this.closeCodex(); this.screen = 'menu'; this.player = null; clearFx(); }
 
   isBossRoom(index = this.roomIndex) { return index % BOSS_ROOM_INTERVAL === 0; }
 
@@ -363,6 +366,7 @@ export class Game {
   // Called by a boss the moment its pool empties.
   onBossDefeated(boss) {
     if (this.screen !== 'playing') return;
+    markBossDefeated(boss.def?.id);
     this.rollBossDrop(boss);
     this.cutscene.play('outro', boss);
   }
@@ -481,6 +485,102 @@ export class Game {
       color: '#ffffff', kind: 'streak', speedMin: 160, speedMax: 400,
       lifeMin: 0.06, lifeMax: 0.18, gravity: 0, drag: 0.8,
     });
+  }
+
+  // --- the bestiary --------------------------------------------------------
+  // Openable any time, from the menu or mid-fight: it holds the world still
+  // like the forge does, so reading it is never a way to dodge a hit.
+
+  toggleCodex() { if (this.codex) this.closeCodex(); else this.openCodex(); }
+
+  openCodex() {
+    if (this.codex) return;
+    const entries = CODEX_ORDER.map(codexEntry).filter(Boolean);
+    // start on the first one you have not beaten yet - the page you want
+    const first = entries.findIndex((e) => !e.beaten);
+    this.codex = {
+      t: 0, sel: first < 0 ? 0 : first, phase: 1, entries,
+      preview: null, view: codexView(entries[0].id, 1), phaseRects: [], geom: codexLayout(),
+    };
+    this.buildCodexPreview();
+    Sfx.ui();
+  }
+
+  closeCodex() {
+    if (!this.codex) return;
+    this.dropCodexPreview();
+    this.codex = null;
+    Sfx.ui();
+  }
+
+  // The preview is a whole boss, so it is built once per page turn and thrown
+  // away on the next one rather than every frame.
+  buildCodexPreview() {
+    const c = this.codex;
+    this.dropCodexPreview();
+    const e = c.entries[c.sel];
+    if (!e) return;
+    const phase = e.twoPhases ? c.phase : 1;
+    try {
+      c.preview = makeBossPreview(this, e.id, phase);
+    } catch (err) {
+      // a page that cannot draw itself is not worth crashing the book over
+      console.error('codex preview', err);
+      c.preview = null;
+    }
+    c.view = codexView(e.id, phase);
+  }
+
+  dropCodexPreview() {
+    const c = this.codex;
+    if (!c || !c.preview) return;
+    // belt and braces: the parts were spliced out when it was built, but a
+    // stray reference left in the room would be a boss you cannot see
+    for (const p of c.preview.previewParts ?? []) {
+      const i = this.enemies.indexOf(p);
+      if (i >= 0) this.enemies.splice(i, 1);
+    }
+    c.preview = null;
+  }
+
+  updateCodex(dt) {
+    const c = this.codex;
+    c.t += dt;
+    const n = c.entries.length;
+    const g = codexLayout();
+    c.geom = g;
+
+    // Escape and Tab are both handled in handleGlobalKeys, which runs first;
+    // here only the right button closes it.
+    if (Input.mouseDown.right) { this.closeCodex(); return; }
+    let want = c.sel, phase = c.phase;
+    if (Input.wheel !== 0) want = (want + sign(Input.wheel) + n) % n;
+    if (Input.pressed.has(Binds.jump) || Input.pressed.has('ArrowUp')) want = (want - 1 + n) % n;
+    if (Input.pressed.has(Binds.down) || Input.pressed.has('ArrowDown')) want = (want + 1) % n;
+    if (Input.pressed.has(Binds.left) || Input.pressed.has('ArrowLeft')) phase = 1;
+    if (Input.pressed.has(Binds.right) || Input.pressed.has('ArrowRight')) phase = 2;
+
+    const cr = closeRect(g.x, g.y, g.w);
+    c.closeHot = inRect(cr, Input.mouse.x, Input.mouse.y);
+    if (c.closeHot && Input.mouseDown.left) { this.closeCodex(); return; }
+
+    if (Input.mouseDown.left) {
+      for (let i = 0; i < n; i++) {
+        if (inRect(codexRowRect(g, i), Input.mouse.x, Input.mouse.y)) { want = i; break; }
+      }
+      for (let i = 0; i < c.phaseRects.length; i++) {
+        if (inRect(c.phaseRects[i], Input.mouse.x, Input.mouse.y)) { phase = i + 1; break; }
+      }
+    }
+
+    const entry = c.entries[want];
+    phase = entry && entry.twoPhases ? clamp(phase, 1, 2) : 1;
+    if (want !== c.sel || phase !== c.phase) {
+      c.sel = want;
+      c.phase = phase;
+      this.buildCodexPreview();
+      Sfx.ui();
+    }
   }
 
   // --- setting things down -----------------------------------------------
@@ -1217,7 +1317,13 @@ export class Game {
         this.toast(`GRAPHICS: ${TIERS[tier].name}`);
       }
       this.handleGlobalKeys();
-      if (this.debugOpen) {
+      // The bestiary is readable from anywhere, including the menu, so it is
+      // driven here rather than from update() - which only runs while a run
+      // is actually in progress.
+      if (this.codex) {
+        this.updateCodex(dt);
+        updateWorld(dt, true);
+      } else if (this.debugOpen) {
         updateWorld(dt, true);
       } else if (this.screen === 'playing' || this.screen === 'gameover') {
         this.update(gdt);
@@ -1251,8 +1357,16 @@ export class Game {
       this.debugOpen = !this.debugOpen;
       Sfx.ui();
     }
+    // The bestiary toggles from exactly one place. Handling the same key in
+    // updateCodex as well would open and close it inside a single frame.
+    if (Input.pressed.has(Binds.codex) && !this.debugOpen &&
+        (this.screen === 'playing' || this.screen === 'paused')) {
+      this.toggleCodex();
+      return;
+    }
     if (!Input.pressed.has('Escape')) return;
     if (this.debugOpen) { this.debugOpen = false; return; }
+    if (this.codex) { this.closeCodex(); return; }
     if (this.screen === 'playing') {
       if (this.invOpen) this.invOpen = false;
       else this.screen = 'paused';
@@ -1266,7 +1380,7 @@ export class Game {
 
   // Anything that stops the world: a menu, a popup, the god's held breath.
   get worldFrozen() {
-    return this.screen !== 'playing' || this.invOpen || !!this.fold || !!this.forge
+    return this.screen !== 'playing' || this.invOpen || !!this.fold || !!this.forge || !!this.codex
       || this.debugOpen || this.timeStopT > 0;
   }
 
@@ -1619,6 +1733,8 @@ export class Game {
     if (this.screen === 'paused') drawPause(ctx, this, this.time);
     if (this.screen === 'gameover') drawGameOver(ctx, this, this.time);
     if (this.screen === 'victory') drawVictory(ctx, this, this.time);
+    // over the pause menu, since that is where a phone reaches it from
+    if (this.codex) drawCodex(ctx, this);
     if (this.debugOpen) drawDebugMenu(ctx, this);
     this.drawToast(ctx);
   }

@@ -414,6 +414,22 @@ export class WormBoss {
 
   // --- art ---------------------------------------------------------------
 
+  // Reared out of the floor, which is the only time you ever get to look at
+  // it. Built for the codex; the fight never calls this.
+  posePreview() {
+    const d = this.def;
+    this.hx = VIEW_W / 2 + 34;
+    this.hy = GROUND_Y - 96;
+    this.airborne = true;
+    let x = this.hx, y = this.hy, ang = 2.5;      // heading back and down
+    for (const s of this.segments) {
+      s.x = x; s.y = y;
+      x += Math.cos(ang) * d.segSpacing;
+      y += Math.sin(ang) * d.segSpacing;
+      ang += 0.075;                                // curls under as it goes
+    }
+  }
+
   draw(ctx) {
     const d = this.def;
     const flash = this.head.hurtFlash > 0 || this.bodyParts.some((p) => p.hurtFlash > 0);

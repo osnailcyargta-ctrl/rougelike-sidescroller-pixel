@@ -52,11 +52,39 @@ export function padLayout() {
       btn('inventory', 107, 176, L, 'BAG', 'tap', Theme.ui),
     ],
     pause: { id: 'pause', ...grow(17, 17, 0, 0, s), r: PAUSE_R * s },
+    // directly under the pause button, so both live in the same corner and
+    // neither is under the thumb that is steering
+    book: { id: 'book', ...grow(17, 17 + PAUSE_R * 2 + 6, 0, 0, s), r: PAUSE_R * s },
   };
 }
 
 // How far the HUD has to step aside for the pause button in the corner.
 // Derived from the button itself so the two can never drift apart.
+// --- the codex, a book laid open across the screen -----------------------
+
+export const CODEX_W = 404;
+export const CODEX_H = 236;
+export const CODEX_ROW_H = 17;
+
+export function codexLayout() {
+  const w = CODEX_W, h = CODEX_H;
+  const x = Math.round((VIEW_W - w) / 2), y = Math.round((VIEW_H - h) / 2);
+  // the spine runs down the middle; the left leaf is the list, the right the
+  // page you are reading
+  const spine = x + Math.round(w * 0.40);
+  return {
+    x, y, w, h, spine,
+    left: { x: x + 8, y: y + 26, w: spine - x - 17, h: h - 34 },
+    // the right leaf starts lower: its title line has to clear the close button
+    right: { x: spine + 9, y: y + 28, w: x + w - spine - 17, h: h - 36 },
+    rowH: CODEX_ROW_H,
+  };
+}
+
+export function codexRowRect(g, i) {
+  return { x: g.left.x, y: g.left.y + 4 + i * g.rowH, w: g.left.w, h: g.rowH - 2 };
+}
+
 export function hudInset() {
   if (!Options.mobileControls) return 6;
   const q = padLayout().pause;

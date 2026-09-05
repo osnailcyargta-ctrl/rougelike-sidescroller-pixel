@@ -7,9 +7,10 @@ import { pxRect, glowDot, Camera } from './gfx.js';
 import { VIEW_W, VIEW_H, BOW, SHARDGUN, STINGER_GUN, PLAYER, ENEMY_TYPES, BOSS_TYPES } from './config.js';
 import { ENEMY_TINT } from './entities.js';
 import { Options } from './settings.js';
+import { drawBossPreview } from './boss.js';
 import { ITEMS, RARITY, INV_COLS, INV_ROWS, INV_SIZE, HOTBAR_SIZE, ARMOR_SLOTS, Inventory, drawItemIcon } from './items.js';
 import { Input, Binds, BIND_ORDER, BIND_LABELS, bindLabel } from './input.js';
-import { hotbarSlotRect, hudInset, forgeLayout, forgeRowRect, forgeTrackRect, closeRect } from './layout.js';
+import { hotbarSlotRect, hudInset, forgeLayout, forgeRowRect, forgeTrackRect, closeRect, codexLayout, codexRowRect } from './layout.js';
 import { Sfx } from './audio.js';
 
 export const UI = {
@@ -617,6 +618,192 @@ export function drawForge(ctx, game) {
   closeButton(ctx, closeRect(x, y, w), !!f.closeHot);
   ctx.restore();
   if (UI.tooltip) { drawTooltip(ctx, UI.tooltip); UI.tooltip = null; }
+}
+
+// --- the codex ------------------------------------------------------------
+// A book held open: the running order down the left leaf, the page you have
+// turned to on the right. The only thing you have to earn is the tick.
+//
+// The palette is deliberately dark. A cream page is the obvious choice for a
+// book and completely the wrong one here: the bloom pass takes anything that
+// bright and turns the whole spread into a white haze you cannot read.
+
+const CODEX_PAGE = '#2a2417';
+const CODEX_PAGE2 = '#221d13';
+const CODEX_INK = '#e4d8b4';
+const CODEX_FADE = '#9a8a63';
+const CODEX_GOLD = '#c9a227';
+const CODEX_LEATHER = '#4a3520';
+
+export function drawCodex(ctx, game) {
+  const c = game.codex;
+  if (!c) return;
+  const t = UI.t;
+  const ease = 1 - Math.pow(1 - clamp(c.t * 6, 0, 1), 3);
+  const g = c.geom ?? codexLayout();
+
+  ctx.save();
+  ctx.fillStyle = rgba('#05060c', 0.78 * ease);
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.restore();
+
+  ctx.save();
+  ctx.globalAlpha = ease;
+  const { x, y, w, h, spine } = g;
+  // the cover, then the two leaves, then a shadow gathering into the spine so
+  // it reads as folded rather than as one flat rectangle
+  pxRect(ctx, x - 4, y - 4, w + 8, h + 8, '#1a1109');
+  pxRect(ctx, x - 3, y - 3, w + 6, h + 6, CODEX_LEATHER);
+  pxRect(ctx, x - 3, y - 3, w + 6, 1, '#6b5334');
+  pxRect(ctx, x, y, w, h, CODEX_PAGE);
+  pxRect(ctx, x, y, spine - x, h, CODEX_PAGE2);
+  for (const dir of [-1, 1]) {
+    const gr = ctx.createLinearGradient(spine, 0, spine + dir * 24, 0);
+    gr.addColorStop(0, rgba('#000000', 0.5));
+    gr.addColorStop(1, rgba('#000000', 0));
+    ctx.fillStyle = gr;
+    ctx.fillRect(dir < 0 ? spine - 24 : spine, y, 24, h);
+  }
+  pxRect(ctx, spine - 1, y, 2, h, '#160e07');
+  for (let i = 0; i < 7; i++) pxRect(ctx, spine, y + 8 + i * ((h - 16) / 6), 1, 4, CODEX_GOLD);
+
+  // the running head sits on the left leaf so it cannot land on the page title
+  drawText(ctx, 'BESTIARY', g.left.x, y + 8, CODEX_GOLD, 1);
+  pxRect(ctx, g.left.x, y + 17, g.left.w, 1, rgba(CODEX_GOLD, 0.45));
+
+  drawCodexList(ctx, c, g, t);
+  drawCodexPage(ctx, game, c, g, t);
+
+  closeButton(ctx, closeRect(x, y, w), !!c.closeHot);
+  ctx.restore();
+}
+
+function drawCodexList(ctx, c, g, t) {
+  const beaten = c.entries.filter((e) => e.beaten).length;
+  drawText(ctx, `${beaten}/${c.entries.length} FELLED`, g.left.x + g.left.w, g.left.y - 14,
+           CODEX_FADE, 1, 'right');
+  for (let i = 0; i < c.entries.length; i++) {
+    const e = c.entries[i];
+    const r = codexRowRect(g, i);
+    const sel = i === c.sel;
+    if (sel) {
+      ctx.fillStyle = rgba(CODEX_GOLD, 0.16);
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      pxRect(ctx, r.x, r.y, 2, r.h, CODEX_GOLD);
+    }
+    // the tick: drawn, not typed, so it still reads as a check at this size
+    const bx = r.x + 5, by = r.y + 4;
+    pxRect(ctx, bx, by, 9, 9, rgba('#000000', 0.55));
+    ctx.strokeStyle = rgba(e.beaten ? '#6cd67f' : CODEX_FADE, 0.9);
+    ctx.strokeRect(bx + 0.5, by + 0.5, 8, 8);
+    if (e.beaten) {
+      for (const [dx, dy] of [[2, 4], [3, 5], [4, 6], [5, 5], [6, 4], [7, 3]]) {
+        pxRect(ctx, bx + dx, by + dy, 1, 1, '#6cd67f');
+      }
+    }
+    const whereW = textWidth(e.where, 1);
+    drawTextFit(ctx, e.name, bx + 13, r.y + 4, sel ? CODEX_INK : rgba(CODEX_INK, 0.75),
+                r.w - 26 - whereW, 1);
+    drawText(ctx, e.where, r.x + r.w - 2, r.y + 4, sel ? CODEX_GOLD : CODEX_FADE, 1, 'right');
+    // the thread running down the order
+    if (i < c.entries.length - 1) {
+      pxRect(ctx, bx + 4, r.y + r.h, 1, g.rowH - r.h, rgba(CODEX_FADE, 0.45));
+    }
+  }
+}
+
+function drawCodexPage(ctx, game, c, g, t) {
+  const e = c.entries[c.sel];
+  if (!e) return;
+  const R = g.right;
+  ctx.save();
+  // nothing on this page can spill past the edge of the book, whatever a
+  // future entry decides to say
+  ctx.beginPath();
+  ctx.rect(R.x - 2, R.y - 12, R.w + 4, R.h + 12);
+  ctx.clip();
+
+  let y = R.y - 10;
+  drawTextFit(ctx, e.name, R.x, y, CODEX_INK, R.w - textWidth(e.where, 1) - 6, 1);
+  drawText(ctx, e.where, R.x + R.w, y, CODEX_GOLD, 1, 'right');
+  y += 11;
+
+  // the portrait, with the phase tabs under it when there are two
+  const boxH = 48;
+  pxRect(ctx, R.x, y, R.w, boxH, '#151009');
+  ctx.strokeStyle = rgba(CODEX_FADE, 0.55);
+  ctx.strokeRect(R.x + 0.5, y + 0.5, R.w - 1, boxH - 1);
+  drawCodexPortrait(ctx, game, c, R.x, y, R.w, boxH, t);
+  y += boxH + 3;
+  c.phaseRects.length = 0;
+  if (e.twoPhases) {
+    for (let i = 0; i < 2; i++) {
+      const bw2 = 46, bx = R.x + i * (bw2 + 4);
+      const on = c.phase === i + 1;
+      c.phaseRects[i] = { x: bx, y, w: bw2, h: 11 };
+      ctx.fillStyle = rgba(on ? CODEX_GOLD : '#000000', on ? 0.3 : 0.35);
+      ctx.fillRect(bx, y, bw2, 11);
+      ctx.strokeStyle = rgba(on ? CODEX_GOLD : CODEX_FADE, on ? 0.9 : 0.5);
+      ctx.strokeRect(bx + 0.5, y + 0.5, bw2 - 1, 10);
+      drawText(ctx, `PHASE ${i + 1}`, bx + bw2 / 2, y + 3, on ? CODEX_INK : CODEX_FADE, 1, 'center');
+    }
+    y += 14;
+  }
+
+  // Two columns: what it hits for on the left, what it leaves on the right.
+  // Stacked they did not fit, and a page that runs off the book is worse than
+  // a page that is a little dense.
+  // the damage column only holds short labels; the drops column holds whole
+  // item names, so it gets the larger share
+  const colW = Math.floor((R.w - 8) * 0.42);
+  const cx2 = R.x + colW + 8;
+  const dropW = R.x + R.w - cx2;
+  let ly = y, ry = y;
+  drawText(ctx, `HP ${e.hp}`, R.x, ly, CODEX_GOLD, 1); ly += 10;
+  for (const [label, val] of e.damage) {
+    const vw = textWidth(val, 1);
+    drawTextFit(ctx, label, R.x, ly, rgba(CODEX_INK, 0.8), colW - vw - 4, 1);
+    drawText(ctx, val, R.x + colW, ly, CODEX_INK, 1, 'right');
+    ly += 8;
+  }
+  drawText(ctx, 'DROPS', cx2, ry, CODEX_GOLD, 1); ry += 10;
+  for (const d of e.drops) { drawTextFit(ctx, d, cx2, ry, rgba(CODEX_INK, 0.8), dropW, 1); ry += 8; }
+  y = Math.max(ly, ry) + 3;
+
+  y = codexBlock(ctx, 'HOW IT ARRIVES', e.spawn, R, y);
+  codexBlock(ctx, 'NOTES', e.phases, R, y);
+  ctx.restore();
+}
+
+function codexBlock(ctx, head, lines, R, y) {
+  pxRect(ctx, R.x, y, R.w, 1, rgba(CODEX_GOLD, 0.35));
+  drawText(ctx, head, R.x, y + 4, CODEX_GOLD, 1);
+  y += 13;
+  for (const l of lines) {
+    drawTextFit(ctx, l, R.x, y, rgba(CODEX_INK, 0.85), R.w, 1);
+    y += 8;
+  }
+  return y + 3;
+}
+
+// The real boss, drawn small. Its parts were pulled out of the room when the
+// preview was built, so this is the fight's own art and cannot drift from it.
+function drawCodexPortrait(ctx, game, c, x, y, w, h, t) {
+  const boss = c.preview;
+  if (!boss) {
+    drawText(ctx, 'NO IMAGE', x + w / 2, y + h / 2 - 3, CODEX_FADE, 1, 'center');
+    return;
+  }
+  const v = c.view;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x + 1, y + 1, w - 2, h - 2);
+  ctx.clip();
+  ctx.translate(x + w / 2, y + h / 2);
+  ctx.scale(v.zoom, v.zoom);
+  ctx.translate(-v.cx, -v.cy);
+  drawBossPreview(ctx, boss, t);
+  ctx.restore();
 }
 
 function drawPerkStrip(ctx, game) {
