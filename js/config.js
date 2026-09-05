@@ -150,30 +150,24 @@ export const ORIGAMI = {
 // The anvil rides the drifting platform on even-numbered rooms.
 export const ANVIL = { everyRooms: 2, w: 20, h: 14, reach: 46 };
 
-// Shardgun: one shell, five shards, and a second act. The shards stop dead at
-// their range, hang there, then re-form as splinters that chase the cursor.
-// A thrust, not a swing: the whole reach is a narrow line in front of you, and
-// every enemy it skewers sprouts a burrowing spawn from the tip.
-export const WORM_SPEAR = {
-  range: 4 * BLOCK, damage: 24, cooldown: 0.62,
-  arc: 0.30,                       // narrow: this is a stab, not an arc
-  thrustTime: 0.18,
-  spawnPerHit: 1,                  // one spawn per enemy skewered
-  dropFromBoss: 0.05,              // Big Dude
-  dropFromSmall: 0.02,             // Small Dude
+// The forge list scrolls once it is longer than this. Five rows is what fits
+// on a phone without the panel swallowing the screen.
+export const FORGE_VISIBLE_ROWS = 5;
+
+// What a Stinger Egg is worth in parts, and what a boss leaves behind.
+export const DROPS = {
+  shellsFromBroken: [1, 3],       // an egg you smashed
+  shellsFromHatched: [0, 1],      // one that opened on its own
+  soulsPerBoss: [1, 2],           // every boss but the god
 };
 
-// The spawn the spear leaves behind: a knee-high worm that crawls forward and
-// spits at whatever comes near it.
-export const SPEARLING = {
-  life: 8,
-  speed: 2 * BLOCK,                // two blocks a second
-  range: 3 * BLOCK,                // how far it will shoot
-  damage: 5,
-  interval: 1.0,                   // one shot a second
-  shotSpeed: 150,
-  hp: 1,
+// The one thing you cannot find: it has to be made.
+export const GIANT_EGG = {
+  shells: 10, souls: 3,
+  hatch: 5.0,                     // seconds on the platform before it opens
+  w: 34, h: 42,
 };
+
 
 // Darts, not arrows - which is why lightning never touches them.
 export const STINGER_GUN = {
@@ -227,11 +221,11 @@ export const CEILING_ROOM = 15;        // where the Undead Ceiling hangs
 export const ENEMY_TYPES = {
   grunt: {
     id: 'grunt', name: 'Ghoul', hp: 80, speed: 52, damage: 12, w: 12, h: 17,
-    attackCooldown: 0.9, attackRange: 16, knockback: 120,
+    attackCooldown: 0.9, attackRange: 16, knockback: 120, windUp: 0.22,
   },
   brute: {
     id: 'brute', name: 'Brute', hp: 80, speed: 32, damage: 20, w: 18, h: 22,
-    attackCooldown: 1.4, attackRange: 20, knockback: 190, chargeSpeed: 150,
+    attackCooldown: 1.4, attackRange: 20, knockback: 190, chargeSpeed: 150, windUp: 0.38,
   },
   stinger: {
     id: 'stinger', name: 'Stinger', hp: 80, speed: 60, damage: 10, w: 13, h: 12,
@@ -270,18 +264,6 @@ export const ENEMY_TYPES = {
     frontGuard: 0.25,          // fraction of damage that gets through the plate
     dropId: 'shardgun', dropChance: 0.10,   // at the spot where it broke
   },
-  // Big Dude's brood: two blocks of worm that tunnels under the floor and
-  // comes up beneath you, sometimes spitting on the way out.
-  smalldude: {
-    id: 'smalldude', name: 'Small Dude', hp: 90, speed: 0, damage: 18, w: 30, h: 13,
-    attackCooldown: 2.6, attackRange: 999, ai: 'smalldude',
-    knockback: 150,
-    burrowDepth: 30, burrowSpeed: 140,
-    buriedTime: 1.5, surfaceTime: 1.4,
-    leapUp: 400, leapAcross: 120, leapGravity: 900,
-    spitChance: 0.5, spitCount: 3, spitDamage: 10, spitSpeed: 190, spitSpread: 0.55,
-    dropId: 'wormspear', dropChance: 0.02,
-  },
   // From room 10 the plain Stinger stops turning up and this comes instead:
   // bigger, slower to fire, and it leaves an egg behind.
   mutantstinger: {
@@ -297,6 +279,19 @@ export const ENEMY_TYPES = {
     attackCooldown: 99, attackRange: 0, ai: 'egg',
     noContact: true, noScale: true,
     hatchTime: 5.0, hatchCount: 2, brokenHatchChance: 0.5,
+  },
+  // Poitnus' body. Flying, and a slam cannot reach it.
+  poitnusBody: {
+    id: 'poitnusBody', name: 'Poitnus', hp: 1400, speed: 0, damage: 22,
+    w: 54, h: 40, attackCooldown: 1, attackRange: 30,
+    flying: true, boss: true, slamImmune: true,
+  },
+  // The clutch it lays, and the shell you set down yourself. Both are eggs;
+  // only one of them can be hurt.
+  giantstingeregg: {
+    id: 'giantstingeregg', name: 'Gigantic Stinger Egg', hp: 1, speed: 0, damage: 0,
+    w: 34, h: 42, attackCooldown: 99, attackRange: 0, ai: 'giantegg',
+    noContact: true, noScale: true, invincible: true,
   },
   // The ones Alphads calls up. Same AI, same sprite, different bookkeeping:
   // only these count against the summon cap, and they leave nothing behind.
@@ -398,8 +393,29 @@ export const BOSS_TYPES = {
     healing: { perOrb: 15, orbSpeed: 150, windUp: 0.45 },
     godRay: {
       duration: 2.0, windUp: 0.85, damage: 26, width: 7, lag: 0.14,
-      waveEvery: 0.75, waveRange: 10 * BLOCK, waveSpeed: 320, waveDamage: 18,
+      // the shock waves off the beam reach two blocks now, not ten, and they
+      // hit for five less: standing clear of the beam is meant to be enough
+      waveEvery: 0.75, waveRange: 2 * BLOCK, waveSpeed: 320, waveDamage: 13,
     },
+  },
+
+  // Not a room boss: the one you build yourself and set down on the centre
+  // platform. It never lands, it never stops moving, and it seeds the floor
+  // with the eggs its whole brood came from.
+  poitnus: {
+    id: 'poitnus', name: 'Poitnus', short: 'Poitnus',
+    title: 'THE ANCIENT STINGER', kind: 'stinger',
+    hp: 1400,
+    w: 54, h: 40,
+    contactDamage: 22,
+    hoverY: 72, hoverRange: 26,     // how far up and down it wanders
+    driftSpeed: 116, standOff: 96,
+    // five stingers in a fan, thrown at wherever you were standing
+    volley: { count: 5, spacing: 0.10, speed: 215, damage: 15, windUp: 0.4, spread: 0.34 },
+    // then it hangs still, and lays
+    clutch: { hold: 2.0, count: 3, gap: 0.5, minSpacing: 56, dropSpeed: 90 },
+    volleysPerCycle: 3,
+    volleyGap: 1.0,
   },
 
   // A twenty-block worm that lives under the floor and only surfaces to strike.

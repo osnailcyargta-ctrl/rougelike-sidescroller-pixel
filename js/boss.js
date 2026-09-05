@@ -10,6 +10,7 @@ import { Enemy, Projectile } from './entities.js';
 import { WormBoss } from './worm.js';
 import { AlphadsBoss } from './alphads.js';
 import { CeilingBoss } from './ceiling.js';
+import { PoitnusBoss } from './poitnus.js';
 
 // How far a ray from (ox, oy) travels before it leaves the arena.
 function rayLength(ox, oy, dx, dy) {
@@ -891,6 +892,7 @@ export function makeBoss(game, roomIndex, which = null) {
   if (which === 'bigdude') return new WormBoss(game, roomIndex);
   if (which === 'alphads') return new AlphadsBoss(game, roomIndex);
   if (which === 'ceiling') return new CeilingBoss(game, roomIndex);
+  if (which === 'poitnus') return new PoitnusBoss(game, roomIndex);
   // the last room belongs to the god, whatever the rotation says
   if (roomIndex >= FINAL_ROOM) return new AlphadsBoss(game, roomIndex);
   if (roomIndex === CEILING_ROOM) return new CeilingBoss(game, roomIndex);

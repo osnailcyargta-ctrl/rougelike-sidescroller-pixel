@@ -3,14 +3,14 @@
 // top, so the boss stays on screen the whole time.
 import { clamp, lerp, rand, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
-import { Camera, burst, impactRing, spawnParticle, pxRect, glowDot } from './gfx.js';
+import { Camera, burst, impactRing, spawnParticle, pxRect, glowDot, screenFlash } from './gfx.js';
 import { drawText, drawTextShadow, textWidth } from './font.js';
 import { Sfx } from './audio.js';
 import { VIEW_W, VIEW_H, GROUND_Y } from './config.js';
 
-const INTRO_LEN = 3.2;
-const OUTRO_LEN = 3.4;
-const BAR_H = 30;
+const INTRO_LEN = 4.6;
+const OUTRO_LEN = 4.4;
+const BAR_H = 34;
 
 // eased 0..1 helpers
 const easeOut = (t) => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
@@ -22,6 +22,7 @@ const SUBTITLE = {
   bigdude: 'TWENTY BLOCKS OF APPETITE',
   alphads: 'THE AETHER GOD',
   ceiling: 'THE ROOF OF MEAT',
+  poitnus: 'THE ANCIENT STINGER',
 };
 
 export class Cutscene {
@@ -36,6 +37,9 @@ export class Cutscene {
     this.flash = 0;
     this.nextBoom = 0;
     this.booms = 0;
+    this.roars = 0;        // how many of the staged shocks have gone off
+    this.shafts = [];      // vertical light bars behind the name card
+    this.streaks = [];     // radial speed lines thrown out by each shock
   }
 
   play(type, boss) {
@@ -46,6 +50,13 @@ export class Cutscene {
     this.boss = boss;
     this.booms = 0;
     this.nextBoom = 0.35;
+    this.roars = 0;
+    this.shafts.length = 0;
+    this.streaks.length = 0;
+    // the bars that stand up behind the name, each on its own clock
+    for (let i = 0; i < 9; i++) {
+      this.shafts.push({ x: rand(0, VIEW_W), w: rand(4, 22), delay: rand(0.5, 1.5), speed: rand(0.9, 2.0) });
+    }
     this.roared = false;
     this.finalFlash = false;
     this.flash = type === 'outro' ? 1 : 0;
@@ -74,15 +85,15 @@ export class Cutscene {
     };
   }
 
-  skip() {
-    if (!this.active || this.t < 0.45) return;
-    this.finish();
-  }
-
   finish() {
     this.active = false;
     this.flash = 0;
     Camera.clearCinematic();
+    // A boss you summoned yourself does not own the room, so the room takes
+    // its slot back once the outro is over.
+    if (this.type === 'outro' && this.boss?.summoned && this.game.boss === this.boss) {
+      this.game.boss = null;
+    }
     if (this.type === 'intro' && this.boss) {
       this.boss.intro = 0.25;
       // the worm dives back under before its pattern starts
@@ -99,6 +110,12 @@ export class Cutscene {
     if (!this.active) return;
     this.t += dt;
     this.flash = Math.max(0, this.flash - dt * 2.6);
+    for (let i = this.streaks.length - 1; i >= 0; i--) {
+      const k = this.streaks[i];
+      k.t += dt;
+      k.r += 260 * dt;
+      if (k.t >= k.life) this.streaks.splice(i, 1);
+    }
 
     // keep the frame on the boss even as it moves through its entrance
     const f = this.bossFocus();
@@ -117,22 +134,50 @@ export class Cutscene {
 
   get holy() { return this.boss?.kind === 'god'; }
 
+  // Three shocks, not one, each bigger than the last, so the entrance builds
+  // instead of going off once and then just waiting for the timer.
+  static ROAR_AT = [0.45, 1.15, 1.95];
+
+  roar(n) {
+    const holy = this.holy;
+    const k = 0.55 + n * 0.42;                 // 0.55, 0.97, 1.39
+    const last = n === 2;
+    const c = holy ? '#ffd76a' : Theme.hp;
+    Camera.add((holy ? 8 : 11) * k);
+    Camera.punch((holy ? 1.7 : 2.2) * k);
+    Sfx.slam();
+    if (last) {
+      this.game.hitstop(0.14);
+      screenFlash(0.55, holy ? '#ffe9a8' : '#ffffff', 0.35);
+    }
+    impactRing(this.focus.x, this.focus.y, { color: c, r0: 8, r1: (holy ? 180 : 130) * k, life: 0.8, width: 4 });
+    impactRing(this.focus.x, this.focus.y, { color: '#ffffff', r0: 4, r1: (holy ? 110 : 80) * k, life: 0.45, width: 2.5 });
+    burst(this.focus.x, this.focus.y, Math.round((holy ? 40 : 30) * k), {
+      color: holy ? '#ffe9a8' : Theme.uiAccent, color2: '#ffffff', kind: 'streak',
+      speedMin: 120, speedMax: 340 * k, lifeMin: 0.2, lifeMax: 0.6, gravity: 0, drag: 0.9,
+    });
+    // a wave of dust thrown out along the floor either way
+    for (const dir of [-1, 1]) {
+      burst(this.focus.x, GROUND_Y, Math.round(9 * k), {
+        color: Theme.groundEdge, kind: 'smoke', speedMin: 60 * k, speedMax: 230 * k,
+        lifeMin: 0.4, lifeMax: 1.1, sizeMin: 1, sizeMax: 4, gravity: -30, glow: false,
+        angle: dir > 0 ? -0.35 : Math.PI + 0.35, spread: 0.5,
+      });
+    }
+    // speed lines drawn on the cinematic layer, over everything
+    for (let i = 0; i < Math.round(14 * k); i++) {
+      this.streaks.push({ a: rand(0, TAU), r: rand(20, 60), len: rand(24, 90) * k, life: rand(0.2, 0.45), t: 0 });
+    }
+    this.flash = (holy ? 0.6 : 0.42) * (0.7 + n * 0.3);
+  }
+
   updateIntro(dt) {
     const holy = this.holy;
-    // the roar: one shock at 0.45s that shakes the whole frame. The god does
-    // not roar - it simply arrives, and the room brightens around it.
-    if (this.t >= 0.45 && !this.roared) {
-      this.roared = true;
-      Camera.add(holy ? 9 : 13);
-      Camera.punch(holy ? 2.0 : 2.6);
-      Sfx.slam();
-      impactRing(this.focus.x, this.focus.y, { color: holy ? '#ffd76a' : Theme.hp, r0: 8, r1: holy ? 210 : 150, life: 0.8, width: 4 });
-      impactRing(this.focus.x, this.focus.y, { color: '#ffffff', r0: 4, r1: holy ? 130 : 90, life: 0.45, width: 2.5 });
-      burst(this.focus.x, this.focus.y, holy ? 54 : 40, {
-        color: holy ? '#ffe9a8' : Theme.uiAccent, color2: '#ffffff', kind: 'streak',
-        speedMin: 120, speedMax: 340, lifeMin: 0.2, lifeMax: 0.6, gravity: 0, drag: 0.9,
-      });
-      this.flash = holy ? 0.75 : 0.5;
+    // The god does not roar - it simply arrives - but it still lands in three
+    // stages, and the room brightens harder each time.
+    while (this.roars < 3 && this.t >= Cutscene.ROAR_AT[this.roars]) {
+      this.roar(this.roars);
+      this.roars++;
     }
     if (holy) {
       // feathers falling through the frame instead of embers rising
@@ -159,7 +204,7 @@ export class Cutscene {
     if (this.holy) return this.updateAscension(dt);
     // a chain of detonations walking along the body
     this.nextBoom -= dt;
-    if (this.nextBoom <= 0 && this.t < 2.3) {
+    if (this.nextBoom <= 0 && this.t < 3.1) {
       this.nextBoom = rand(0.13, 0.24);
       this.booms++;
       const p = this.boomPoint(this.booms);
@@ -177,8 +222,71 @@ export class Cutscene {
         color: '#241a12', kind: 'smoke', speedMin: 15, speedMax: 80,
         lifeMin: 0.5, lifeMax: 1.3, sizeMin: 2, sizeMax: 5, gravity: -40, glow: false,
       });
-      if (big) this.flash = 0.55;
+      if (big) {
+        this.flash = 0.55;
+        for (let i = 0; i < 8; i++) {
+          this.streaks.push({ a: rand(0, TAU), r: rand(20, 50), len: rand(20, 70), life: rand(0.2, 0.4), t: 0 });
+        }
+      }
     }
+    // one last detonation that takes the whole frame with it
+    if (!this.finalFlash && this.t >= 3.1) {
+      this.finalFlash = true;
+      this.flash = 1;
+      Camera.add(16);
+      Camera.punch(2.4);
+      this.game.hitstop(0.16);
+      screenFlash(0.8, '#ffffff', 0.55);
+      Sfx.slam();
+      impactRing(this.focus.x, this.focus.y, { color: '#ffffff', r0: 4, r1: 260, life: 0.9, width: 5 });
+      impactRing(this.focus.x, this.focus.y, { color: Theme.fire, r0: 4, r1: 190, life: 0.7, width: 3 });
+      burst(this.focus.x, this.focus.y, 46, {
+        color: Theme.fireHot, color2: '#ffffff', kind: 'streak', speedMin: 90, speedMax: 420,
+        lifeMin: 0.2, lifeMax: 0.7, gravity: 0, drag: 0.9,
+      });
+      for (let i = 0; i < 22; i++) {
+        this.streaks.push({ a: rand(0, TAU), r: rand(10, 40), len: rand(40, 130), life: rand(0.3, 0.6), t: 0 });
+      }
+    }
+  }
+
+  // The speed lines every shock throws: short bright rays flying outward from
+  // wherever the camera is looking.
+  drawStreaks(ctx) {
+    if (!this.streaks.length) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    for (const k of this.streaks) {
+      const a = clamp(1 - k.t / k.life, 0, 1);
+      const c = Math.cos(k.a), s2 = Math.sin(k.a);
+      ctx.strokeStyle = rgba(this.holy ? '#ffe9a8' : '#ffffff', a * 0.55);
+      ctx.lineWidth = 1 + a * 1.6;
+      ctx.beginPath();
+      ctx.moveTo(this.focus.x + c * k.r, this.focus.y + s2 * k.r);
+      ctx.lineTo(this.focus.x + c * (k.r + k.len * a), this.focus.y + s2 * (k.r + k.len * a));
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Bars of light standing up behind the name card, wiping on one by one.
+  drawShafts(ctx, alpha) {
+    if (alpha <= 0) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (const b of this.shafts) {
+      const k = clamp((this.t - b.delay) * b.speed, 0, 1);
+      if (k <= 0) continue;
+      const fade = k * (1 - clamp((this.t - this.len + 1.1) / 1.1, 0, 1));
+      const h = easeOut(k) * VIEW_H;
+      const g = ctx.createLinearGradient(0, VIEW_H, 0, VIEW_H - h);
+      g.addColorStop(0, rgba(this.holy ? '#ffd76a' : Theme.uiAccent, 0.20 * fade * alpha));
+      g.addColorStop(1, rgba(this.holy ? '#ffd76a' : Theme.uiAccent, 0));
+      ctx.fillStyle = g;
+      ctx.fillRect(b.x - b.w / 2, VIEW_H - h, b.w, h);
+    }
+    ctx.restore();
   }
 
   // The god does not explode. Its wings come apart a row at a time and the
@@ -249,6 +357,8 @@ export class Cutscene {
       ctx.restore();
     }
 
+    this.drawShafts(ctx, inK * (1 - outK));
+    this.drawStreaks(ctx);
     if (this.type === 'intro') this.drawIntro(ctx, bars);
     else this.drawOutro(ctx, bars);
 
@@ -259,16 +369,13 @@ export class Cutscene {
     if (bars > 2) {
       pxRect(ctx, 0, bars - 1, VIEW_W, 1, rgba(Theme.uiAccent, 0.35));
       pxRect(ctx, 0, VIEW_H - bars, VIEW_W, 1, rgba(Theme.uiAccent, 0.35));
-      if (t > 0.6 && t < this.len - 0.6) {
-        drawText(ctx, 'ANY KEY TO SKIP', VIEW_W - 6, VIEW_H - bars + 8, rgba(Theme.uiDim, 0.55), 1, 'right');
-      }
     }
   }
 
   drawIntro(ctx, bars) {
     const t = this.t;
-    const cardK = window01(t, 0.62, 1.15);
-    const holdK = 1 - window01(t, this.len - 0.7, this.len - 0.15);
+    const cardK = window01(t, 0.7, 1.5);
+    const holdK = 1 - window01(t, this.len - 0.8, this.len - 0.15);
     if (cardK <= 0 || holdK <= 0) return;
 
     const cy = 104;
@@ -299,17 +406,25 @@ export class Cutscene {
       if (k <= 0) continue;
       const e = easeOut(k);
       const x = (VIEW_W - w) / 2 + i * 6 * scale;
-      const y = cy - 6 + (1 - e) * -10;
+      const y = cy - 6 + (1 - e) * -16;
       ctx.globalAlpha = holdK * e;
+      // each letter lands with its own small shock, so the name arrives in
+      // pieces instead of simply appearing
+      if (k < 1) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        glowDot(ctx, x + 2 * scale, y + 3 * scale, 20 * (1 - e), '#ffffff', 0.5 * (1 - e) * holdK);
+        ctx.restore();
+      }
       drawText(ctx, this.title[i], x + 2, y + 2, rgba('#000000', 0.75), scale);
       drawText(ctx, this.title[i], x, y, i % 2 ? Theme.uiAccent : '#ffffff', scale);
     }
-    ctx.globalAlpha = holdK * window01(t, 1.0, 1.4);
+    ctx.globalAlpha = holdK * window01(t, 1.4, 1.9);
     if (this.subtitle) drawTextShadow(ctx, this.subtitle, VIEW_W / 2, cy + 32, Theme.ui, 1, 'center');
     ctx.globalAlpha = 1;
 
     // the HP bar filling in under the card
-    const barK = easeOut(window01(t, 1.15, 1.9));
+    const barK = easeOut(window01(t, 1.6, 2.7));
     if (barK > 0) {
       const bw = Math.round(200 * barK);
       const bx = Math.round((VIEW_W - 200) / 2);
@@ -321,7 +436,7 @@ export class Cutscene {
 
   drawOutro(ctx, bars) {
     const t = this.t;
-    const cardK = window01(t, 1.05, 1.6);
+    const cardK = window01(t, 1.5, 2.2);
     const holdK = 1 - window01(t, this.len - 0.75, this.len - 0.2);
     if (cardK <= 0 || holdK <= 0) return;
     const cy = 104;
@@ -331,10 +446,10 @@ export class Cutscene {
     drawTextShadow(ctx, this.title, VIEW_W / 2, cy - 4, rgba(Theme.uiDim, 0.9), 2, 'center');
     // struck through, the line drawn on
     const w = textWidth(this.title, 2);
-    const strike = Math.round(w * easeOut(window01(t, 1.45, 1.9)));
+    const strike = Math.round(w * easeOut(window01(t, 2.0, 2.6)));
     pxRect(ctx, VIEW_W / 2 - w / 2, cy + 3, strike, 1, Theme.hp);
 
-    const defK = window01(t, 1.6, 2.05);
+    const defK = window01(t, 2.3, 2.8);
     if (defK > 0) {
       const s = 3;
       const pop = 1 + (1 - easeOut(defK)) * 0.4;

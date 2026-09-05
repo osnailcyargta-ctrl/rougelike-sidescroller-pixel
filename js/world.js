@@ -662,7 +662,6 @@ export function buildWave(roomIndex, waveIndex) {
   if (roomIndex >= 4) pool.push('spitter');
   if (roomIndex >= 6) pool.push('shardling');   // golem wreckage, post room 5
   if (roomIndex >= 6) pool.push('wisp');        // and its lamplighter
-  if (roomIndex >= 11) pool.push('smalldude');  // Big Dude's brood, past its room
   // Past room 12 the enemies stop getting stronger, so the rooms get fuller
   // instead. A wave never sends more than the cap, however deep you are.
   const base = 3 + Math.floor((roomIndex - 1) / 2) + Math.max(0, roomIndex - 12);

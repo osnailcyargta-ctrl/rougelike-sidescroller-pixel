@@ -89,6 +89,14 @@ export function shortAngle(a, b) {
   return d;
 }
 
+// Round an angle onto one of `steps` evenly spaced directions. A swing that
+// lands on one of eight compass points is readable; one that can point
+// anywhere is not, because you cannot tell two near-identical swings apart.
+export function snapAngle(a, steps = 8) {
+  const q = TAU / steps;
+  return Math.round(a / q) * q;
+}
+
 // #rrggbb -> rgba() with alpha, keeps palette handling simple.
 export function rgba(hex, a) {
   const n = parseInt(hex.slice(1), 16);

@@ -1,7 +1,7 @@
 // Where the screen furniture sits. Pure geometry, no drawing and no state, so
 // the code that paints a control and the code that decides whether a finger
 // landed on it are reading the exact same numbers.
-import { VIEW_W, VIEW_H } from './config.js';
+import { VIEW_W, VIEW_H, FORGE_VISIBLE_ROWS } from './config.js';
 import { HOTBAR_SIZE } from './items.js';
 import { Options } from './settings.js';
 import { Theme } from './theme.js';
@@ -73,14 +73,31 @@ export const FORGE_W = 236;
 export const FORGE_ROW_H = 15;
 export const CLOSE_SIZE = 12;
 
+// `rows` is how many recipes there are in total; the panel only ever grows to
+// FORGE_VISIBLE_ROWS of them and the rest is reached by scrolling.
 export function forgeLayout(rows) {
   const w = FORGE_W, rowH = FORGE_ROW_H;
-  const h = 40 + Math.max(1, rows) * rowH + 16;
-  return { x: Math.round((VIEW_W - w) / 2), y: Math.round((VIEW_H - h) / 2), w, h, rowH };
+  const visible = Math.min(Math.max(1, rows), FORGE_VISIBLE_ROWS);
+  const h = 40 + visible * rowH + 16;
+  return {
+    x: Math.round((VIEW_W - w) / 2), y: Math.round((VIEW_H - h) / 2), w, h, rowH,
+    visible, rows, scrolls: rows > visible,
+  };
 }
 
+// i counts visible slots from the top of the list, not entries in it.
 export function forgeRowRect(g, i) {
-  return { x: g.x + 6, y: g.y + 40 + i * g.rowH, w: g.w - 12, h: g.rowH - 1 };
+  return { x: g.x + 6, y: g.y + 40 + i * g.rowH, w: g.w - 12 - (g.scrolls ? 4 : 0), h: g.rowH - 1 };
+}
+
+// The strip the thumb rides in, down the right edge of the row area.
+export function forgeTrackRect(g) {
+  return { x: g.x + g.w - 8, y: g.y + 40, w: 3, h: g.visible * g.rowH - 1 };
+}
+
+// Everything a drag can grab: the rows themselves, not the header or footer.
+export function forgeListRect(g) {
+  return { x: g.x + 4, y: g.y + 38, w: g.w - 8, h: g.visible * g.rowH + 2 };
 }
 
 // The close button every popup puts in its top right corner.

@@ -55,6 +55,24 @@ export const ITEMS = {
     desc: ['Teaches the PAPER MISSILE fold.', '2 sheets. Starts slow, builds',
            'speed, detonates on contact for', '40 over 5 blocks.'],
   },
+  // --- the ancient stinger -----------------------------------------------
+  stingereggshell: {
+    id: 'stingereggshell', name: 'Stinger Egg Shell', rarity: 'common', stack: MAX_STACK,
+    desc: ['Chitin off a broken Stinger Egg.', 'Smashing one open leaves 1-3;',
+           'a hatched one leaves at most 1.', 'Ten of them, and three souls,',
+           'make a Gigantic Stinger Egg.'],
+  },
+  soul: {
+    id: 'soul', name: 'Soul', rarity: 'uncommon', stack: MAX_STACK,
+    desc: ['What a boss leaves behind.', 'Every boss but the god drops', '1 or 2 of them.'],
+  },
+  giganticstingeregg: {
+    id: 'giganticstingeregg', name: 'Gigantic Stinger Egg', rarity: 'rare', stack: 1,
+    place: 'giantegg',
+    desc: ['Stand on the centre platform and', 'attack to set it down.',
+           'It takes five seconds to open, and', 'nothing you do can hurt it.',
+           'What comes out is POITNUS.'],
+  },
   // --- armour ------------------------------------------------------------
   ironbar: {
     id: 'ironbar', name: 'Iron Bar', rarity: 'common', stack: MAX_STACK,
@@ -106,12 +124,6 @@ export const ITEMS = {
     desc: ['Ranged weapon. 3 darts, 1.4s reload.', '20 damage, and every dart poisons:',
            'it burns and drags at once.',
            'Darts are not arrows - lightning', 'never touches them.'],
-  },
-  wormspear: {
-    id: 'wormspear', name: 'Worm Spear', rarity: 'rare', stack: 1, weapon: 'spear',
-    desc: ['Melee. 4 block thrust, 24 damage.', 'Stabs in a line instead of swinging.',
-           'Every enemy it skewers sprouts a', 'worm from the tip, which crawls off',
-           'and spits at whatever it passes.'],
   },
   shardgun: {
     id: 'shardgun', name: 'Shardgun', rarity: 'rare', stack: 1, weapon: 'shardgun',
@@ -428,6 +440,42 @@ export function drawItemIcon(ctx, id, x, y, s = 12, t = 0) {
       P(5, 1 + pulse, 2, 2, '#ffffff');
       break;
     }
+    case 'stingereggshell': {
+      // a curved shard of shell, inner face pale, jagged along the break
+      const lift = Math.round(Math.sin(t * 2.4) * 0.5);
+      P(2, 5 + lift, 8, 5, '#9fd8c4');
+      P(3, 4 + lift, 6, 1, '#cdf3e6');
+      P(2, 5 + lift, 1, 4, '#cdf3e6');
+      P(4, 9 + lift, 2, 1, '#5d9484');
+      P(7, 9 + lift, 1, 1, '#5d9484');
+      P(9, 6 + lift, 1, 3, '#5d9484');
+      break;
+    }
+    case 'soul': {
+      // a small flame with a hollow in it, always drifting upward
+      const lift = Math.sin(t * 3) * 0.8;
+      const flick = 0.6 + 0.4 * Math.sin(t * 9);
+      P(4, 4 + lift, 4, 7, '#7cc8ff');
+      P(5, 3 + lift, 2, 2, '#d8f2ff');
+      P(3, 6 + lift, 1, 4, '#4a8cd8');
+      P(8, 6 + lift, 1, 4, '#4a8cd8');
+      P(5, 6 + lift, 2, 2, flick > 0.6 ? '#ffffff' : '#a8dcff');
+      P(4, 11 + lift, 4, 1, '#2a4a80');
+      break;
+    }
+    case 'giganticstingeregg': {
+      // a fat egg with a hairline crack, breathing
+      const br = Math.sin(t * 2) * 0.4;
+      P(2, 3 - br, 8, 9 + br * 2, '#9fd8c4');
+      P(3, 2 - br, 6, 1, '#cdf3e6');
+      P(2, 4 - br, 1, 5, '#cdf3e6');
+      P(8, 5 - br, 1, 5, '#5d9484');
+      P(3, 12, 6, 1, '#3d6a5c');
+      P(5, 4 - br, 1, 3, '#3d6a5c');
+      P(6, 7, 1, 3, '#3d6a5c');
+      if (Math.sin(t * 5) > 0.7) P(5, 6, 2, 1, '#ffe9a8');
+      break;
+    }
     case 'ironbar': {
       const lift = Math.round(Math.sin(t * 2.5) * 0.5);
       P(1, 6 + lift, 10, 4, '#7d8798');
@@ -478,19 +526,6 @@ export function drawItemIcon(ctx, id, x, y, s = 12, t = 0) {
       P(10, 6, 2, 1, '#a8e04a');
       P(11 + Math.sin(t * 5) * 0.5, 5.5, 1, 1, pulse > 0.5 ? '#eaffb0' : '#a8e04a');
       P(4, 3, 1, 2, '#a8e04a');
-      break;
-    }
-    case 'wormspear': {
-      // a long shaft with a barbed head, and a grub coiled at the base
-      P(2, 9, 8, 1, '#6a4a2a');
-      P(3, 8, 7, 1, '#8a6238');
-      P(9, 6, 3, 3, Theme.steel);
-      P(10, 7, 2, 1, '#ffffff');
-      P(8, 8, 2, 1, Theme.steelDark);
-      const wig = Math.sin(t * 4) * 0.6;
-      P(1, 6 + wig, 3, 2, '#c86a4a');
-      P(2, 5.5 + wig, 2, 1, '#e08a68');
-      P(1, 6 + wig, 1, 1, '#2a1018');
       break;
     }
     case 'shardgun': {

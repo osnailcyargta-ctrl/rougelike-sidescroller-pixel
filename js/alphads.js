@@ -81,7 +81,6 @@ export class AlphadsBoss {
     this.shotT = 0;
     this.ray = null;
     this.orbs = [];
-    this.rainMarks = [];
     this.pillars = [];       // light columns the shardlings arrive down
     this.sweep = -1;         // the time-stop clock hand, -1 when idle
     this.shardlingsSpawned = 0;
@@ -197,7 +196,6 @@ export class AlphadsBoss {
 
     this.updateOrbs(dt);
     this.updateRay(dt);
-    this.updateRainMarks(dt);
     this.updatePillars(dt);
     this.ambient(dt);
 
@@ -403,16 +401,6 @@ export class AlphadsBoss {
       ctx.lineTo(this.x + Math.cos(a) * 300, this.y + Math.sin(a) * 300);
       ctx.stroke();
       ctx.restore();
-    }
-  }
-
-  // Sights on the floor under anything falling from above the screen.
-  updateRainMarks(dt) {
-    this.rainMarks.length = 0;
-    for (const pr of this.game.projectiles) {
-      if (pr.kind !== 'godarrow' || !pr.keepTop || pr.dead) continue;
-      if (pr.y > 0 || pr.vy <= 0) continue;
-      this.rainMarks.push(pr.x + pr.vx * 0.35);
     }
   }
 
@@ -899,33 +887,8 @@ export class AlphadsBoss {
 
     this.drawRay(ctx);
     this.drawOrbs(ctx);
-    this.drawRainMarks(ctx);
     this.drawPillars(ctx);
     ctx.restore();
-  }
-
-  drawRainMarks(ctx) {
-    const t = this.body ? this.body.anim : 0;
-    for (const mx of this.rainMarks) {
-      const x = clamp(mx, 4, VIEW_W - 4);
-      const beat = 0.7 + 0.3 * Math.sin(t * 14 + x);
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      const g = ctx.createLinearGradient(0, GROUND_Y - 64, 0, GROUND_Y);
-      g.addColorStop(0, rgba(TINT.gold, 0));
-      g.addColorStop(1, rgba(TINT.gold, 0.34 * beat));
-      ctx.fillStyle = g;
-      ctx.fillRect(x - 4, GROUND_Y - 64, 8, 64);
-      // a target ring on the floor that tightens as it comes in
-      ctx.strokeStyle = rgba('#ffffff', 0.4 * beat);
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.ellipse(x, GROUND_Y - 1, 8 + beat * 4, 3 + beat * 1.5, 0, 0, TAU);
-      ctx.stroke();
-      ctx.restore();
-      pxRect(ctx, x - 5, GROUND_Y - 1, 10, 1, rgba(TINT.gold, 0.85 * beat));
-      pxRect(ctx, x - 1, GROUND_Y - 4, 2, 3, rgba('#ffffff', 0.5 * beat));
-    }
   }
 
   drawOrbs(ctx) {

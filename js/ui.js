@@ -4,12 +4,12 @@ import { clamp, lerp, rand, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
 import { drawText, drawTextShadow, textWidth } from './font.js';
 import { pxRect, glowDot, Camera } from './gfx.js';
-import { VIEW_W, VIEW_H, BOW, SHARDGUN, PLAYER, ENEMY_TYPES, BOSS_TYPES } from './config.js';
+import { VIEW_W, VIEW_H, BOW, SHARDGUN, STINGER_GUN, PLAYER, ENEMY_TYPES, BOSS_TYPES } from './config.js';
 import { ENEMY_TINT } from './entities.js';
 import { Options } from './settings.js';
 import { ITEMS, RARITY, INV_COLS, INV_ROWS, INV_SIZE, HOTBAR_SIZE, ARMOR_SLOTS, Inventory, drawItemIcon } from './items.js';
 import { Input, Binds, BIND_ORDER, BIND_LABELS, bindLabel } from './input.js';
-import { hotbarSlotRect, hudInset, forgeLayout, forgeRowRect, closeRect } from './layout.js';
+import { hotbarSlotRect, hudInset, forgeLayout, forgeRowRect, forgeTrackRect, closeRect } from './layout.js';
 import { Sfx } from './audio.js';
 
 export const UI = {
@@ -348,7 +348,8 @@ function drawHotbar(ctx, game) {
     pxRect(ctx, ax + 1, y + 7 + lift, 3, 1, '#3a3340');
     drawTextShadow(ctx, String(have), ax + 12, y + 4, have > 0 ? '#f4f0e6' : Theme.hp, 2);
   }
-  const gun = w && (w.weapon === 'bow' ? BOW : w.weapon === 'shardgun' ? SHARDGUN : null);
+  const gun = w && (w.weapon === 'bow' ? BOW : w.weapon === 'shardgun' ? SHARDGUN
+    : w.weapon === 'stingergun' ? STINGER_GUN : null);
   if (gun) {
     const ax = x0 + total + 8;
     if (p.reloadT > 0) {
@@ -361,6 +362,16 @@ function drawHotbar(ctx, game) {
       const hot = p.ammo > 0;
       pxRect(ctx, ax, y + 3, 7, 10, hot ? '#a98cff' : rgba(Theme.uiDim, 0.3));
       pxRect(ctx, ax + 1, y + 4, 5, 4, hot ? '#ffffff' : rgba(Theme.uiDim, 0.4));
+    } else if (w.weapon === 'stingergun') {
+      // darts stand in a row with a green bead on the point, so a full three
+      // reads differently from three arrows at a glance
+      for (let i = 0; i < gun.ammo; i++) {
+        const live = i < p.ammo;
+        const dx = ax + i * 6;
+        pxRect(ctx, dx, y + 4, 2, 7, live ? Theme.steel : rgba(Theme.uiDim, 0.35));
+        pxRect(ctx, dx, y + 3, 2, 2, live ? '#a8e04a' : rgba(Theme.uiDim, 0.3));
+        pxRect(ctx, dx - 1, y + 11, 4, 1, live ? Theme.steelDark : rgba(Theme.uiDim, 0.25));
+      }
     } else {
       for (let i = 0; i < gun.ammo; i++) {
         pxRect(ctx, ax + (i % 5) * 5, y + 3 + Math.floor(i / 5) * 7, 2, 5, i < p.ammo ? Theme.steel : rgba(Theme.uiDim, 0.35));
@@ -544,35 +555,58 @@ export function drawForge(ctx, game) {
   const paper = p.inventory.countOf('paper');
   drawText(ctx, `${bars} BARS`, x + 8, y + 24, '#ccd6e6', 1);
   drawText(ctx, `${paper} PAPER`, x + w - 8, y + 24, '#f4f0e6', 1, 'right');
+  // the two rarer materials, tallied between them
+  const shells = p.inventory.countOf('stingereggshell');
+  const souls = p.inventory.countOf('soul');
+  drawText(ctx, `${shells} SHELL ${souls} SOUL`, x + w / 2, y + 24,
+           shells || souls ? '#9fd8c4' : rgba(Theme.uiDim, 0.7), 1, 'center');
   pxRect(ctx, x + 8, y + 34, w - 16, 1, rgba(Theme.uiDim, 0.5));
 
   if (!f.list.length) {
     drawText(ctx, 'NOTHING TO WORK WITH', x + w / 2, y + 46, Theme.uiDim, 1, 'center');
   }
-  for (let i = 0; i < f.list.length; i++) {
-    const e = f.list[i];
+  // Only a window of the list is on screen; everything below indexes into the
+  // full list through the scroll offset the update pass settled on.
+  const top = clamp(f.top ?? Math.round(f.scroll ?? 0), 0, Math.max(0, f.list.length - g.visible));
+  for (let i = 0; i < g.visible; i++) {
+    const idx = top + i;
+    if (idx >= f.list.length) break;
+    const e = f.list[idx];
     const rr = forgeRowRect(g, i);
     const ry = rr.y;
-    const hot = f.hover === i;
-    const sel = i === f.sel;
+    const sel = idx === f.sel;
     if (sel) {
       ctx.fillStyle = rgba('#ffb43c', 0.16);
-      ctx.fillRect(x + 6, ry, w - 12, rowH - 1);
+      ctx.fillRect(rr.x, ry, rr.w, rowH - 1);
       ctx.strokeStyle = rgba('#ffb43c', 0.8);
-      ctx.strokeRect(x + 6.5, ry + 0.5, w - 13, rowH - 2);
+      ctx.strokeRect(rr.x + 0.5, ry + 0.5, rr.w - 1, rowH - 2);
     }
-    drawItemIcon(ctx, e.icon, x + 10, ry + 1, 12, t);
+    drawItemIcon(ctx, e.icon, rr.x + 4, ry + 1, 12, t);
     const col = e.owned ? Theme.uiDim : e.ok ? (sel ? '#ffd76a' : Theme.ui) : Theme.uiDim;
-    drawText(ctx, e.label, x + 26, ry + 4, col, 1);
-    drawText(ctx, e.cost, x + w - 10, ry + 4,
+    drawText(ctx, e.label, rr.x + 20, ry + 4, col, 1);
+    drawText(ctx, e.cost, rr.x + rr.w - 4, ry + 4,
              e.owned ? Theme.uiDim : e.ok ? '#8ce88c' : Theme.hp, 1, 'right');
     // what the piece actually does, on the highlighted row
-    if (sel && ITEMS[e.id]?.armor) {
+    if (sel && (ITEMS[e.id]?.armor || ITEMS[e.id]?.place)) {
       // above the panel, so it never covers the rows you are choosing between
       UI.tooltip = { id: e.id, x: x + w / 2, y: y - 2 };
     }
   }
-  drawText(ctx, 'TAP A ROW TO MAKE IT', x + w / 2, y + h - 11, rgba(Theme.uiDim, 0.85), 1, 'center');
+
+  // the scrollbar, and a hint at what is still off each end
+  if (g.scrolls) {
+    const tr = forgeTrackRect(g);
+    pxRect(ctx, tr.x, tr.y, tr.w, tr.h, rgba('#000000', 0.55));
+    const span = Math.max(0, f.list.length - g.visible);
+    const th = Math.max(6, Math.round(tr.h * g.visible / f.list.length));
+    const ty = tr.y + Math.round((tr.h - th) * (span ? top / span : 0));
+    pxRect(ctx, tr.x, ty, tr.w, th, rgba('#ffb43c', 0.85));
+    const arrow = 0.4 + 0.3 * Math.sin(t * 5);
+    if (top > 0) drawText(ctx, '^', x + w / 2, y + 34, rgba('#ffb43c', arrow), 1, 'center');
+    if (top < span) drawText(ctx, 'v', x + w / 2, y + h - 19, rgba('#ffb43c', arrow), 1, 'center');
+  }
+  drawText(ctx, g.scrolls ? 'DRAG TO SCROLL - TAP A ROW TO MAKE IT' : 'TAP A ROW TO MAKE IT',
+           x + w / 2, y + h - 11, rgba(Theme.uiDim, 0.85), 1, 'center');
   closeButton(ctx, closeRect(x, y, w), !!f.closeHot);
   ctx.restore();
   if (UI.tooltip) { drawTooltip(ctx, UI.tooltip); UI.tooltip = null; }

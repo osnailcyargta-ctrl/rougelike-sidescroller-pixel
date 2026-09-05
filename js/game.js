@@ -1,5 +1,5 @@
 // Game shell: canvas setup, main loop, run/room/wave state machine.
-import { clamp, lerp, rand, randInt, dist, distToSegment, rgba, sign, setSeed, getSeed, randomSeedText, TAU } from './util.js';
+import { clamp, lerp, rand, randInt, dist, distToSegment, rgba, sign, snapAngle, setSeed, getSeed, randomSeedText, TAU } from './util.js';
 import { Theme, applyTheme, resetTheme, DEFAULT_THEME } from './theme.js';
 import {
   Camera, updateFx, drawParticles, drawTexts, drawRings, clearFx, burst, floatText,
@@ -11,7 +11,7 @@ import { PostFX, parseShaderPack, DEFAULT_COMPOSITE } from './postfx.js';
 import {
   VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, DROP_POINT, PERK, WAVES, PLAYER as PCFG,
   BOSS_ROOM_INTERVAL, NUKERANG, FINAL_ROOM, SHARDGUN, TWINDAGGER, SWORD, BOW, ORIGAMI,
-  ARMOR, PAPER_SHIELD, ANVIL, GRAPPLE, WORM_SPEAR, STINGER_GUN, BLOCK,
+  ARMOR, PAPER_SHIELD, ANVIL, GRAPPLE, STINGER_GUN, BLOCK, DROPS, GIANT_EGG, FORGE_VISIBLE_ROWS,
 } from './config.js';
 import { Player, Enemy, Projectile, SHARD_TINT, INK, doodleShape, doodleLine } from './entities.js';
 import { makeBoss } from './boss.js';
@@ -21,7 +21,7 @@ import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, rollPerkPair, drawItemIcon } from
 import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, drawForge, panel, button } from './ui.js';
 import { updateTouchPad, drawTouchPad, drawAimLeash, Pad } from './touch.js';
 import { Perf, perfTick, syncPerfOptions, TIERS } from './perf.js';
-import { forgeLayout, forgeRowRect, closeRect, inRect } from './layout.js';
+import { forgeLayout, forgeRowRect, forgeListRect, closeRect, inRect } from './layout.js';
 import { drawText, drawTextShadow } from './font.js';
 import { Options, loadOptions, saveOptions, applyVisualOptions, captureShaderBase, saveShader, loadShader } from './settings.js';
 import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, drawControls, drawVictory } from './screens.js';
@@ -483,6 +483,61 @@ export class Game {
     });
   }
 
+  // --- setting things down -----------------------------------------------
+
+  // The Gigantic Stinger Egg is not thrown, it is placed: you have to be
+  // standing on the still platform in the middle of the room, and it goes down
+  // on the boards under your feet.
+  placeItem(def) {
+    const p = this.player;
+    if (!p || def.place !== 'giantegg') return;
+    const pad = PLATFORMS.find((pl) => pl.tag === 'center');
+    if (!pad) return;
+    const onPad = p.onGround && Math.abs(p.y - pad.y) < 2 &&
+      p.x > pad.x - 4 && p.x < pad.x + pad.w + 4;
+    if (!onPad) { this.toast('STAND ON THE CENTRE PLATFORM'); Sfx.ui(); return; }
+    if (this.boss && !this.boss.dead) { this.toast('SOMETHING IS ALREADY HERE'); Sfx.ui(); return; }
+    if (!p.inventory.remove('giganticstingeregg', 1)) return;
+
+    const e = new Enemy('giantstingeregg', clamp(p.x, pad.x + 10, pad.x + pad.w - 10), pad.y, this);
+    e.spawnT = 0.3;
+    this.enemies.push(e);
+    Camera.add(8);
+    Camera.punch(1.2);
+    Sfx.slam();
+    screenFlash(0.35, '#cdf3e6', 0.3);
+    impactRing(e.cx, e.cy, { color: '#cdf3e6', r0: 4, r1: 90, life: 0.6, width: 3 });
+    burst(e.cx, pad.y, 22, {
+      color: '#cdf3e6', color2: '#ffffff', speedMin: 30, speedMax: 150,
+      lifeMin: 0.25, lifeMax: 0.7, gravity: 200, angle: -Math.PI / 2, spread: 1.2,
+    });
+    p.recomputeStats();
+  }
+
+  // Five seconds later the shell comes apart and the thing inside gets its
+  // own entrance, cutscene and all.
+  hatchGiantEgg(egg) {
+    const x = egg ? egg.cx : VIEW_W / 2;
+    const y = egg ? egg.cy : 120;
+    Camera.add(20);
+    this.hitstop(0.22);
+    screenFlash(0.85, '#ffffff', 0.55);
+    Sfx.die();
+    impactRing(x, y, { color: '#ffffff', r0: 6, r1: 200, life: 0.8, width: 4 });
+    impactRing(x, y, { color: '#7ad7a0', r0: 4, r1: 130, life: 0.55, width: 3 });
+    burst(x, y, 48, {
+      color: '#cdf3e6', color2: '#ffffff', speedMin: 50, speedMax: 320,
+      lifeMin: 0.3, lifeMax: 1.1, sizeMax: 4, gravity: 260, drag: 0.92,
+    });
+    if (this.boss && !this.boss.dead) return;
+    this.boss = makeBoss(this, this.roomIndex, 'poitnus');
+    this.boss.x = clamp(x, 60, VIEW_W - 60);
+    this.boss.targetX = this.boss.x;
+    this.boss.y = Math.max(50, y - 20);
+    this.boss.intro = 99;
+    this.cutscene.play('intro', this.boss);
+  }
+
   // --- the forge ---------------------------------------------------------
 
   // Melt a weapon down for bars, or spend bars and paper on armour. The world
@@ -518,12 +573,32 @@ export class Game {
         });
       }
     }
+    // The one recipe that is not armour: shells and souls into the egg.
+    {
+      const shells = inv.countOf('stingereggshell');
+      const souls = inv.countOf('soul');
+      const owned = inv.has('giganticstingeregg');
+      const needS = Math.max(0, GIANT_EGG.shells - shells);
+      const needL = Math.max(0, GIANT_EGG.souls - souls);
+      // the running tally lives in the header, so the row only has to say
+      // what is still missing - which is the part you can act on
+      const cost = owned ? 'CARRIED'
+        : needS && needL ? `NEED ${needS}+${needL}`
+          : needS ? `NEED ${needS} SHELL`
+            : needL ? `NEED ${needL} SOUL` : 'READY';
+      list.push({
+        kind: 'giantegg', id: 'giganticstingeregg', icon: 'giganticstingeregg',
+        label: 'GIGANTIC STINGER EGG', cost,
+        ok: !owned && !needS && !needL,
+        owned,
+      });
+    }
     return list;
   }
 
   openForge() {
     if (!this.player || this.forge) return;
-    this.forge = { sel: 0, t: 0, list: this.forgeRecipes() };
+    this.forge = { sel: 0, scroll: 0, t: 0, list: this.forgeRecipes(), drag: null };
     Sfx.ui();
   }
 
@@ -539,39 +614,92 @@ export class Game {
     f.list = this.forgeRecipes();
     const n = f.list.length;
     if (n === 0) { if (Input.mouseDown.right || Input.pressed.has('Escape')) this.closeForge(); return; }
+    const g = forgeLayout(n);
+    f.geom = g;
+    const maxScroll = Math.max(0, n - g.visible);
     f.sel = clamp(f.sel, 0, n - 1);
+
+    // Wheel and keys move the SELECTION, and the view chases it. A drag moves
+    // the VIEW, and the selection stays where it is - otherwise letting go of
+    // a scroll would snap the list straight back to the highlighted row.
+    let seek = false;
     if (Input.wheel !== 0) {
       f.sel = (f.sel + sign(Input.wheel) + n) % n;
+      seek = true;
       Sfx.ui();
     }
-    if (Input.pressed.has(Binds.jump) || Input.pressed.has('ArrowUp')) { f.sel = (f.sel - 1 + n) % n; Sfx.ui(); }
-    if (Input.pressed.has(Binds.down) || Input.pressed.has('ArrowDown')) { f.sel = (f.sel + 1) % n; Sfx.ui(); }
+    if (Input.pressed.has(Binds.jump) || Input.pressed.has('ArrowUp')) { f.sel = (f.sel - 1 + n) % n; seek = true; Sfx.ui(); }
+    if (Input.pressed.has(Binds.down) || Input.pressed.has('ArrowDown')) { f.sel = (f.sel + 1) % n; seek = true; Sfx.ui(); }
     if (Input.pressed.has('Escape') || Input.mouseDown.right) { this.closeForge(); return; }
+
+    // --- dragging the list. A press inside the rows starts a candidate drag;
+    // it only becomes a scroll once the finger has actually moved, so a tap
+    // still reads as a tap and never scrolls the row out from under itself.
+    const onList = inRect(forgeListRect(g), Input.mouse.x, Input.mouse.y);
+    if (Input.mouseDown.left && onList) {
+      f.drag = { y0: Input.mouse.y, scroll0: f.scroll, moved: 0 };
+    }
+    if (f.drag && Input.mouse.left) {
+      const dy = Input.mouse.y - f.drag.y0;
+      f.drag.moved = Math.max(f.drag.moved, Math.abs(dy));
+      if (f.drag.moved > 3) f.scroll = clamp(f.drag.scroll0 - dy / g.rowH, 0, maxScroll);
+    }
+    const dragged = f.drag && f.drag.moved > 3;
+    const released = f.drag && !Input.mouse.left;
+    if (released) f.drag = null;
+
+    // the selection drags the view along with it when it leaves the window
+    if (seek) f.scroll = clamp(f.scroll, f.sel - g.visible + 1, f.sel);
+    f.scroll = clamp(f.scroll, 0, maxScroll);
+    const top = Math.round(f.scroll);
 
     // Work out what the cursor is over NOW. Reading a hover that was worked
     // out while drawing is a frame behind, and a touch arrives and clicks in
     // the same frame - which is how tapping one recipe used to forge another.
-    const g = forgeLayout(n);
-    f.geom = g;
     let over = -1;
-    for (let i = 0; i < n; i++) {
-      if (inRect(forgeRowRect(g, i), Input.mouse.x, Input.mouse.y)) { over = i; break; }
+    for (let i = 0; i < g.visible; i++) {
+      const idx = top + i;
+      if (idx >= n) break;
+      if (inRect(forgeRowRect(g, i), Input.mouse.x, Input.mouse.y)) { over = idx; break; }
     }
     f.hover = over;
-    if (over >= 0) f.sel = over;
+    f.top = top;
+    if (over >= 0 && !dragged) f.sel = over;
 
     const cr = closeRect(g.x, g.y, g.w);
     f.closeHot = inRect(cr, Input.mouse.x, Input.mouse.y);
     if (f.closeHot && Input.mouseDown.left) { this.closeForge(); return; }
-    // only a click that lands on a recipe forges it, so a stray tap on the
-    // panel or the backdrop can never spend your bars
-    if (f.t > 0.12 && Input.mouseDown.left && over >= 0) this.craft(f.list[over]);
+    // Only a tap that both starts and ends on a recipe forges it: a stray tap
+    // on the panel can never spend your bars, and neither can a scroll that
+    // happened to begin on a row.
+    if (f.t > 0.12 && released && !dragged && over >= 0) this.craft(f.list[over]);
   }
 
   craft(entry) {
     const p = this.player;
     const inv = p.inventory;
     if (!entry) return;
+    if (entry.kind === 'giantegg') {
+      if (!entry.ok) { Sfx.ui(); return; }
+      if (inv.countOf('stingereggshell') < GIANT_EGG.shells) return;
+      if (inv.countOf('soul') < GIANT_EGG.souls) return;
+      inv.remove('stingereggshell', GIANT_EGG.shells);
+      inv.remove('soul', GIANT_EGG.souls);
+      if (inv.add('giganticstingeregg', 1) > 0) {
+        // no room: hand the parts straight back rather than eating them
+        inv.add('stingereggshell', GIANT_EGG.shells);
+        inv.add('soul', GIANT_EGG.souls);
+        this.toast('NO ROOM FOR IT');
+        Sfx.ui();
+        return;
+      }
+      floatText(this.anvil ? this.anvil.x : p.x, (this.anvil ? this.anvil.y : p.cy) - 22,
+                'GIGANTIC STINGER EGG', '#cdf3e6', { life: 1.4 });
+      this.forgeSparks('#cdf3e6');
+      p.recomputeStats();
+      Sfx.pickup();
+      return;
+    }
     if (entry.kind === 'smelt') {
       if (!inv.remove(entry.id, 1)) return;
       inv.add('ironbar', ARMOR.smeltValue);
@@ -932,13 +1060,25 @@ export class Game {
     this.rollWeaponDrop(enemy.def.dropId, enemy.def.dropChance ?? 0.1, enemy.cx, enemy.cy);
   }
 
-  // Bosses do not carry a dropId, so Big Dude's spear is rolled by hand when
-  // its pool empties.
+  // Every boss leaves souls behind - except the god, which has none to give.
   rollBossDrop(boss) {
-    if (!boss || boss.def.id !== 'bigdude') return;
-    const x = clamp(boss.hx ?? VIEW_W / 2, 20, VIEW_W - 20);
-    const y = Math.min(boss.hy ?? GROUND_Y - 20, GROUND_Y - 20);
-    this.rollWeaponDrop('wormspear', WORM_SPEAR.dropFromBoss, x, y);
+    if (!boss || boss.def.id === 'alphads') return;
+    const [lo, hi] = DROPS.soulsPerBoss;
+    const x = clamp(boss.x ?? boss.hx ?? VIEW_W / 2, 24, VIEW_W - 24);
+    const y = clamp(boss.y ?? boss.hy ?? GROUND_Y - 40, 30, GROUND_Y - 20);
+    this.dropItems('soul', randInt(lo, hi), x, y);
+  }
+
+  // A handful of the same thing thrown out of one point. Each lands on its
+  // own, so a pile of five reads as five things and not as one.
+  dropItems(id, n, x, y) {
+    if (!ITEMS[id]) return 0;
+    for (let i = 0; i < n; i++) {
+      this.pickups.push(new Pickup(id, clamp(x + rand(-8, 8), 10, VIEW_W - 10), y, null, {
+        falling: true, vx: rand(-70, 70), vy: rand(-190, -110),
+      }));
+    }
+    return n;
   }
 
   rollWeaponDrop(id, chance, x, y) {
@@ -1137,7 +1277,6 @@ export class Game {
     if (this.cutscene.active) {
       if (this.screen !== 'playing' || !this.player || this.player.dead) this.cutscene.finish();
       else {
-        if (Input.pressed.size > 0 || Input.mouseDown.left || Input.mouseDown.right) this.cutscene.skip();
         this.cutscene.update(dt);
         for (const e of this.enemies) e.anim += dt;
         if (this.boss && this.boss.cinematicUpdate) this.boss.cinematicUpdate(dt);
@@ -1492,7 +1631,6 @@ export class Game {
     let r = SWORD.range * 0.5;
     if (w) {
       if (w.id === 'twindagger') r = TWINDAGGER.range;
-      else if (w.weapon === 'spear') r = WORM_SPEAR.range + (p.armorBuff?.meleeRange ?? 0) * BLOCK;
       else if (w.weapon === 'melee') r = SWORD.range;
       else if (w.weapon === 'stingergun') r = STINGER_GUN.range;
       else if (w.weapon === 'bow') r = BOW.range;
@@ -1510,6 +1648,20 @@ export class Game {
     ctx.arc(p.x, p.cy, r, 0, TAU);
     ctx.stroke();
     ctx.setLineDash([]);
+    // A swing snaps to one of eight directions, so the ring says which one it
+    // is about to take - otherwise the cursor and the strike disagree.
+    const melee = !w || w.weapon === 'melee';
+    if (melee) {
+      const a = snapAngle(p.aim, 8);
+      const arc = (w && w.id === 'twindagger' ? TWINDAGGER.arc : SWORD.arc) * 0.95;
+      ctx.strokeStyle = rgba(Theme.uiAccent, 0.5);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.cy, r, a - arc, a + arc);
+      ctx.stroke();
+      const tx = p.x + Math.cos(a) * r, ty = p.cy + Math.sin(a) * r;
+      pxRect(ctx, tx - 1, ty - 1, 2, 2, rgba('#ffffff', 0.7));
+    }
     ctx.restore();
   }
 
@@ -1523,8 +1675,7 @@ export class Game {
         : w.weapon === 'bow' ? BOW.cooldown
           : w.weapon === 'shardgun' ? SHARDGUN.cooldown
             : w.weapon === 'stingergun' ? STINGER_GUN.cooldown
-              : w.weapon === 'spear' ? WORM_SPEAR.cooldown
-                : w.weapon === 'paper' ? ORIGAMI.forms.missile.cooldown
+              : w.weapon === 'paper' ? ORIGAMI.forms.missile.cooldown
               : w.weapon === 'boomerang' ? NUKERANG.cooldown : SWORD.cooldown)
       : 0.35;
     const busy = p.reloadT > 0 ? p.reloadT / ((this.player.gunCfg()?.reload) || 1)
