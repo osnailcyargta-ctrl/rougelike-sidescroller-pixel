@@ -6,8 +6,9 @@ import { drawText, drawTextShadow, drawTextFit, textWidth } from './font.js';
 import { pxRect, glowDot, spawnParticle } from './gfx.js';
 import { VIEW_W, VIEW_H, FINAL_ROOM, BOSS_RUSH } from './config.js';
 import { Unlocks, BOSS_RUSH_ROOM } from './codex.js';
-import { panel, button, slider, textField, drawTooltip, UI } from './ui.js';
+import { panel, button, slider, textField, drawTooltip, inside, UI } from './ui.js';
 import { Options, optionsIn, saveOptions, resetOptions, applyVisualOptions } from './settings.js';
+import { shaderStoreUsage, STORE_LIMIT } from './shaderlib.js';
 import { Perf, syncPerfOptions } from './perf.js';
 import { drawItemIcon, ITEMS, RARITY } from './items.js';
 import { AudioCfg, setVolume, Sfx } from './audio.js';
@@ -192,6 +193,7 @@ export function drawMainMenu(ctx, game, t) {
 const TABS = [
   { id: 'indicator', label: 'INDICATORS' },
   { id: 'visual', label: 'VISUALS' },
+  { id: 'shaders', label: 'SHADERS' },
   { id: 'binds', label: 'KEYS' },
   { id: 'touch', label: 'TOUCH' },
 ];
@@ -202,11 +204,11 @@ export function drawSettings(ctx, game, t) {
   drawTextShadow(ctx, 'SETTINGS', VIEW_W / 2, 13, Theme.uiAccent, 2, 'center');
 
   // --- tab strip
-  const tw = 86, ty = 29;
-  const tx0 = Math.round((VIEW_W - (TABS.length * tw + (TABS.length - 1) * 6)) / 2);
+  const tw = 82, ty = 29;
+  const tx0 = Math.round((VIEW_W - (TABS.length * tw + (TABS.length - 1) * 5)) / 2);
   for (let i = 0; i < TABS.length; i++) {
     const tab = TABS[i];
-    const x = tx0 + i * (tw + 6);
+    const x = tx0 + i * (tw + 5);
     const on = UI.tab === tab.id;
     if (button(ctx, 'tab' + tab.id, x, ty, tw, 14, tab.label, { selected: on })) {
       UI.tab = tab.id;
@@ -217,6 +219,7 @@ export function drawSettings(ctx, game, t) {
 
   if (UI.tab === 'binds') drawBindsTab(ctx, game, t);
   else if (UI.tab === 'visual') drawVisualTab(ctx, game, t);
+  else if (UI.tab === 'shaders') drawShaderTab(ctx, game, t);
   else if (UI.tab === 'touch') drawTouchTab(ctx, game, t);
   else drawIndicatorTab(ctx, game, t);
 
@@ -396,6 +399,84 @@ function drawVisualTab(ctx, game, t) {
     ctx.fillStyle = Theme[keys[i]];
     ctx.fillRect(sx + 1, py + 30, 8, 8);
   }
+}
+
+// The shelf: every pack the player has handed over, switched on or off from
+// here. Uploading is the same file picker as the Visuals tab - the difference
+// is that what lands here stays, so nothing has to be uploaded twice.
+const SHADER_ROWS = 5;
+
+function drawShaderTab(ctx, game, t) {
+  const list = game.savedShaders();
+  const x0 = 32, w = VIEW_W - 64;
+
+  // the tab strip ends at y 44, so nothing here starts above 48
+  drawText(ctx, 'SAVED SHADERS', x0, 52, Theme.platformGlow, 1);
+  if (button(ctx, 'shup', x0 + w - 176, 48, 78, 14, 'UPLOAD')) game.requestShaderUpload();
+  if (button(ctx, 'shsample', x0 + w - 94, 48, 46, 14, 'SAMPLE')) game.downloadSampleShader();
+  if (button(ctx, 'shoff', x0 + w - 44, 48, 44, 14, 'OFF', { disabled: !game.shaderName })) {
+    game.resetShader();
+  }
+
+  const ry0 = 68, rh = 15;
+  if (!list.length) {
+    drawText(ctx, 'NOTHING SAVED YET.', x0, ry0 + 6, Theme.uiDim, 1);
+    drawText(ctx, 'UPLOAD A .SHDR, DROP ONE ON THE WINDOW, OR OPEN ONE',
+             x0, ry0 + 18, rgba(Theme.uiDim, 0.8), 1);
+    drawText(ctx, 'WITH AETHER DESCENT FROM YOUR FILES.',
+             x0, ry0 + 28, rgba(Theme.uiDim, 0.8), 1);
+  }
+
+  // a wheel over the list, exactly like the forge and the debug grids
+  const maxOff = Math.max(0, list.length - SHADER_ROWS);
+  if (maxOff > 0 && inside(x0, ry0, w, SHADER_ROWS * rh) && Input.wheel !== 0) {
+    UI.shaderScroll = clamp((UI.shaderScroll ?? 0) + Math.sign(Input.wheel), 0, maxOff);
+    Sfx.ui();
+  }
+  const off = clamp(UI.shaderScroll ?? 0, 0, maxOff);
+  UI.shaderScroll = off;
+
+  for (let i = off; i < Math.min(list.length, off + SHADER_ROWS); i++) {
+    const e = list[i];
+    const y = ry0 + (i - off) * rh;
+    const on = game.shaderId === e.id;
+    pxRect(ctx, x0, y, w, rh - 2, rgba(on ? Theme.uiAccent : '#000000', on ? 0.16 : 0.35));
+    if (on) pxRect(ctx, x0, y, 2, rh - 2, Theme.uiAccent);
+    drawTextFit(ctx, e.name, x0 + 6, y + 4, on ? Theme.ui : Theme.uiDim, 200, 1);
+    const kb = e.size >= 1024 ? `${Math.round(e.size / 1024)}KB` : `${e.size}B`;
+    drawText(ctx, kb, x0 + 268, y + 4, rgba(Theme.uiDim, 0.9), 1, 'right');
+    // which of the three stores it landed in, so a full one is not a mystery
+    drawText(ctx, `S${(e.store ?? 0) + 1}`, x0 + 292, y + 4, rgba(Theme.uiDim, 0.7), 1, 'right');
+    if (button(ctx, 'shon' + e.id, x0 + w - 74, y, 46, 13, on ? 'ON' : 'OFF', { selected: on })) {
+      game.toggleSavedShader(e.id);
+    }
+    if (button(ctx, 'shdel' + e.id, x0 + w - 24, y, 24, 13, 'X')) game.deleteSavedShader(e.id);
+  }
+  if (maxOff > 0) {
+    drawText(ctx, `${off + 1}-${Math.min(list.length, off + SHADER_ROWS)} OF ${list.length}  WHEEL TO SCROLL`,
+             x0 + w, ry0 + SHADER_ROWS * rh + 2, rgba(Theme.uiDim, 0.8), 1, 'right');
+  }
+
+  // --- what the shelf is holding
+  const uy = ry0 + SHADER_ROWS * rh + 14;
+  pxRect(ctx, x0, uy - 5, w, 1, rgba(Theme.uiDim, 0.4));
+  drawText(ctx, 'STORAGE', x0, uy, rgba(Theme.uiDim, 0.9), 1);
+  const use = shaderStoreUsage();
+  const ux = x0 + 52, ustep = 118;
+  for (let i = 0; i < use.length; i++) {
+    const bx = ux + i * ustep;
+    const pct = clamp(use[i].bytes / STORE_LIMIT, 0, 1);
+    drawText(ctx, `${i + 1}`, bx, uy, rgba(Theme.uiDim, 0.9), 1);
+    pxRect(ctx, bx + 10, uy + 1, 60, 5, rgba('#000000', 0.6));
+    pxRect(ctx, bx + 10, uy + 1, Math.round(60 * pct), 5, pct > 0.9 ? Theme.hp : Theme.uiAccent);
+    drawText(ctx, `${Math.round(pct * 100)}%`, bx + 76, uy, rgba(Theme.uiDim, 0.9), 1);
+  }
+  drawText(ctx, 'WHEN ONE STORE FILLS UP THE NEXT ONE TAKES OVER.',
+           x0, uy + 12, rgba(Theme.uiDim, 0.75), 1);
+
+  const status = game.shaderError ? game.shaderError.slice(0, 46)
+    : game.shaderName ? `ACTIVE: ${game.shaderName}` : 'BUILT-IN SHADER';
+  drawText(ctx, status, x0, uy + 24, game.shaderError ? Theme.hp : Theme.ui, 1);
 }
 
 function drawBindsTab(ctx, game, t) {

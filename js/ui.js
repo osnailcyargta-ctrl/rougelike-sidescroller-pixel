@@ -25,6 +25,7 @@ export const UI = {
   dt: 0,
   dbgScroll: { items: 0, mobs: 0 },
   dbgRoom: 1,              // the room the debug menu's teleport is pointed at
+  shaderScroll: 0,         // first visible row of the saved-shader list
   fps: 0,
   tab: 'indicator',        // which settings tab is showing
 };
@@ -39,7 +40,7 @@ export function uiBeginFrame(dt) {
   Input.captureText = false;
 }
 
-function inside(x, y, w, h) {
+export function inside(x, y, w, h) {
   const m = Input.mouse;
   return m.x >= x && m.x < x + w && m.y >= y && m.y < y + h;
 }

@@ -30,6 +30,8 @@ import { Perf, perfTick, syncPerfOptions, TIERS } from './perf.js';
 import { forgeLayout, forgeRowRect, forgeListRect, closeRect, inRect, codexLayout, codexRowRect } from './layout.js';
 import { drawText, drawTextShadow } from './font.js';
 import { Options, loadOptions, saveOptions, applyVisualOptions, captureShaderBase, saveShader, loadShader } from './settings.js';
+import { loadShaderLibrary, saveShaderToLibrary, removeShaderFromLibrary, findShader,
+  saveActiveShaderId, loadActiveShaderId } from './shaderlib.js';
 import {
   drawMainMenu, drawSettings, drawClassSelect, drawModeSelect, drawWeaponSelect,
   drawPerkSlot, drawRushReward, drawPause, drawGameOver, drawControls, drawVictory,
@@ -76,6 +78,7 @@ export class Game {
     this.freezeT = 0;
     this.screenShake = true;
     this.shaderName = null;
+    this.shaderId = null;    // which shelf entry is on, if it came from the shelf
     this.shaderError = null;
     this.deathT = 0;
 
@@ -129,9 +132,20 @@ export class Game {
     });
     this.setupShaderInput(root);
 
-    // and the shader pack the player was last using
-    const saved = loadShader();
-    if (saved) this.applyShaderPack(saved.text, saved.name, { silent: true, store: false });
+    // and the shader pack the player was last using. The shelf is asked first:
+    // a pack switched on from there is remembered by id, so deleting it turns
+    // it off rather than leaving a ghost copy running.
+    const activeId = loadActiveShaderId();
+    const shelved = activeId ? findShader(activeId) : null;
+    if (shelved) {
+      this.applyShaderPack(shelved.text, shelved.name, { silent: true, store: false });
+      this.shaderId = shelved.id;
+    } else {
+      const saved = loadShader();
+      if (saved) this.applyShaderPack(saved.text, saved.name, { silent: true, store: false });
+    }
+    // anything shared into the app arrives here, whenever it arrives
+    window.__aetherOpenShader = (name, text) => this.openSharedShader(name, text);
 
     this.last = performance.now();
     this.loop = this.loop.bind(this);
@@ -201,7 +215,7 @@ export class Game {
       const f = e.target.files[0];
       if (!f) return;
       const text = await f.text();
-      this.applyShaderPack(text, f.name.replace(/\.shdr$/i, ''));
+      this.importShader(f.name.replace(/\.shdr$/i, ''), text);
       this.fileInput.value = '';
     });
     // drag & drop a .shdr anywhere
@@ -210,7 +224,7 @@ export class Game {
       e.preventDefault();
       const f = e.dataTransfer?.files?.[0];
       if (!f || !/\.shdr$/i.test(f.name)) return;
-      this.applyShaderPack(await f.text(), f.name.replace(/\.shdr$/i, ''));
+      this.importShader(f.name.replace(/\.shdr$/i, ''), await f.text());
     });
   }
 
@@ -244,14 +258,81 @@ export class Game {
     }
   }
 
+  // --- the shader shelf ---------------------------------------------------
+
+  /**
+   * Take a pack in, put it on the shelf, and switch it on. A pack that will
+   * not compile is not shelved: the shelf is things that work.
+   */
+  importShader(name, text, opts = {}) {
+    const before = this.shaderName;
+    this.applyShaderPack(text, name, { ...opts, store: false, silent: true });
+    if (this.shaderError) {
+      this.toast(this.shaderError);
+      return null;
+    }
+    const res = saveShaderToLibrary(this.shaderName || name, text);
+    if (!res.ok) {
+      // it is running, it just could not be kept - say which, not "failed"
+      this.toast(res.error);
+      this.shaderId = null;
+      saveActiveShaderId(null);
+      saveShader(this.shaderName, text);       // at least survive a reload
+      return null;
+    }
+    this.shaderId = res.entry.id;
+    saveActiveShaderId(res.entry.id);
+    saveShader(this.shaderName, text);
+    this.toast(before === this.shaderName ? `SHADER UPDATED: ${this.shaderName}`
+                                          : `SHADER SAVED: ${this.shaderName}`);
+    return res.entry;
+  }
+
+  /** Switch a shelved pack on, or off again if it is the one already on. */
+  toggleSavedShader(id) {
+    if (this.shaderId === id) { this.resetShader(); return; }
+    const entry = findShader(id);
+    if (!entry) { this.toast('THAT SHADER IS GONE'); return; }
+    this.applyShaderPack(entry.text, entry.name, { store: false, silent: true });
+    if (this.shaderError) { this.toast(this.shaderError); return; }
+    this.shaderId = entry.id;
+    saveActiveShaderId(entry.id);
+    saveShader(entry.name, entry.text);
+    this.toast(`SHADER ON: ${entry.name}`);
+  }
+
+  deleteSavedShader(id) {
+    const entry = findShader(id);
+    if (!entry) return;
+    if (this.shaderId === id) this.resetShader();
+    removeShaderFromLibrary(id);
+    this.toast(`DELETED: ${entry.name}`);
+  }
+
+  savedShaders() { return loadShaderLibrary(); }
+
+  /**
+   * A .shdr handed over by the system - Android's open-with or share sheet.
+   * It goes on the shelf like any other, so it is there next time too.
+   */
+  openSharedShader(name, text) {
+    const clean = String(name || 'SHARED').replace(/\.shdr$/i, '');
+    const entry = this.importShader(clean, String(text ?? ''));
+    // The menus are where the result is visible; a run in progress is not
+    // interrupted for it.
+    return !!entry;
+  }
+
   resetShader() {
     resetTheme();
     captureShaderBase();
     applyVisualOptions();
     this.postfx.resetComposite();
     this.shaderName = null;
+    this.shaderId = null;
     this.shaderError = null;
     saveShader(null, null);
+    saveActiveShaderId(null);
     this.toast('SHADER RESET');
   }
 
