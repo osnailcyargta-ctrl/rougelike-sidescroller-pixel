@@ -45,6 +45,23 @@ jobs:
           echo "VERSION_NAME=$(date -u +%Y.%m.%d)-$SHA" >> "$GITHUB_ENV"
           echo "VERSION_CODE=$CODE" >> "$GITHUB_ENV"
 
+      # webapp.json is fetched over the network by the installed app, so a
+      # stale one would have it download a file list that no longer matches
+      # the game. Regenerate and compare rather than trusting anyone to
+      # remember.
+      - name: Check the web manifest is current
+        run: |
+          set -euo pipefail
+          cp webapp.json /tmp/webapp.committed.json 2>/dev/null || true
+          bash android/gen-webapp-manifest.sh /tmp/webapp.fresh.json
+          # the commit line differs by design between a local run and CI
+          strip() { grep -v '"commit"' "$1"; }
+          if ! diff <(strip /tmp/webapp.committed.json) <(strip /tmp/webapp.fresh.json); then
+            echo "webapp.json is stale. Run android/gen-webapp-manifest.sh and commit it."
+            exit 1
+          fi
+          echo "web manifest matches the tree"
+
       - name: Snapshot the game into the app
         run: bash android/snapshot.sh
 
@@ -88,6 +105,15 @@ jobs:
           COUNT=$(grep -c 'assets/www/' /tmp/apk.txt)
           echo "$COUNT game files packaged"
           [ "$COUNT" -ge 25 ] || { echo "too few files packaged"; exit 1; }
+          grep -q 'assets/www/webapp.json' /tmp/apk.txt \
+            || { echo "the update manifest is not in the APK"; exit 1; }
+          # The game is ES modules. Loading them from file:// is blocked by
+          # CORS, which is what left the first build stuck on "click to
+          # start", so the app must not be pointed at file:// again.
+          if grep -rn 'file:///android_asset' android/app/src/main/java/; then
+            echo "the app is loading from file:// - modules will not run"
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         with:

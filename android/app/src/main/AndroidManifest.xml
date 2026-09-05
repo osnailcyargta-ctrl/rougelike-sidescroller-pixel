@@ -1,8 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-  <!-- No INTERNET permission on purpose. Everything the game needs is inside
-       the APK, so the app cannot phone home even if something tried to. -->
+  <!-- The game inside the APK is always playable with no network at all.
+       These are only used for the update check on a cold start, which is
+       skipped entirely when there is no connection. -->
+  <uses-permission android:name="android.permission.INTERNET" />
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
   <uses-feature android:glEsVersion="0x00020000" android:required="true" />
 

@@ -1,14 +1,49 @@
 # Aether Descent, packaged
 
-A WebView around the game, with the game itself copied inside the APK. There
-is no `INTERNET` permission: once it is installed nothing is downloaded, and
-it plays in flight mode.
+A WebView around the game, with the game itself copied inside the APK. It
+plays in flight mode from the moment it is installed; the network is only ever
+used to look for a newer copy, and only on a cold start.
+
+## Served over https, not file://
+
+The game is ES modules. A module script fetched from a `file://` page has an
+opaque origin, so Chromium blocks it by CORS — the page paints and nothing
+runs, which is a "click to start" with nothing behind it. So the assets are
+served through `WebViewAssetLoader` at
+`https://appassets.androidplatform.net/`. That also gives `localStorage` a
+single origin that survives an update, so settings and unlocks are not lost
+when the files underneath change.
+
+If the game object has not appeared a few seconds after the page loads, the
+loading screen says so instead of handing over a dead overlay.
+
+## Updating
+
+On a **cold start** — first launch, or after the app was swiped out of recents
+— it checks for a newer copy:
+
+- **Offline**: nothing is attempted. The game starts immediately from what is
+  already installed.
+- **Online**: it fetches `webapp.json` from the release branch and compares
+  each file's SHA-256 against what is on the device. Only files that actually
+  differ are downloaded, into a staging directory. If every one arrives and
+  every hash matches, the staged set replaces the live one in a single rename;
+  if anything at all fails, the staging is thrown away and the copy already
+  installed is used.
+
+Coming back from the background does **not** re-check — the activity is still
+alive and you are probably mid-run.
+
+Two copies exist at all times: the one packaged in the APK, which cannot go
+missing, and the downloaded one, which is only used once it is complete. Reads
+prefer the download and fall back to the package per file.
 
 ## What the build does
 
 1. `snapshot.sh` copies `index.html`, `js/`, `css/` and `shaders/` out of the
-   repository into `app/src/main/assets/www/`, and writes a `build.json` next
-   to them recording the commit it took and the date.
+   repository into `app/src/main/assets/www/`, writes a `build.json` recording
+   the commit and date, and regenerates `webapp.json` — the file list with
+   hashes that the installed app later compares against the web copy.
 2. It then refuses to continue if anything in the bundle points at `http://`
    or `https://` — a single absolute reference would be a file the game could
    not load offline.
@@ -17,17 +52,6 @@ it plays in flight mode.
 
 The snapshot is **not** in git. It is generated, and a copy in the branch
 would sooner or later be the stale one that ships.
-
-## Known good
-
-The first CI run built it in 48 seconds:
-
-```
-BUILD SUCCESSFUL in 48s
-aether-descent-2026.09.05-1402e6d-debug.apk   256K
-aether-descent-2026.09.05-1402e6d.apk         218K
-32 game files packaged
-```
 
 ## Getting an APK
 

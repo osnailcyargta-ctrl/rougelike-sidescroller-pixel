@@ -27,6 +27,11 @@ for d in js css shaders; do
   fi
 done
 
+# The manifest travels with the bundle: it is what the updater compares the
+# web copy against to decide whether anything needs downloading.
+bash "$here/gen-webapp-manifest.sh" "$out/webapp.json" >/dev/null
+cp "$out/webapp.json" "$repo/webapp.json"
+
 sha="$(git -C "$repo" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 date="$(date -u +%Y-%m-%d)"
 count="$(find "$out" -type f | wc -l | tr -d ' ')"

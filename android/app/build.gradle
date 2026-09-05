@@ -50,4 +50,10 @@ android {
   }
 }
 
-dependencies { }
+dependencies {
+  // WebViewAssetLoader. The game is ES modules, and a module script fetched
+  // from file:// has an opaque origin, so Chromium blocks it by CORS: the page
+  // renders and nothing runs. Serving the same files over an https origin
+  // fixes that, and gives localStorage one origin that survives an update.
+  implementation 'androidx.webkit:webkit:1.11.0'
+}
