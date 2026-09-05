@@ -541,7 +541,7 @@ export function drawModeSelect(ctx, game, t) {
       id: 'bossrush', name: 'BOSS RUSH', color: Theme.hp, ok: !locked,
       lines: locked
         ? ['LOCKED.', 'FELL THE UNDEAD CEILING', `AND REACH ROOM ${BOSS_RUSH_ROOM}`, 'IN A NORMAL RUN.']
-        : ['FOUR BOSSES, BACK TO', 'BACK, NOTHING BETWEEN.', 'PICK ONE WEAPON OF TWO', 'AND KEEP IT.'],
+        : [`${BOSS_RUSH.order.length} BOSSES, BACK TO BACK,`, 'NOTHING IN BETWEEN.', 'ONE WEAPON, ONE PERK,', 'AND SPOILS AS YOU GO.'],
     },
   ];
   const cw = 170, ch = 118, gap = 14;
@@ -638,7 +638,11 @@ export function drawPerkSlot(ctx, game, t) {
   for (let k = -1; k <= 1; k++) {
     const idx = ((Math.floor(pos) + k) % sl.pool.length + sl.pool.length) % sl.pool.length;
     const id = sl.pool[idx];
-    const cy = winY + winH / 2 + (k + frac) * cellH;
+    // (k - frac), not (k + frac). With the sign the other way the strip runs
+    // backwards against its own index: the item under the line between steps
+    // is not the one the index says, so the reel appears to settle on one
+    // perk and hand over a different one.
+    const cy = winY + winH / 2 + (k - frac) * cellH;
     if (cy < winY - cellH || cy > winY + winH + cellH) continue;
     const near = 1 - Math.min(1, Math.abs(cy - (winY + winH / 2)) / cellH);
     ctx.globalAlpha = 0.25 + near * 0.75;
