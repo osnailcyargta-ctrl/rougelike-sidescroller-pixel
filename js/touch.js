@@ -224,8 +224,12 @@ export function updateTouchPad(game, dt = 0) {
   Pad.geom = g;
 
   const p = game.player;
+  // Every popup has to be listed here. While one is up the pad stands down so
+  // taps become cursor input instead of being claimed as sticks and buttons -
+  // and, just as importantly, so the pad stops overwriting Input.mouse with
+  // the aim crosshair, which is what a popup hit-tests against.
   Pad.active = !!Options.mobileControls && game.screen === 'playing'
-    && !game.invOpen && !game.fold && !game.forge && !game.debugOpen
+    && !game.invOpen && !game.fold && !game.forge && !game.codex && !game.debugOpen
     && !game.cutscene.active && !!p && !p.dead;
 
   drainTouches(game, g, Pad.active);
