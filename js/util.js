@@ -32,6 +32,39 @@ export function setSeed(text) {
 
 export function getSeed() { return _seedLabel; }
 
+// --- per-room streams -----------------------------------------------------
+// One global stream is only reproducible if every draw from it happens in the
+// same order, which it does not: what a room rolls depends on what you are
+// carrying, and whether a boss dropped anything depends on whether you killed
+// it. So each (room, purpose) gets its own generator, hashed from the seed and
+// a label. Draw order stops mattering entirely.
+
+function hashText(str) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h >>> 0;
+}
+
+// A standalone generator. Same shape as rng(), its own state.
+export function makeRng(seedNum) {
+  let st = seedNum >>> 0;
+  return () => {
+    st = (st + 0x6d2b79f5) >>> 0;
+    let t = st;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// The stream for one labelled slot of the run, e.g. streamFor('wave:3:1').
+export function streamFor(label) {
+  return makeRng(hashText(`${_seedLabel || 'AETHER'}#${label}`));
+}
+
 // A fresh pronounceable seed for the "random" button.
 export function randomSeedText() {
   const cons = 'BCDFGHJKLMNPRSTVWXZ';

@@ -1,7 +1,7 @@
 // Item / perk definitions plus the inventory model.
 // Passive perks work while the item merely sits anywhere in the inventory.
 import { Theme } from './theme.js';
-import { rng } from './util.js';
+import { rng, streamFor } from './util.js';
 import { pxRect, drawBoomerang } from './gfx.js';
 
 export const INV_COLS = 4;
@@ -64,6 +64,12 @@ export const ITEMS = {
   soul: {
     id: 'soul', name: 'Soul', rarity: 'uncommon', stack: MAX_STACK,
     desc: ['Crafting material.'],
+  },
+  souldart: {
+    id: 'souldart', name: 'Soul Dart', rarity: 'uncommon', stack: 100,
+    desc: ['Ammunition for the Stinger Gun.', 'While a stack is on the hotbar it',
+           'fires these instead: +25% damage', 'and a hit knocks the target back',
+           'a block. One is spent per shot.'],
   },
   giganticstingeregg: {
     id: 'giganticstingeregg', name: 'Gigantic Stinger Egg', rarity: 'rare', stack: 1,
@@ -172,11 +178,13 @@ const PERK_WEIGHTS = {
   graplinghook: 2,
 };
 
-function weightedPerk(inventory) {
+// `roll` is the generator to draw from: a room's own seeded stream where the
+// seed is meant to decide the offer, or the loose one where it is not.
+function weightedPerk(inventory, roll = rng) {
   const pool = DROP_POOL.filter((id) => !(UNIQUE.has(id) && inventory && inventory.has(id)));
   let total = 0;
   for (const id of pool) total += PERK_WEIGHTS[id];
-  let r = rng() * total;
+  let r = roll() * total;
   for (const id of pool) {
     r -= PERK_WEIGHTS[id];
     if (r <= 0) return id;
@@ -188,22 +196,22 @@ export const WEAPON_DROP_CHANCE = 0.20;
 
 // One in five room clears drops a weapon instead of a perk, favouring one the
 // player is not already carrying so it actually opens up a second playstyle.
-export function rollDrop(inventory) {
-  if (rng() < WEAPON_DROP_CHANCE) {
+export function rollDrop(inventory, roll = rng) {
+  if (roll() < WEAPON_DROP_CHANCE) {
     const missing = WEAPON_POOL.filter((id) => !inventory || !inventory.has(id));
     const pool = missing.length ? missing : WEAPON_POOL;
-    return pool[Math.floor(rng() * pool.length)];
+    return pool[Math.floor(roll() * pool.length)];
   }
-  return weightedPerk(inventory);
+  return weightedPerk(inventory, roll);
 }
 
 // Boss rooms hand out a choice of two perks, never a weapon, and never two of
 // the same thing.
-export function rollPerkPair(inventory) {
-  const first = weightedPerk(inventory);
-  let second = weightedPerk(inventory);
+export function rollPerkPair(inventory, roll = rng) {
+  const first = weightedPerk(inventory, roll);
+  let second = weightedPerk(inventory, roll);
   let guard = 0;
-  while (second === first && guard++ < 20) second = weightedPerk(inventory);
+  while (second === first && guard++ < 20) second = weightedPerk(inventory, roll);
   if (second === first) second = DROP_POOL.find((id) => id !== first);
   return [first, second];
 }
@@ -313,6 +321,31 @@ export class Inventory {
     let n = 0;
     for (const s of this.slots) if (s && s.id === id) n += s.count;
     return n;
+  }
+
+  // Only the first row. Some things have to be to hand, not merely carried:
+  // Soul Darts feed the gun from the hotbar, so stuffing them in the back of
+  // the bag does nothing.
+  countInHotbar(id) {
+    let n = 0;
+    for (let i = 0; i < HOTBAR_SIZE; i++) {
+      const s = this.slots[i];
+      if (s && s.id === id) n += s.count;
+    }
+    return n;
+  }
+
+  removeFromHotbar(id, count = 1) {
+    if (this.countInHotbar(id) < count) return false;
+    for (let i = HOTBAR_SIZE - 1; i >= 0 && count > 0; i--) {
+      const s = this.slots[i];
+      if (!s || s.id !== id) continue;
+      const take = Math.min(s.count, count);
+      s.count -= take;
+      count -= take;
+      if (s.count <= 0) this.slots[i] = null;
+    }
+    return true;
   }
 
   has(id) { return this.countOf(id) > 0; }
@@ -471,6 +504,17 @@ export function drawItemIcon(ctx, id, x, y, s = 12, t = 0) {
       P(5, 4 - br, 1, 3, '#3d6a5c');
       P(6, 7, 1, 3, '#3d6a5c');
       if (Math.sin(t * 5) > 0.7) P(5, 6, 2, 1, '#ffe9a8');
+      break;
+    }
+    case 'souldart': {
+      // a needle with a soul-blue bead burning behind the point
+      const lift = Math.sin(t * 3) * 0.6;
+      P(1, 6 + lift, 8, 2, '#5a6b8c');
+      P(1, 6 + lift, 7, 1, '#98a8c8');
+      P(9, 5.5 + lift, 3, 3, '#dfe7f5');
+      P(0, 5 + lift, 2, 4, '#7cc8ff');
+      const glow = 0.5 + 0.5 * Math.sin(t * 7);
+      P(1, 6 + lift, 2, 2, glow > 0.5 ? '#d8f2ff' : '#7cc8ff');
       break;
     }
     case 'ironbar': {

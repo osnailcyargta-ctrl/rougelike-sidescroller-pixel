@@ -8,6 +8,7 @@ import { VIEW_W, VIEW_H, BOW, SHARDGUN, STINGER_GUN, PLAYER, ENEMY_TYPES, BOSS_T
 import { ENEMY_TINT } from './entities.js';
 import { Options } from './settings.js';
 import { drawBossPreview } from './boss.js';
+import { SOUL_TINT } from './entities.js';
 import { ITEMS, RARITY, INV_COLS, INV_ROWS, INV_SIZE, HOTBAR_SIZE, ARMOR_SLOTS, Inventory, drawItemIcon } from './items.js';
 import { Input, Binds, BIND_ORDER, BIND_LABELS, bindLabel } from './input.js';
 import { hotbarSlotRect, hudInset, forgeLayout, forgeRowRect, forgeTrackRect, closeRect, codexLayout, codexRowRect } from './layout.js';
@@ -370,14 +371,21 @@ function drawHotbar(ctx, game) {
       pxRect(ctx, ax, y + 3, 7, 10, hot ? '#a98cff' : rgba(Theme.uiDim, 0.3));
       pxRect(ctx, ax + 1, y + 4, 5, 4, hot ? '#ffffff' : rgba(Theme.uiDim, 0.4));
     } else if (w.weapon === 'stingergun') {
-      // darts stand in a row with a green bead on the point, so a full three
-      // reads differently from three arrows at a glance
+      // Darts stand in a row with a bead on the point, so a full three reads
+      // differently from three arrows at a glance. The bead turns soul-blue
+      // while there are Soul Darts on the hotbar - which is the only warning
+      // that the next shot will be the loaded kind.
+      const souls = p.inventory.countInHotbar('souldart');
+      const bead = souls > 0 ? SOUL_TINT : '#a8e04a';
       for (let i = 0; i < gun.ammo; i++) {
         const live = i < p.ammo;
         const dx = ax + i * 6;
         pxRect(ctx, dx, y + 4, 2, 7, live ? Theme.steel : rgba(Theme.uiDim, 0.35));
-        pxRect(ctx, dx, y + 3, 2, 2, live ? '#a8e04a' : rgba(Theme.uiDim, 0.3));
+        pxRect(ctx, dx, y + 3, 2, 2, live ? bead : rgba(Theme.uiDim, 0.3));
         pxRect(ctx, dx - 1, y + 11, 4, 1, live ? Theme.steelDark : rgba(Theme.uiDim, 0.25));
+      }
+      if (souls > 0) {
+        drawTextShadow(ctx, String(souls), ax + gun.ammo * 6 + 2, y + 4, SOUL_TINT, 1);
       }
     } else {
       for (let i = 0; i < gun.ammo; i++) {
@@ -1015,6 +1023,7 @@ export function drawDebugMenu(ctx, game) {
   drawTextShadow(ctx, 'DEBUG', x + w / 2, y + 6, '#8ce88c', 2, 'center');
 
   const d = game.debug;
+  // god mode is both halves: nothing touches you, and nothing survives you
   if (button(ctx, 'dbg-god', x + 12, y + 24, 116, 15, `GOD MODE: ${d.god ? 'ON' : 'OFF'}`, { selected: d.god })) {
     d.god = !d.god;
   }

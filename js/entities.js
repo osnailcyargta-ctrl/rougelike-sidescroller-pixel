@@ -6,7 +6,7 @@ import {
 } from './gfx.js';
 import { Sfx } from './audio.js';
 import {
-  VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, SHARDGUN, TWINDAGGER, ORIGAMI, NUKERANG, GRAPPLE, ARMOR, BLOCK, ENEMY_TYPES, PERK, ROOM_SCALING, roomScaleSteps, STINGER_GUN, GIANT_EGG, DROPS,
+  VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, SHARDGUN, TWINDAGGER, ORIGAMI, NUKERANG, GRAPPLE, ARMOR, BLOCK, ENEMY_TYPES, PERK, ROOM_SCALING, roomScaleSteps, STINGER_GUN, SOUL_DART, GIANT_EGG, DROPS,
 } from './config.js';
 import { ITEMS, Inventory } from './items.js';
 import { Binds, Input } from './input.js';
@@ -100,6 +100,7 @@ export class Status {
 
 // --- enemies -------------------------------------------------------------
 
+export const SOUL_TINT = '#7cc8ff';
 export const SHARD_TINT = '#a98cff';
 
 // Everything the Origamist throws is drawn in two colours only: the sheet and
@@ -156,7 +157,7 @@ export function doodleShape(ctx, pts, fill, stroke, width, seed = 0, wob = 1) {
 // What each class considers its own weapons, for the Damage Booster.
 const CLASS_WEAPONS = {
   melee: ['melee', 'boomerang'],
-  ranger: ['bow', 'shardgun'],
+  ranger: ['bow', 'shardgun', 'stingergun'],
   origamist: ['paper'],
 };
 
@@ -211,6 +212,7 @@ export class Enemy {
     this.hover = rand(0, TAU);
     this.knockT = 0;
     this.telegraph = 0;
+    this.launchT = 0;
     this.squash = 0;
     this.guardFlash = 0;
     this.wasGround = false;
@@ -239,6 +241,10 @@ export class Enemy {
 
   damage(amount, opts = {}) {
     if (this.dead) return;
+    // God mode is not just an unkillable player: anything you touch dies.
+    // Sized to whatever is left rather than Infinity, so the damage number
+    // that floats off it is still a number.
+    if (this.game.debug?.god && !this.def.invincible) amount = Math.max(amount, this.hp);
     // some things are scenery with a hitbox: the shell you set down yourself
     // cannot be broken, so hitting it rings rather than bleeds
     if (this.def.invincible) {
@@ -291,7 +297,22 @@ export class Enemy {
       arc: opts.angle !== undefined ? 1.1 : 0, angle: opts.angle ?? 0,
     });
     Camera.punch(crit ? 0.9 : 0.35);
-    if (opts.knockback) {
+    if (opts.launch) {
+      // A measured throw rather than a shove: pick the arc that lands the
+      // target `launch` pixels away and hold the AI off for exactly as long
+      // as it is in the air, so gravity does the moving and nothing snaps.
+      const dir = opts.dir ?? (sign(this.cx - (opts.fromX ?? this.cx)) || 1);
+      const h = opts.launchHeight ?? 10;
+      const vy = -Math.sqrt(2 * GRAVITY * h);
+      const air = (2 * Math.abs(vy)) / GRAVITY;
+      this.vx = (opts.launch / air) * dir;
+      this.knockT = air;
+      // and the AI's own drag is held off for the same window, or the throw
+      // would be rubbed out before it landed anywhere
+      this.launchT = air;
+      if (!this.def.flying) this.vy = Math.min(this.vy, vy);
+      else this.vy = vy * 0.5;
+    } else if (opts.knockback) {
       const dir = opts.dir ?? (sign(this.cx - (opts.fromX ?? this.cx)) || 1);
       this.vx += opts.knockback * dir;
       this.knockT = 0.12;
@@ -433,6 +454,7 @@ export class Enemy {
     this.anim += dt * Theme.animSpeed;
     this.hurtFlash = Math.max(0, this.hurtFlash - dt);
     this.knockT = Math.max(0, this.knockT - dt);
+    this.launchT = Math.max(0, (this.launchT ?? 0) - dt);
     this.squash = Math.max(0, this.squash - dt * 4.5);
     this.guardFlash = Math.max(0, this.guardFlash - dt * 4);
     // the swing wake and the shot recoil both live for a fraction of a second
@@ -512,7 +534,7 @@ export class Enemy {
         this.stateT = 0;
       }
       if (this.state === 'charge' && this.stateT > 1.4) this.state = 'idle';
-    } else {
+    } else if (this.launchT <= 0) {
       this.vx = lerp(this.vx, 0, 1 - Math.pow(0.004, dt));
     }
 
@@ -527,6 +549,14 @@ export class Enemy {
     if (this.ai === 'shardling') return this.updateShardling(dt, p, slow);
     if (this.ai === 'wisp') return this.updateWisp(dt, p, slow);
     this.hover += dt * 3;
+    // a thing with wings would simply fly out of a knockback, so while it is
+    // being thrown it falls like everything else
+    if (this.launchT > 0) {
+      this.vy += GRAVITY * dt;
+      moveAndCollide(this, dt, { ignorePlatforms: true });
+      this.y = clamp(this.y, 30, GROUND_Y - 6);
+      return;
+    }
     const target = p && !p.dead ? p : null;
     if (target) {
       const desiredX = target.x - sign(target.x - this.x) * 70;
@@ -2119,7 +2149,12 @@ export class Projectile {
         Sfx.slime();
         burst(this.x, this.y, 10, { color: Theme.slime, speedMin: 20, speedMax: 90, lifeMin: 0.2, lifeMax: 0.5, gravity: 260 });
       } else {
-        target.damage(this.damage, { angle: this.angle, spread: 0.9, knockback: 30, dir: sign(this.vx) });
+        // a soul dart does not just sting: it throws what it hits a block back
+        const hit = this.kind === 'souldart'
+          ? { angle: this.angle, spread: 0.9, dir: sign(this.vx), color: SOUL_TINT,
+              launch: SOUL_DART.knockback, launchHeight: SOUL_DART.hopHeight, shake: 3 }
+          : { angle: this.angle, spread: 0.9, knockback: 30, dir: sign(this.vx) };
+        target.damage(this.damage, hit);
         if (this.game?.player) this.game.player.registerHit();
         if (this.mark) target.applyMark();
         if (this.poison && !target.dead) {
@@ -2138,20 +2173,35 @@ export class Projectile {
 
   draw(ctx) {
     ctx.save();
-    if (this.kind === 'dart') {
-      // a needle with a wet green bead behind the point
+    if (this.kind === 'dart' || this.kind === 'souldart') {
+      // a needle with a bead burning behind the point - green venom on the
+      // plain one, a cold soul on the other
+      const soul = this.kind === 'souldart';
+      const c = soul ? SOUL_TINT : '#a8e04a';
+      const deep = soul ? '#2a4a80' : '#5a8a2a';
       ctx.translate(Math.round(this.x), Math.round(this.y));
       ctx.rotate(this.angle);
       for (let i = 0; i < this.trail.length; i += 2) {
         const k = i / this.trail.length;
-        pxRect(ctx, -6 - i, -0.5, 2, 1, rgba('#a8e04a', k * 0.35 * Theme.trail));
+        pxRect(ctx, -6 - i, -0.5, 2, 1, rgba(c, k * (soul ? 0.5 : 0.35) * Theme.trail));
       }
       pxRect(ctx, -6, -1, 10, 2, Theme.steelDark);
       pxRect(ctx, 2, -1, 5, 2, '#eef4ff');
-      pxRect(ctx, -2, -1, 4, 2, '#a8e04a');
-      pxRect(ctx, -7, -2, 3, 4, '#5a8a2a');
+      pxRect(ctx, -2, -1, 4, 2, c);
+      pxRect(ctx, -7, -2, 3, 4, deep);
+      if (soul) {
+        // a wisp of it streaming off the flights
+        pxRect(ctx, -9, -1, 2, 2, rgba('#d8f2ff', 0.7));
+        if (Math.random() < 0.5) {
+          spawnParticle({
+            x: this.x - Math.cos(this.angle) * 7, y: this.y - Math.sin(this.angle) * 7,
+            vx: rand(-14, 14), vy: rand(-26, -6), life: rand(0.15, 0.4),
+            size: 1, color: SOUL_TINT, color2: '#d8f2ff', gravity: -30, kind: 'shrink',
+          });
+        }
+      }
       ctx.globalCompositeOperation = 'lighter';
-      glowDot(ctx, 0, 0, 7, '#a8e04a', 0.35);
+      glowDot(ctx, 0, 0, soul ? 10 : 7, c, soul ? 0.5 : 0.35);
     } else if (this.kind === 'slime') {
       const wob = Math.sin(this.t * 22) * 1;
       glowDot(ctx, this.x, this.y, 8, Theme.slime, 0.35);
@@ -3158,19 +3208,27 @@ export class Player {
       this.attackCd = STINGER_GUN.cooldown;
       this.ammo--;
       const a = this.aim;
+      // A stack of Soul Darts on the hotbar loads itself: one is spent per
+      // shot, and what leaves the barrel is a different round entirely.
+      const soul = this.inventory.removeFromHotbar('souldart', 1);
+      const dmg = Math.round(this.boosted(STINGER_GUN.damage, 'bow') * (soul ? SOUL_DART.damageMult : 1));
       this.game.projectiles.push(new Projectile({
         x: this.x + Math.cos(a) * 10, y: this.cy + Math.sin(a) * 10,
-        vx: Math.cos(a) * STINGER_GUN.speed, vy: Math.sin(a) * STINGER_GUN.speed,
-        damage: this.boosted(STINGER_GUN.damage, 'bow'), kind: 'dart', team: 'player',
+        vx: Math.cos(a) * (soul ? SOUL_DART.speed : STINGER_GUN.speed),
+        vy: Math.sin(a) * (soul ? SOUL_DART.speed : STINGER_GUN.speed),
+        damage: dmg, kind: soul ? 'souldart' : 'dart', team: 'player',
         maxDist: STINGER_GUN.range, life: 3, poison: true, game: this.game,
       }));
       this.swing = { t: 0, angle: a, kind: 'bow' };
       Sfx.bow();
-      Camera.add(1.4);
-      burst(this.x + Math.cos(a) * 12, this.cy + Math.sin(a) * 12, 5, {
-        color: '#a8e04a', color2: '#eaffb0', speedMin: 20, speedMax: 90,
+      Camera.add(soul ? 2.2 : 1.4);
+      const tint = soul ? SOUL_TINT : '#a8e04a';
+      burst(this.x + Math.cos(a) * 12, this.cy + Math.sin(a) * 12, soul ? 8 : 5, {
+        color: tint, color2: soul ? '#d8f2ff' : '#eaffb0', speedMin: 20, speedMax: soul ? 140 : 90,
         lifeMin: 0.1, lifeMax: 0.3, angle: a, spread: 0.4, gravity: 0,
       });
+      if (soul) impactRing(this.x + Math.cos(a) * 12, this.cy + Math.sin(a) * 12,
+                           { color: SOUL_TINT, r0: 1, r1: 16, life: 0.22, width: 1.5 });
     } else if (weapon.weapon === 'paper') {
       // paper never fires directly: it opens the fold wheel and waits
       this.game.openFoldWheel();

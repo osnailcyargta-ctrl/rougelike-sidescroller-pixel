@@ -2,9 +2,10 @@
 // pause, and the death screen.
 import { clamp, rand, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
-import { drawText, drawTextShadow, textWidth } from './font.js';
+import { drawText, drawTextShadow, drawTextFit, textWidth } from './font.js';
 import { pxRect, glowDot, spawnParticle } from './gfx.js';
 import { VIEW_W, VIEW_H, FINAL_ROOM } from './config.js';
+import { Unlocks, BOSS_RUSH_ROOM } from './codex.js';
 import { panel, button, slider, textField, drawTooltip, UI } from './ui.js';
 import { Options, optionsIn, saveOptions, resetOptions, applyVisualOptions } from './settings.js';
 import { Perf, syncPerfOptions } from './perf.js';
@@ -516,10 +517,93 @@ export function drawClassSelect(ctx, game, t) {
       drawText(ctx, wrapped[k], x + cw / 2, top + k * 9, Theme.ui, 1, 'center');
     }
     if (button(ctx, 'class' + c.id, x + 18, y + ch + 6, cw - 36, 18, 'SELECT')) {
-      game.startRun(c.id);
+      game.chooseClass(c.id);
     }
   }
   if (button(ctx, 'back', 8, VIEW_H - 24, 60, 16, 'BACK')) game.screen = 'menu';
+}
+
+// --- mode and weapon, the two steps between a class and a run -------------
+
+export function drawModeSelect(ctx, game, t) {
+  drawMenuBackdrop(ctx, t);
+  drawTextShadow(ctx, 'CHOOSE A MODE', VIEW_W / 2, 14, Theme.uiAccent, 2, 'center');
+  const cls = (game.pendingClass ?? 'melee').toUpperCase();
+  drawText(ctx, `PLAYING AS ${cls}`, VIEW_W / 2, 32, Theme.uiDim, 1, 'center');
+
+  const locked = !Unlocks.bossRush;
+  const cards = [
+    {
+      id: 'normal', name: 'NORMAL', color: Theme.platformGlow, ok: true,
+      lines: ['ALL 20 ROOMS.', 'WAVES, ANVILS, DROPS,', 'AND FOUR BOSSES ON', 'THE WAY THROUGH.'],
+    },
+    {
+      id: 'bossrush', name: 'BOSS RUSH', color: Theme.hp, ok: !locked,
+      lines: locked
+        ? ['LOCKED.', 'FELL THE UNDEAD CEILING', `AND REACH ROOM ${BOSS_RUSH_ROOM}`, 'IN A NORMAL RUN.']
+        : ['FOUR BOSSES, BACK TO', 'BACK, NOTHING BETWEEN.', 'PICK ONE WEAPON OF TWO', 'AND KEEP IT.'],
+    },
+  ];
+  const cw = 170, ch = 118, gap = 14;
+  const totalW = cards.length * cw + (cards.length - 1) * gap;
+  for (let i = 0; i < cards.length; i++) {
+    const c = cards[i];
+    const x = Math.round((VIEW_W - totalW) / 2) + i * (cw + gap);
+    const y = 54;
+    const hot = UI.hovered === 'mode' + c.id && c.ok;
+    panel(ctx, x, y, cw, ch, { accent: c.ok ? c.color : Theme.uiDim, alpha: hot ? 0.95 : 0.8 });
+    if (c.ok) glowDot(ctx, x + cw / 2, y + 26, 30, c.color, hot ? 0.3 : 0.14);
+    drawTextFit(ctx, c.name, x + cw / 2, y + 12, c.ok ? c.color : Theme.uiDim, cw - 16, 2, 'center');
+    for (let k = 0; k < c.lines.length; k++) {
+      drawTextFit(ctx, c.lines[k], x + cw / 2, y + 40 + k * 10,
+                  c.ok ? Theme.ui : Theme.uiDim, cw - 14, 1, 'center');
+    }
+    const label = c.ok ? 'START' : 'LOCKED';
+    if (button(ctx, 'mode' + c.id, x + 22, y + ch - 26, cw - 44, 18, label, { disabled: !c.ok })) {
+      if (c.id === 'normal') game.beginNormal();
+      else game.beginBossRush();
+    }
+  }
+  if (button(ctx, 'modeback', 8, VIEW_H - 24, 60, 16, 'BACK')) game.screen = 'classSelect';
+}
+
+export function drawWeaponSelect(ctx, game, t) {
+  drawMenuBackdrop(ctx, t);
+  const pick = game.weaponPick;
+  if (!pick) { game.screen = 'modeSelect'; return; }
+  drawTextShadow(ctx, 'TAKE ONE', VIEW_W / 2, 14, Theme.hp, 2, 'center');
+  drawText(ctx, 'THERE IS NOTHING BETWEEN THE BOSSES TO FIND ANOTHER',
+           VIEW_W / 2, 32, Theme.uiDim, 1, 'center');
+
+  const cw = 150, ch = 144, gap = 16;
+  const totalW = pick.offer.length * cw + (pick.offer.length - 1) * gap;
+  for (let i = 0; i < pick.offer.length; i++) {
+    const id = pick.offer[i];
+    const def = ITEMS[id];
+    if (!def) continue;
+    const x = Math.round((VIEW_W - totalW) / 2) + i * (cw + gap);
+    const y = 48;
+    const col = RARITY[def.rarity].color;
+    const hot = UI.hovered === 'wpn' + id;
+    panel(ctx, x, y, cw, ch, { accent: col, alpha: hot ? 0.95 : 0.8 });
+    glowDot(ctx, x + cw / 2, y + 34, 30, col, hot ? 0.35 : 0.18);
+    ctx.save();
+    ctx.translate(x + cw / 2, y + 34);
+    const sc = 3 + (hot ? 0.4 : 0) + Math.sin(t * 3 + i) * 0.1;
+    ctx.scale(sc, sc);
+    drawItemIcon(ctx, id, -6, -6, 12, t);
+    ctx.restore();
+    drawTextFit(ctx, def.name, x + cw / 2, y + 60, col, cw - 14, 1, 'center');
+    const wrapped = [];
+    for (const line of def.desc) for (const part of wrapLine(line, cw - 16)) wrapped.push(part);
+    for (let k = 0; k < Math.min(wrapped.length, 7); k++) {
+      drawText(ctx, wrapped[k], x + cw / 2, y + 72 + k * 9, Theme.ui, 1, 'center');
+    }
+    if (button(ctx, 'wpn' + id, x + 20, y + ch + 6, cw - 40, 18, 'TAKE IT')) {
+      game.takeRushWeapon(id);
+    }
+  }
+  if (button(ctx, 'wpnback', 8, VIEW_H - 24, 60, 16, 'BACK')) game.screen = 'modeSelect';
 }
 
 export function drawPause(ctx, game, t) {

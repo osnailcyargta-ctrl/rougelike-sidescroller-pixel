@@ -177,6 +177,17 @@ export const STINGER_GUN = {
   poisonFromStinger: 0.0021,       // and a plain Stinger's
 };
 
+// Darts cast from a soul and an iron bar. Loading them into the Stinger Gun
+// makes it hit harder and actually move what it hits.
+export const SOUL_DART = {
+  barCost: 1, soulCost: 1, perCraft: 10,
+  stack: 100,
+  damageMult: 1.25,
+  knockback: 1 * BLOCK,     // how far the thing you hit ends up, in pixels
+  hopHeight: 10,            // and how high the arc that carries it there is
+  speed: 380,
+};
+
 export const SHARDGUN = {
   range: 5 * BLOCK, damage: 20, ammo: 1, reload: 1.5, cooldown: 0.45,
   pellets: 5, speed: 400, spread: 0.30,
@@ -217,6 +228,27 @@ export function roomScaleSteps(room) {
 export const BOSS_ROOM_INTERVAL = 5;   // rooms 5, 10, 15, 20 get a third wave
 export const FINAL_ROOM = 20;          // Alphads waits here; there is no room 21
 export const CEILING_ROOM = 15;        // where the Undead Ceiling hangs
+// Up to here the seed decides everything: which enemies a wave sends, which
+// perks a room offers, what a boss leaves. Past it the run goes off-script on
+// purpose - the last stretch should not be something you can rehearse.
+export const SEEDED_THROUGH_ROOM = 15;
+
+// Boss Rush: the four room bosses back to back, nothing in between. Each one
+// is a "room", so the reward between them is the same choice of two perks a
+// boss room normally gives.
+export const BOSS_RUSH = {
+  order: ['golem', 'bigdude', 'ceiling', 'alphads'],
+  // the room number each is fought at, so it arrives at the strength it would
+  // have had in a full run rather than at its room-5 numbers
+  atRoom: { golem: 5, bigdude: 10, ceiling: 15, alphads: 20 },
+  // two on offer, one taken, from the class you picked
+  weaponPicks: 2,
+  weapons: {
+    melee: ['sword', 'twindagger', 'nukerang'],
+    ranger: ['bow', 'shardgun', 'stingergun'],
+    origamist: ['bookairplane', 'bookmissile'],
+  },
+};
 
 export const ENEMY_TYPES = {
   grunt: {

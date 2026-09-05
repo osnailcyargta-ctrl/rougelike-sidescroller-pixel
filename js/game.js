@@ -1,5 +1,5 @@
 // Game shell: canvas setup, main loop, run/room/wave state machine.
-import { clamp, lerp, rand, randInt, dist, distToSegment, rgba, sign, snapAngle, setSeed, getSeed, randomSeedText, TAU } from './util.js';
+import { clamp, lerp, rand, randInt, dist, distToSegment, rgba, sign, snapAngle, setSeed, getSeed, randomSeedText, streamFor, TAU } from './util.js';
 import { Theme, applyTheme, resetTheme, DEFAULT_THEME } from './theme.js';
 import {
   Camera, updateFx, drawParticles, drawTexts, drawRings, clearFx, burst, floatText,
@@ -12,11 +12,15 @@ import {
   VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, DROP_POINT, PERK, WAVES, PLAYER as PCFG,
   BOSS_ROOM_INTERVAL, NUKERANG, FINAL_ROOM, SHARDGUN, TWINDAGGER, SWORD, BOW, ORIGAMI,
   ARMOR, PAPER_SHIELD, ANVIL, GRAPPLE, STINGER_GUN, BLOCK, DROPS, GIANT_EGG, FORGE_VISIBLE_ROWS,
+  SEEDED_THROUGH_ROOM, SOUL_DART, BOSS_RUSH,
 } from './config.js';
 import { Player, Enemy, Projectile, SHARD_TINT, INK, doodleShape, doodleLine } from './entities.js';
 import { makeBoss, makeBossPreview } from './boss.js';
 import { Cutscene } from './cutscene.js';
-import { CODEX_ORDER, codexEntry, codexView, loadCodex, markBossDefeated } from './codex.js';
+import {
+  CODEX_ORDER, codexEntry, codexView, markBossDefeated, resetCodex,
+  loadUnlocks, checkBossRushUnlock,
+} from './codex.js';
 import { drawBackground, drawArena, drawLightShafts, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal, Anvil } from './world.js';
 import { ITEMS, RARITY, HOTBAR_SIZE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
 import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, drawForge, drawCodex, panel, button } from './ui.js';
@@ -25,7 +29,10 @@ import { Perf, perfTick, syncPerfOptions, TIERS } from './perf.js';
 import { forgeLayout, forgeRowRect, forgeListRect, closeRect, inRect, codexLayout, codexRowRect } from './layout.js';
 import { drawText, drawTextShadow } from './font.js';
 import { Options, loadOptions, saveOptions, applyVisualOptions, captureShaderBase, saveShader, loadShader } from './settings.js';
-import { drawMainMenu, drawSettings, drawClassSelect, drawPause, drawGameOver, drawControls, drawVictory } from './screens.js';
+import {
+  drawMainMenu, drawSettings, drawClassSelect, drawModeSelect, drawWeaponSelect,
+  drawPause, drawGameOver, drawControls, drawVictory,
+} from './screens.js';
 
 // Health restored to the player after every cleared wave; clearing a room and
 // stepping through the gate restores the rest.
@@ -83,9 +90,12 @@ export class Game {
     this.anvil = null;
     this.forge = null;       // the crafting popup, open only while paused
     this.codex = null;       // the bestiary, readable from anywhere
+    this.mode = 'normal';    // or 'bossrush'
+    this.pendingClass = null;   // chosen on one screen, started on another
+    this.weaponPick = null;     // the two-weapon offer Boss Rush opens with
     this.boss = null;
     this.cutscene = new Cutscene(this);
-    loadCodex();
+    loadUnlocks();
     this.roomIndex = 1;
     this.waveIndex = 1;
     this.roomCleared = false;
@@ -280,11 +290,13 @@ export class Game {
 
   goClassSelect() { resumeAudio(); this.screen = 'classSelect'; }
 
-  startRun(classId) {
+  startRun(classId, mode = 'normal', startWeapon = null) {
     resumeAudio();
+    this.mode = mode;
     // an empty field means "surprise me", but the roll is still recorded so the
     // death screen can hand the seed back for a rematch
     this.activeSeed = setSeed(this.seedText.trim() || randomSeedText());
+    resetCodex();          // the book records this run, not the last one
     this.runTime = 0;
     this.runStats = null;
     clearFx();
@@ -301,19 +313,100 @@ export class Game {
     this.invOpen = false;
     this.boss = null;
     this.screen = 'playing';
+    // Boss Rush hands you one weapon of your own choosing instead of the
+    // class default, and there is nothing between the bosses to find another.
+    if (startWeapon) {
+      // whatever the class hands out by default goes back; the pick replaces
+      // it. The Origamist keeps its paper - that is ammunition, not a weapon.
+      for (const id of ['sword', 'bow', 'bookairplane']) this.player.inventory.remove(id, 1);
+      this.player.inventory.add(startWeapon, 1);
+      const i = this.player.inventory.slots.findIndex((sl) => sl && sl.id === startWeapon);
+      if (i >= 0 && i < HOTBAR_SIZE) this.player.inventory.selected = i;
+      this.player.recomputeStats();
+    }
     this.startRoom(1);
   }
 
-  quitToMenu() { this.closeCodex(); this.screen = 'menu'; this.player = null; clearFx(); }
+  // --- Boss Rush ----------------------------------------------------------
+  // Four bosses back to back. Each is its own room, so the perk choice between
+  // them is the one a boss room already gives.
 
-  isBossRoom(index = this.roomIndex) { return index % BOSS_ROOM_INTERVAL === 0; }
+  get rushLength() { return BOSS_RUSH.order.length; }
+
+  rushBossFor(index = this.roomIndex) { return BOSS_RUSH.order[index - 1] ?? null; }
+
+  // The last room of whichever mode is running.
+  get lastRoom() { return this.mode === 'bossrush' ? this.rushLength : FINAL_ROOM; }
+
+  // Pick the class, then the mode, then - in Boss Rush - the weapon.
+  chooseClass(classId) {
+    this.pendingClass = classId;
+    this.screen = 'modeSelect';
+    Sfx.ui();
+  }
+
+  beginNormal() {
+    this.startRun(this.pendingClass ?? 'melee', 'normal');
+  }
+
+  // The offer is rolled from the run's seed, so a seed you liked gives the
+  // same two weapons back.
+  beginBossRush() {
+    const cls = this.pendingClass ?? 'melee';
+    const pool = [...(BOSS_RUSH.weapons[cls] ?? BOSS_RUSH.weapons.melee)];
+    // Fix the seed HERE, not in startRun: streamFor reads whatever seed is
+    // currently set, so rolling the offer first would key it to the previous
+    // run's seed instead of this one's.
+    this.seedText = setSeed(this.seedText.trim() || randomSeedText());
+    const roll = streamFor('rush:weapons');
+    // Work out how many to offer BEFORE drawing any: the pool shrinks as they
+    // come out, so re-checking its length each pass made a two-weapon class
+    // (the Origamist, with two tutors) offer only one.
+    const want = Math.min(BOSS_RUSH.weaponPicks, pool.length);
+    const offer = [];
+    while (offer.length < want) offer.push(pool.splice(Math.floor(roll() * pool.length), 1)[0]);
+    this.weaponPick = { classId: cls, offer };
+    this.screen = 'weaponSelect';
+    Sfx.ui();
+  }
+
+  takeRushWeapon(id) {
+    this.startRun(this.weaponPick?.classId ?? 'melee', 'bossrush', id);
+  }
+
+  quitToMenu() {
+    this.closeCodex();
+    resetCodex();
+    this.screen = 'menu';
+    this.player = null;
+    clearFx();
+  }
+
+  // The generator a room's rewards come from: its own, derived from the seed,
+  // for as long as the seed is meant to be in charge. `null` means "use the
+  // loose one", which is what the last rooms want.
+  roomRoll(tag, index = this.roomIndex) {
+    if (this.mode === 'bossrush' || index > SEEDED_THROUGH_ROOM) return undefined;
+    return streamFor(`${tag}:${index}`);
+  }
+
+  isBossRoom(index = this.roomIndex) {
+    return this.mode === 'bossrush' ? true : index % BOSS_ROOM_INTERVAL === 0;
+  }
 
   wavesInRoom(index = this.roomIndex) {
+    // in a rush there is no trash to clear: the room is the boss
+    if (this.mode === 'bossrush') return 1;
     return this.isBossRoom(index) ? WAVES.bossRoomWaves : WAVES.perRoom;
   }
 
   startRoom(index) {
     this.roomIndex = index;
+    // Boss Rush is earned the moment both halves of the condition are true,
+    // not at the end of the run - dying on room 19 should still count.
+    if (this.mode === 'normal' && checkBossRushUnlock(index)) {
+      this.toast('BOSS RUSH UNLOCKED');
+    }
     this.roomCleared = false;
     this.portal = null;
     this.boss = null;
@@ -346,10 +439,13 @@ export class Game {
     this.waveIndex = n;
     this.waveTimer = 0;
     this.waveCooldown = null;
-    if (this.isBossRoom() && n === WAVES.bossRoomWaves) {
+    if (this.isBossRoom() && n === this.wavesInRoom()) {
       this.pendingSpawns = [];
       this.player.healPct(1);      // full HP going into the boss
-      this.boss = makeBoss(this, this.roomIndex);
+      const rush = this.rushBossFor();
+      this.boss = this.mode === 'bossrush'
+        ? makeBoss(this, BOSS_RUSH.atRoom[rush] ?? 5, rush)
+        : makeBoss(this, this.roomIndex);
       this.boss.intro = 99;        // held until the cutscene hands control back
       this.cutscene.play('intro', this.boss);
     } else {
@@ -372,6 +468,8 @@ export class Game {
   }
 
   onPlayerDeath() {
+    // the bestiary goes with the run; the next one starts with a blank book
+    resetCodex();
     this.screen = 'gameover';
     this.deathT = 0;
     this.captureRunStats();
@@ -421,7 +519,8 @@ export class Game {
 
   finishRun() {
     this.captureRunStats();
-    this.runStats.room = FINAL_ROOM;
+    this.runStats.room = this.lastRoom;
+    this.runStats.mode = this.mode;
     this.screen = 'victory';
     this.victoryT = 0;
     this.boss = null;
@@ -673,6 +772,19 @@ export class Game {
         });
       }
     }
+    // Ammunition, and the cheapest thing on the list: a bar and a soul.
+    {
+      const bars2 = inv.countOf('ironbar');
+      const souls2 = inv.countOf('soul');
+      const needB = Math.max(0, SOUL_DART.barCost - bars2);
+      const needS = Math.max(0, SOUL_DART.soulCost - souls2);
+      list.push({
+        kind: 'souldart', id: 'souldart', icon: 'souldart',
+        label: `${SOUL_DART.perCraft}x SOUL DART`,
+        cost: needB || needS ? `${SOUL_DART.barCost} BAR ${SOUL_DART.soulCost} SOUL` : 'READY',
+        ok: !needB && !needS,
+      });
+    }
     // The one recipe that is not armour: shells and souls into the egg.
     {
       const shells = inv.countOf('stingereggshell');
@@ -779,6 +891,29 @@ export class Game {
     const p = this.player;
     const inv = p.inventory;
     if (!entry) return;
+    if (entry.kind === 'souldart') {
+      if (!entry.ok) { Sfx.ui(); return; }
+      if (inv.countOf('ironbar') < SOUL_DART.barCost) return;
+      if (inv.countOf('soul') < SOUL_DART.soulCost) return;
+      inv.remove('ironbar', SOUL_DART.barCost);
+      inv.remove('soul', SOUL_DART.soulCost);
+      const left = inv.add('souldart', SOUL_DART.perCraft);
+      if (left >= SOUL_DART.perCraft) {
+        // nothing fitted: hand the materials back rather than eating them
+        inv.add('ironbar', SOUL_DART.barCost);
+        inv.add('soul', SOUL_DART.soulCost);
+        this.toast('NO ROOM FOR IT');
+        Sfx.ui();
+        return;
+      }
+      const made = SOUL_DART.perCraft - left;
+      floatText(this.anvil ? this.anvil.x : p.x, (this.anvil ? this.anvil.y : p.cy) - 22,
+                `+${made} SOUL DART`, '#7cc8ff', { life: 1.2 });
+      this.forgeSparks('#7cc8ff');
+      p.recomputeStats();
+      Sfx.pickup();
+      return;
+    }
     if (entry.kind === 'giantegg') {
       if (!entry.ok) { Sfx.ui(); return; }
       if (inv.countOf('stingereggshell') < GIANT_EGG.shells) return;
@@ -1166,7 +1301,9 @@ export class Game {
     const [lo, hi] = DROPS.soulsPerBoss;
     const x = clamp(boss.x ?? boss.hx ?? VIEW_W / 2, 24, VIEW_W - 24);
     const y = clamp(boss.y ?? boss.hy ?? GROUND_Y - 40, 30, GROUND_Y - 20);
-    this.dropItems('soul', randInt(lo, hi), x, y);
+    const roll = this.roomRoll('bossdrop');
+    const n = roll ? lo + Math.floor(roll() * (hi - lo + 1)) : randInt(lo, hi);
+    this.dropItems('soul', n, x, y);
   }
 
   // A handful of the same thing thrown out of one point. Each lands on its
@@ -1372,6 +1509,10 @@ export class Game {
       else this.screen = 'paused';
     } else if (this.screen === 'paused') {
       this.screen = 'playing';
+    } else if (this.screen === 'modeSelect') {
+      this.screen = 'classSelect';
+    } else if (this.screen === 'weaponSelect') {
+      this.screen = 'modeSelect';
     } else if (this.screen === 'settings' || this.screen === 'controls' || this.screen === 'classSelect') {
       this.screen = this.returnScreen || 'menu';
       this.returnScreen = null;
@@ -1555,11 +1696,11 @@ export class Game {
   clearRoom() {
     this.roomCleared = true;
     // The vault has no room past the god.
-    if (this.roomIndex >= FINAL_ROOM) { this.finishRun(); return; }
+    if (this.roomIndex >= this.lastRoom) { this.finishRun(); return; }
     if (this.isBossRoom()) {
       // two offers on the centre platform, one pick
       const inv = this.player.inventory;
-      const [rolledA, rolled] = rollPerkPair(inv);
+      const [rolledA, rolled] = rollPerkPair(inv, this.roomRoll('perk'));
       // The Undead Ceiling only ever hands over the Damage Booster.
       if (this.boss && this.boss.def.id === 'ceiling' && !inv.has('damagebooster')) {
         this.dropBossPair('damagebooster', null);
@@ -1580,7 +1721,7 @@ export class Game {
       }
       this.dropBossPair(a, b);
     } else {
-      const id = rollDrop(this.player.inventory);
+      const id = rollDrop(this.player.inventory, this.roomRoll('perk'));
       this.pickups.push(new Pickup(id, DROP_POINT.x, DROP_POINT.y));
       burst(DROP_POINT.x, DROP_POINT.y - 12, 26, {
         color: RARITY[ITEMS[id].rarity].color, color2: '#ffffff',
@@ -1670,6 +1811,8 @@ export class Game {
     if (this.screen === 'settings') { drawSettings(ctx, this, this.time); if (this.debugOpen) drawDebugMenu(ctx, this); this.drawToast(ctx); return; }
     if (this.screen === 'controls') { drawControls(ctx, this, this.time); if (this.debugOpen) drawDebugMenu(ctx, this); this.drawToast(ctx); return; }
     if (this.screen === 'classSelect') { drawClassSelect(ctx, this, this.time); if (this.debugOpen) drawDebugMenu(ctx, this); this.drawToast(ctx); return; }
+    if (this.screen === 'modeSelect') { drawModeSelect(ctx, this, this.time); if (this.debugOpen) drawDebugMenu(ctx, this); this.drawToast(ctx); return; }
+    if (this.screen === 'weaponSelect') { drawWeaponSelect(ctx, this, this.time); if (this.debugOpen) drawDebugMenu(ctx, this); this.drawToast(ctx); return; }
 
     ctx.save();
     Camera.apply(ctx);

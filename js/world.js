@@ -1,8 +1,8 @@
 // Arena backdrop, platforms, pickups, portal and the wave composer.
-import { clamp, lerp, rand, randInt, choice, srand, schoice, rgba, mixHex, TAU, dist } from './util.js';
+import { clamp, lerp, rand, randInt, choice, streamFor, rgba, mixHex, TAU, dist } from './util.js';
 import { Theme } from './theme.js';
 import { pxRect, glowDot, spawnParticle, burst, linGrad } from './gfx.js';
-import { VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER, BLOCK, WAVES, ANVIL } from './config.js';
+import { VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER, BLOCK, WAVES, ANVIL, SEEDED_THROUGH_ROOM } from './config.js';
 import { ITEMS, RARITY, drawItemIcon } from './items.js';
 import { Sfx } from './audio.js';
 import { Options } from './settings.js';
@@ -672,16 +672,22 @@ export function buildWave(roomIndex, waveIndex) {
     ? [SPAWN_LEFT, SPAWN_RIGHT]
     : [SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER];
   const list = [];
-  // every roll here is seeded, so the same seed always sends the same waves
+  // Through room 15 this wave has its own stream, so the same seed always
+  // sends the same enemies to the same places no matter what you did on the
+  // way here. Past it the rooms go off-script and use the loose generator.
+  const seeded = roomIndex <= SEEDED_THROUGH_ROOM;
+  const r = seeded ? streamFor(`wave:${roomIndex}:${waveIndex}`) : null;
+  const pick = (arr) => (r ? arr[Math.floor(r() * arr.length)] : choice(arr));
+  const jitter = () => (r ? -14 + r() * 28 : rand(-14, 14));
   for (let i = 0; i < count; i++) {
-    let type = i === 0 && roomIndex === 1 && waveIndex === 1 ? 'grunt' : schoice(pool);
+    let type = i === 0 && roomIndex === 1 && waveIndex === 1 ? 'grunt' : pick(pool);
     if (roomIndex >= 2 && waveIndex === 2 && i === count - 1) type = 'brute';
     // a Wisp with nothing to feed is just a free kill, so never lead with one
     if (type === 'wisp' && (i === 0 || list.filter((e) => e.type === 'wisp').length >= 1)) {
-      type = schoice(pool.filter((id) => id !== 'wisp'));
+      type = pick(pool.filter((id) => id !== 'wisp'));
     }
     const p = spawns[i % spawns.length];
-    list.push({ type, x: p.x + srand(-14, 14), y: p.y, delay: i * 0.45 });
+    list.push({ type, x: p.x + jitter(), y: p.y, delay: i * 0.45 });
   }
   return list;
 }

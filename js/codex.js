@@ -3,10 +3,8 @@
 //
 // Nothing here is discovered - the whole list is readable from the start, so
 // you can plan a run - except the tick beside a name, which is the one thing
-// you have to earn. That is kept in localStorage, so it survives a death.
+// you have to earn. Those ticks belong to the run you are in and go with it.
 import { BOSS_TYPES, CEILING_ROOM, FINAL_ROOM } from './config.js';
-
-const STORE = 'aether.codex.v1';
 
 // How each portrait is framed: the world point to put in the middle of the
 // box, and how much to shrink it by. Tuned by eye against the real sprites.
@@ -89,29 +87,55 @@ export const CODEX = {
   },
 };
 
-// --- what you have actually killed ---------------------------------------
+// --- what you have killed THIS RUN ---------------------------------------
+// Deliberately not saved. The book is a record of the run you are in, so it
+// empties when that run does - on death, on quit, and on starting a new one.
 
 export const Defeated = new Set();
-
-export function loadCodex() {
-  try {
-    const raw = localStorage.getItem(STORE);
-    if (!raw) return;
-    const saved = JSON.parse(raw);
-    if (Array.isArray(saved)) for (const id of saved) if (CODEX[id]) Defeated.add(id);
-  } catch { /* storage blocked; an empty book is fine */ }
-}
 
 export function markBossDefeated(id) {
   if (!CODEX[id] || Defeated.has(id)) return false;
   Defeated.add(id);
-  try { localStorage.setItem(STORE, JSON.stringify([...Defeated])); } catch { /* ignore */ }
   return true;
 }
 
-export function resetCodex() {
-  Defeated.clear();
-  try { localStorage.removeItem(STORE); } catch { /* ignore */ }
+export function resetCodex() { Defeated.clear(); }
+
+// --- the one thing that does persist --------------------------------------
+// Boss Rush has to be earned once and stays earned, so it is the only piece
+// of the bestiary that outlives a run.
+
+const UNLOCK_STORE = 'aether.unlocks.v1';
+export const Unlocks = { bossRush: false };
+
+export function loadUnlocks() {
+  try {
+    const raw = localStorage.getItem(UNLOCK_STORE);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    Unlocks.bossRush = !!saved.bossRush;
+  } catch { /* storage blocked; nothing is unlocked, which is the safe way round */ }
+}
+
+function saveUnlocks() {
+  try { localStorage.setItem(UNLOCK_STORE, JSON.stringify(Unlocks)); } catch { /* ignore */ }
+}
+
+// Earned by getting the Undead Ceiling down AND reaching room 19 - far enough
+// that you have seen everything Boss Rush is going to throw at you.
+export const BOSS_RUSH_ROOM = 19;
+
+export function checkBossRushUnlock(roomIndex) {
+  if (Unlocks.bossRush) return false;
+  if (!Defeated.has('ceiling') || roomIndex < BOSS_RUSH_ROOM) return false;
+  Unlocks.bossRush = true;
+  saveUnlocks();
+  return true;
+}
+
+export function resetUnlocks() {
+  Unlocks.bossRush = false;
+  try { localStorage.removeItem(UNLOCK_STORE); } catch { /* ignore */ }
 }
 
 // --- page contents --------------------------------------------------------
