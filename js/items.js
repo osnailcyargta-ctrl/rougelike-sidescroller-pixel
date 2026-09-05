@@ -58,20 +58,18 @@ export const ITEMS = {
   // --- the ancient stinger -----------------------------------------------
   stingereggshell: {
     id: 'stingereggshell', name: 'Stinger Egg Shell', rarity: 'common', stack: MAX_STACK,
-    desc: ['Chitin off a broken Stinger Egg.', 'Smashing one open leaves 1-3;',
-           'a hatched one leaves at most 1.', 'Ten of them, and three souls,',
-           'make a Gigantic Stinger Egg.'],
+    desc: ['Crafting material.', 'Ten, with three souls, make a',
+           'Gigantic Stinger Egg.'],
   },
   soul: {
     id: 'soul', name: 'Soul', rarity: 'uncommon', stack: MAX_STACK,
-    desc: ['What a boss leaves behind.', 'Every boss but the god drops', '1 or 2 of them.'],
+    desc: ['Crafting material.'],
   },
   giganticstingeregg: {
     id: 'giganticstingeregg', name: 'Gigantic Stinger Egg', rarity: 'rare', stack: 1,
     place: 'giantegg',
     desc: ['Stand on the centre platform and', 'attack to set it down.',
-           'It takes five seconds to open, and', 'nothing you do can hurt it.',
-           'What comes out is POITNUS.'],
+           'Five seconds later POITNUS', 'comes out of it.'],
   },
   // --- armour ------------------------------------------------------------
   ironbar: {
@@ -122,8 +120,7 @@ export const ITEMS = {
   stingergun: {
     id: 'stingergun', name: 'Stinger Gun', rarity: 'rare', stack: 1, weapon: 'stingergun',
     desc: ['Ranged weapon. 3 darts, 1.4s reload.', '20 damage, and every dart poisons:',
-           'it burns and drags at once.',
-           'Darts are not arrows - lightning', 'never touches them.'],
+           'it burns and drags at once.'],
   },
   shardgun: {
     id: 'shardgun', name: 'Shardgun', rarity: 'rare', stack: 1, weapon: 'shardgun',

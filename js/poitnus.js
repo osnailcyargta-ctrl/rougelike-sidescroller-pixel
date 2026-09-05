@@ -137,6 +137,14 @@ export class PoitnusBoss {
     }
     if (this.volleys >= this.def.volleysPerCycle) {
       this.volleys = 0;
+      // the arena holds only so many of its children at once; at the cap it
+      // skips the clutch entirely and goes back to throwing stingers
+      if (this.broodCount() >= this.def.maxBrood) {
+        this.state = 'idle';
+        this.waitT = this.def.volleyGap;
+        this.pickPerch();
+        return;
+      }
       this.state = 'clutch';
       this.laid = 0;
       this.layT = 0;
@@ -282,6 +290,9 @@ export class PoitnusBoss {
     }
     this.layT -= dt;
     if (this.layT > 0) return;
+    // re-checked before every egg, not just at the start of the clutch: one
+    // hatching mid-clutch is enough to reach the cap
+    if (this.broodCount() >= this.def.maxBrood) { this.nextStep(); return; }
     this.layOne();
     this.laid++;
     if (this.laid >= cfg.count) { this.nextStep(); return; }
@@ -321,6 +332,18 @@ export class PoitnusBoss {
       lifeMin: 0.2, lifeMax: 0.5, gravity: 160, angle: Math.PI / 2, spread: 1.0,
     });
     impactRing(x, this.y + this.def.h / 2, { color: TINT.egg, r0: 2, r1: 26, life: 0.3, width: 2 });
+  }
+
+  // Everything its brood already accounts for: the stingers that are out, plus
+  // the two each egg still on the floor is about to become.
+  broodCount() {
+    let n = 0;
+    for (const e of this.game.enemies) {
+      if (e.dead) continue;
+      if (e.type === 'stinger') n++;
+      else if (e.ai === 'egg') n += e.def.hatchCount ?? 2;
+    }
+    return n;
   }
 
   // --- geometry ----------------------------------------------------------

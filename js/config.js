@@ -414,6 +414,7 @@ export const BOSS_TYPES = {
     volley: { count: 5, spacing: 0.10, speed: 215, damage: 15, windUp: 0.4, spread: 0.34 },
     // then it hangs still, and lays
     clutch: { hold: 2.0, count: 3, gap: 0.5, minSpacing: 56, dropSpeed: 90 },
+    maxBrood: 10,                   // stingers on screen; at the cap it stops laying
     volleysPerCycle: 3,
     volleyGap: 1.0,
   },

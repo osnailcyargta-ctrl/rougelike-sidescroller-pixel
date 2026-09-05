@@ -112,3 +112,25 @@ export function drawTextShadow(ctx, str, x, y, color, scale = 1, align = 'left',
   drawText(ctx, str, x + scale, y + scale, shadow, scale, align);
   return drawText(ctx, str, x, y, color, scale, align);
 }
+
+// The largest scale at or below `scale` that keeps `str` inside `maxW`.
+export function fitScale(str, maxW, scale = 1) {
+  const w = textWidth(String(str), scale);
+  return w > 0 && w > maxW ? scale * (maxW / w) : scale;
+}
+
+// Text that never leaves its box. A long name shrinks to fit instead of being
+// cut off halfway through a word, which is what the old slice() did to
+// anything past seventeen characters.
+export function drawTextFit(ctx, str, x, y, color, maxW, scale = 1, align = 'left', shadow = null) {
+  const s = fitScale(str, maxW, scale);
+  const paint = (sc) => (shadow
+    ? drawTextShadow(ctx, str, 0, 0, color, sc, align, shadow)
+    : drawText(ctx, str, 0, 0, color, sc, align));
+  ctx.save();
+  ctx.translate(Math.round(x), Math.round(y));
+  if (s < scale) ctx.scale(s / scale, s / scale);
+  paint(scale);
+  ctx.restore();
+  return s;
+}

@@ -2,7 +2,7 @@
 // post-processing chain (and any user shader) affects the interface too.
 import { clamp, lerp, rand, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
-import { drawText, drawTextShadow, textWidth } from './font.js';
+import { drawText, drawTextShadow, drawTextFit, textWidth, fitScale } from './font.js';
 import { pxRect, glowDot, Camera } from './gfx.js';
 import { VIEW_W, VIEW_H, BOW, SHARDGUN, STINGER_GUN, PLAYER, ENEMY_TYPES, BOSS_TYPES } from './config.js';
 import { ENEMY_TINT } from './entities.js';
@@ -123,7 +123,9 @@ export function button(ctx, id, x, y, w, h, label, opts = {}) {
     ctx.stroke();
   }
   const col = opts.disabled ? Theme.uiDim : k > 0.35 ? Theme.uiAccent : Theme.ui;
-  drawText(ctx, label, x + w / 2, y + (h - 7) / 2, col, opts.scale ?? 1, 'center');
+  // every button in the game comes through here, so a label that does not fit
+  // shrinks rather than running off both ends of its own box
+  drawTextFit(ctx, label, x + w / 2, y + (h - 7) / 2, col, w - 8, opts.scale ?? 1, 'center');
   if (k > 0.05) {
     const p = Math.sin(UI.t * 8) * 1;
     const slide = (1 - k) * 6;
@@ -220,11 +222,15 @@ export function drawHUD(ctx, game) {
   const px = hudInset();
   const bx = px + 5;
   panel(ctx, px, 6, bw + 10, 22, { alpha: 0.55 });
-  // name what is in your hand, not the class you picked at the start
-  const held = p.inventory.selectedWeapon();
-  // long weapon names have to give way to the HP readout on the right
-  const heldName = (held ? held.name.toUpperCase() : 'UNARMED').slice(0, 17);
-  drawText(ctx, heldName, bx, 9, Theme.uiDim, 1);
+  // Name what is in your hand, not the class you picked at the start - and
+  // not only weapons: a placeable in the hotbar is still something you hold.
+  const slot = p.inventory.selectedItem();
+  const held = slot ? ITEMS[slot.id] : null;
+  // long names shrink to fit rather than being cut off - the readout to the
+  // right owns the rest of the panel
+  const heldName = held ? held.name.toUpperCase() : 'UNARMED';
+  const hpText = `${Math.ceil(p.hp)}/${p.maxHp}`;
+  drawTextFit(ctx, heldName, bx, 9, Theme.uiDim, bw - textWidth(hpText, 1) - 5, 1);
   const hpFrac = clamp(p.hp / p.maxHp, 0, 1);
   pxRect(ctx, bx, 18, bw, 5, Theme.hpBack);
   const grad = ctx.createLinearGradient(bx, 0, bx + bw, 0);
@@ -238,7 +244,7 @@ export function drawHUD(ctx, game) {
   }
   ctx.strokeStyle = rgba(Theme.uiDim, 0.8);
   ctx.strokeRect(bx - 0.5, 17.5, bw + 1, 6);
-  drawTextShadow(ctx, `${Math.ceil(p.hp)}/${p.maxHp}`, bx + bw, 9, Theme.ui, 1, 'right');
+  drawTextShadow(ctx, hpText, bx + bw, 9, Theme.ui, 1, 'right');
   if (p.shieldMax > 0) {
     const sw = Math.round(bw * clamp(p.shield / p.shieldMax, 0, 1));
     pxRect(ctx, bx, 24, bw, 2, rgba('#0b2438', 0.9));
@@ -274,7 +280,7 @@ function drawBossBar(ctx, game) {
   const y = 16;
   const k = clamp(boss.hp / boss.maxHp, 0, 1);
   const phaseK = clamp(boss.phase2At / boss.maxHp, 0, 1);
-  drawTextShadow(ctx, boss.name, VIEW_W / 2, y - 10, Theme.uiAccent, 1, 'center');
+  drawTextFit(ctx, boss.name, VIEW_W / 2, y - 10, Theme.uiAccent, VIEW_W - 24, 1, 'center', '#000000cc');
   pxRect(ctx, x - 1, y - 1, w + 2, 8, rgba('#000000', 0.7));
   pxRect(ctx, x, y, w, 6, Theme.hpBack);
   const g = ctx.createLinearGradient(x, 0, x + w, 0);
@@ -294,7 +300,7 @@ function drawBossBar(ctx, game) {
                    x - 6, y, Theme.ui, 1, 'right');
   }
   // some bosses carry a title under the bar
-  if (boss.title) drawTextShadow(ctx, boss.title, VIEW_W / 2, y + 9, rgba(Theme.uiDim, 0.95), 1, 'center');
+  if (boss.title) drawTextFit(ctx, boss.title, VIEW_W / 2, y + 9, rgba(Theme.uiDim, 0.95), VIEW_W - 24, 1, 'center', '#000000cc');
   // a boss on a clock shows how much of it is left
   if (Options.showBossTimer && boss.def?.crushAfter && !boss.crushArmed) {
     const left = Math.max(0, boss.def.crushAfter - (boss.fightT ?? 0));
@@ -495,7 +501,7 @@ export function drawFoldWheel(ctx, game) {
   if (cur) {
     ctx.save();
     ctx.globalAlpha = ease;
-    drawTextShadow(ctx, cur.name, cx, cy - R - 25, '#f4f0e6', 1, 'center');
+    drawTextFit(ctx, cur.name, cx, cy - R - 25, '#f4f0e6', VIEW_W - 20, 1, 'center', '#000000cc');
     const afford = have >= cur.cost;
     drawText(ctx, `${cur.cost} / ${have} SHEETS`, cx, cy + R + 18,
              afford ? Theme.ui : Theme.hp, 1, 'center');
@@ -583,7 +589,8 @@ export function drawForge(ctx, game) {
     }
     drawItemIcon(ctx, e.icon, rr.x + 4, ry + 1, 12, t);
     const col = e.owned ? Theme.uiDim : e.ok ? (sel ? '#ffd76a' : Theme.ui) : Theme.uiDim;
-    drawText(ctx, e.label, rr.x + 20, ry + 4, col, 1);
+    const costW = textWidth(e.cost, 1);
+    drawTextFit(ctx, e.label, rr.x + 20, ry + 4, col, rr.w - 28 - costW, 1);
     drawText(ctx, e.cost, rr.x + rr.w - 4, ry + 4,
              e.owned ? Theme.uiDim : e.ok ? '#8ce88c' : Theme.hp, 1, 'right');
     // what the piece actually does, on the highlighted row
@@ -752,15 +759,16 @@ export function drawTooltip(ctx, tip) {
   const def = ITEMS[tip.id];
   if (!def) return;
   const lines = def.desc;
-  const w = Math.max(textWidth(def.name, 1), ...lines.map((l) => textWidth(l, 1))) + 12;
+  const wide = Math.max(textWidth(def.name, 1), ...lines.map((l) => textWidth(l, 1))) + 12;
+  const w = Math.min(wide, VIEW_W - 6);
   const h = 24 + lines.length * 9;
   const x = clamp(tip.x - w / 2, 3, VIEW_W - w - 3);
   const y = clamp(tip.below ? tip.y : tip.y - h, 3, VIEW_H - h - 3);
   panel(ctx, x, y, w, h, { alpha: 0.95, accent: RARITY[def.rarity].color });
-  drawText(ctx, def.name, x + 6, y + 5, RARITY[def.rarity].color, 1);
+  drawTextFit(ctx, def.name, x + 6, y + 5, RARITY[def.rarity].color, w - 12, 1);
   drawText(ctx, RARITY[def.rarity].name, x + 6, y + 14, Theme.uiDim, 1);
   for (let i = 0; i < lines.length; i++) {
-    drawText(ctx, lines[i], x + 6, y + 25 + i * 9, Theme.ui, 1);
+    drawTextFit(ctx, lines[i], x + 6, y + 25 + i * 9, Theme.ui, w - 12, 1);
   }
 }
 

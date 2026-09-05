@@ -4,7 +4,7 @@
 import { clamp, lerp, rand, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
 import { Camera, burst, impactRing, spawnParticle, pxRect, glowDot, screenFlash } from './gfx.js';
-import { drawText, drawTextShadow, textWidth } from './font.js';
+import { drawText, drawTextShadow, textWidth, fitScale } from './font.js';
 import { Sfx } from './audio.js';
 import { VIEW_W, VIEW_H, GROUND_Y } from './config.js';
 
@@ -398,8 +398,9 @@ export class Cutscene {
     pxRect(ctx, VIEW_W / 2 - ruleW, cy - 12, ruleW * 2, 1, rgba(Theme.uiAccent, 0.85));
     pxRect(ctx, VIEW_W / 2 - ruleW, cy + 26, ruleW * 2, 1, rgba(Theme.uiAccent, 0.85));
 
-    // the name, letters dropping in one after another
-    const scale = 3;
+    // the name, letters dropping in one after another. A long one steps down
+    // to whatever scale keeps it inside the frame instead of running off it.
+    const scale = fitScale(this.title, VIEW_W - 28, 3);
     const w = textWidth(this.title, scale);
     for (let i = 0; i < this.title.length; i++) {
       const k = clamp((cardK * this.title.length - i) / 1.2, 0, 1);
@@ -420,7 +421,7 @@ export class Cutscene {
       drawText(ctx, this.title[i], x, y, i % 2 ? Theme.uiAccent : '#ffffff', scale);
     }
     ctx.globalAlpha = holdK * window01(t, 1.4, 1.9);
-    if (this.subtitle) drawTextShadow(ctx, this.subtitle, VIEW_W / 2, cy + 32, Theme.ui, 1, 'center');
+    if (this.subtitle) drawTextShadow(ctx, this.subtitle, VIEW_W / 2, cy + 32, Theme.ui, fitScale(this.subtitle, VIEW_W - 28, 1), 'center');
     ctx.globalAlpha = 1;
 
     // the HP bar filling in under the card
@@ -443,9 +444,10 @@ export class Cutscene {
     const e = easeOut(cardK);
 
     ctx.globalAlpha = holdK * e;
-    drawTextShadow(ctx, this.title, VIEW_W / 2, cy - 4, rgba(Theme.uiDim, 0.9), 2, 'center');
+    const tScale = fitScale(this.title, VIEW_W - 28, 2);
+    drawTextShadow(ctx, this.title, VIEW_W / 2, cy - 4, rgba(Theme.uiDim, 0.9), tScale, 'center');
     // struck through, the line drawn on
-    const w = textWidth(this.title, 2);
+    const w = textWidth(this.title, tScale);
     const strike = Math.round(w * easeOut(window01(t, 2.0, 2.6)));
     pxRect(ctx, VIEW_W / 2 - w / 2, cy + 3, strike, 1, Theme.hp);
 
