@@ -549,17 +549,25 @@ export class Enemy {
       return;
     }
 
-    // out in the open: it arcs up and falls back into its own hole
+    // Out in the open, and it leaps the way Big Dude leaps: a real arc that
+    // carries it across the room, not a hop straight up out of one hole and
+    // back down the same one.
     this.untargetable = false;
     this.noContact = false;
     this.vy += d.leapGravity * dt;
     this.y += this.vy * dt;
-    if (this.spitPending && this.sdT >= 0.26) {
+    this.x = clamp(this.x + this.vx * dt, 14, VIEW_W - 14);
+    if (this.x <= 14 || this.x >= VIEW_W - 14) this.vx = 0;
+
+    // spit at the top of the arc, once - the same cue Big Dude gives
+    if (this.spitPending && this.vy > -60 && this.y < GROUND_Y - 4) {
       this.spitPending = false;
       this.spitFan(target);
     }
+
     if (this.vy > 0 && this.y >= GROUND_Y + d.burrowDepth) {
       this.y = GROUND_Y + d.burrowDepth;
+      this.vx = 0;
       this.sdState = 'under';
       this.sdT = 0;
       // flip the flags with the state, not a frame after it
@@ -573,6 +581,9 @@ export class Enemy {
     this.sdState = 'out';
     this.sdT = 0;
     this.vy = -d.leapUp;
+    // it comes up under you and keeps going, so it lands somewhere new
+    this.vx = (sign(target ? target.x - this.x : this.facing) || 1) * d.leapAcross;
+    this.facing = sign(this.vx) || this.facing;
     // hittable the instant it breaks the surface, not a frame later
     this.untargetable = false;
     this.noContact = false;
@@ -587,19 +598,26 @@ export class Enemy {
     impactRing(this.x, GROUND_Y, { color: Theme.groundEdge, r0: 3, r1: 32, life: 0.35, width: 2 });
   }
 
+  // A fan of globs lobbed upward, each on its own arc. They fall - a shot
+  // that flew flat forever would be a different weapon entirely, and it is
+  // the arc that makes Big Dude's spit readable.
   spitFan(target) {
     const d = this.def;
-    const base = target ? Math.atan2(target.cy - this.cy, target.x - this.cx) : -Math.PI / 2;
     for (let i = 0; i < d.spitCount; i++) {
-      const a = base + (i - (d.spitCount - 1) / 2) * d.spitSpread;
+      const a = -Math.PI / 2 + (i / Math.max(1, d.spitCount - 1) - 0.5) * 2 * d.spitSpread + rand(-0.06, 0.06);
+      const sp = d.spitSpeed * rand(0.8, 1.15);
       this.game.projectiles.push(new Projectile({
-        x: this.cx, y: this.cy,
-        vx: Math.cos(a) * d.spitSpeed, vy: Math.sin(a) * d.spitSpeed,
-        damage: Math.round(d.spitDamage * this.dmgScale),
-        team: 'enemy', kind: 'bolt', life: 3, game: this.game,
+        x: this.cx, y: this.cy - 4,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        gravity: 560, damage: Math.round(d.spitDamage * this.dmgScale),
+        team: 'enemy', kind: 'acid', life: 5, game: this.game,
       }));
     }
-    Sfx.bow();
+    burst(this.cx, this.cy - 5, 10, {
+      color: '#a8e04a', color2: '#e6ffb0', speedMin: 25, speedMax: 110,
+      lifeMin: 0.18, lifeMax: 0.45, gravity: 240, angle: -Math.PI / 2, spread: 1.1,
+    });
+    Sfx.slime();
   }
 
   // --- Stinger Egg -------------------------------------------------------
@@ -610,7 +628,18 @@ export class Enemy {
     const d = this.def;
     this.eggT = (this.eggT ?? 0) + dt;
     this.vx = 0;
+    // it was laid in mid-air wherever the Mutant died, so it falls
+    this.vy = Math.min(this.vy + GRAVITY * dt, 700);
+    const wasAir = !this.onGround;
     moveAndCollide(this, dt);
+    if (wasAir && this.onGround) {
+      // a small puff where it settles, so the landing reads
+      burst(this.cx, this.y, 6, {
+        color: Theme.groundEdge, kind: 'smoke', speedMin: 20, speedMax: 70,
+        lifeMin: 0.2, lifeMax: 0.45, gravity: 120, glow: false,
+        angle: -Math.PI / 2, spread: 1.0,
+      });
+    }
     if (Math.random() < dt * 6) {
       spawnParticle({
         x: this.cx + rand(-4, 4), y: this.cy + rand(-5, 5), vx: rand(-6, 6), vy: rand(-14, -4),
@@ -1884,14 +1913,13 @@ export class Projectile {
       });
       return;
     }
-    this.vy += 620 * dt;
+    // It swims through the air rather than falling: no gravity at all, so it
+    // holds the height it was born at and crosses the room level.
+    this.vy = 0;
     this.x += this.vx * dt;
-    this.y += this.vy * dt;
-    // ride the floor, and turn around at the walls
-    const floor = surfaceBelow(this.x, this.y - 2);
-    if (this.y >= floor) { this.y = floor; this.vy = 0; }
     if (this.x < 8) { this.x = 8; this.vx = Math.abs(this.vx); }
     if (this.x > VIEW_W - 8) { this.x = VIEW_W - 8; this.vx = -Math.abs(this.vx); }
+    this.y = clamp(this.y, 14, surfaceBelow(this.x, this.y - 2));
 
     this.shotT = (this.shotT ?? cfg.interval * 0.4) + dt;
     if (this.shotT >= cfg.interval) {
@@ -2095,9 +2123,9 @@ export class Projectile {
   draw(ctx) {
     ctx.save();
     if (this.kind === 'spearling') {
-      // a grub humping along the floor, head up when it is about to spit
+      // a grub swimming through the air, undulating as it goes
       const f = this.facing ?? sign(this.vx) ?? 1;
-      const hump = Math.abs(Math.sin(this.t * 9)) * 2;
+      const hump = Math.sin(this.t * 9) * 2;
       const x = Math.round(this.x), y = Math.round(this.y);
       const ink = inkFor('#c86a4a');
       pxSolid(ctx, x - 5, y - 4 - hump, 4, 4, '#c86a4a', { ink, light: null, dark: null });
@@ -3471,6 +3499,32 @@ export class Player {
     if (dashing) ctx.restore();
   }
 
+  // The spear's own trail: a lance straight down the aim out to its reach,
+  // which is what tells you the stab is a line and not a swept arc.
+  drawThrustFx(ctx, sw) {
+    const p = clamp(sw.t / (WORM_SPEAR.thrustTime * 2), 0, 1);
+    if (p >= 1) return;
+    const e = 1 - Math.pow(1 - p, 2);
+    const a = sw.angle;
+    const r0 = 8, r1 = 8 + (sw.range - 8) * Math.min(1, e * 1.6);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = rgba('#c86a4a', (1 - p) * 0.7);
+    ctx.lineWidth = 4 * (1 - p) + 1;
+    ctx.beginPath();
+    ctx.moveTo(this.x + Math.cos(a) * r0, this.cy + Math.sin(a) * r0);
+    ctx.lineTo(this.x + Math.cos(a) * r1, this.cy + Math.sin(a) * r1);
+    ctx.stroke();
+    ctx.strokeStyle = rgba('#ffffff', (1 - p) * 0.55);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // a short cross-tick at the tip, where the spawn comes from
+    const tx = this.x + Math.cos(a) * r1, ty = this.cy + Math.sin(a) * r1;
+    glowDot(ctx, tx, ty, 14 * (1 - p), '#e08a68', (1 - p) * 0.5);
+    ctx.restore();
+  }
+
   drawWeapon(ctx, x, y, f, dashing = false, swordDash = false) {
     const w = this.inventory.selectedWeapon();
     const sw = this.swing;
@@ -3624,6 +3678,72 @@ export class Player {
       return;
     }
 
+    if (w.weapon === 'spear') {
+      // A stab, so the arm does not sweep: it drives straight down the aim and
+      // snaps back. p runs 0 -> 1 over the lunge, and the shaft rides it.
+      const a = this.aim;
+      const p0 = sw && sw.kind === 'thrust' ? clamp(sw.t / WORM_SPEAR.thrustTime, 0, 1) : 1;
+      // out fast on the first third, back slower over the rest
+      const push = p0 < 0.34 ? p0 / 0.34 : 1 - (p0 - 0.34) / 0.66;
+      const lunge = Math.pow(clamp(push, 0, 1), 0.6);
+      const reach = 6 + lunge * 7;
+      const gx = x + Math.cos(a) * reach, gy = shoulderY + Math.sin(a) * reach;
+      // back hand braced further down the shaft
+      limb(ctx, x - f * 2, shoulderY + 3, a, 4 + lunge * 5, 3, Theme.skin);
+      limb(ctx, x, shoulderY, a, reach, 3, Theme.skin);
+      // shaft, then the barbed head
+      limb(ctx, gx - Math.cos(a) * 7, gy - Math.sin(a) * 7, a, 26, 2, '#6b4a30');
+      const hx2 = gx + Math.cos(a) * 19, hy2 = gy + Math.sin(a) * 19;
+      ctx.save();
+      ctx.translate(Math.round(hx2), Math.round(hy2));
+      ctx.rotate(a);
+      pxRect(ctx, -6, -1, 7, 2, Theme.steelDark);
+      pxRect(ctx, 0, -2, 5, 4, '#c86a4a');       // the grub-flesh socket
+      pxRect(ctx, 1, -1, 3, 1, '#e08a68');
+      pxRect(ctx, 5, -1, 5, 2, Theme.steel);     // the point
+      pxRect(ctx, 5, -1, 4, 1, '#eef4ff');
+      pxRect(ctx, 2, -4, 2, 3, Theme.steelDark); // barbs
+      pxRect(ctx, 2, 1, 2, 3, Theme.steelDark);
+      ctx.restore();
+      if (lunge > 0.2) {
+        glowDot(ctx, hx2 + Math.cos(a) * 8, hy2 + Math.sin(a) * 8, 8 + lunge * 10, '#c86a4a', 0.25 + lunge * 0.35);
+      }
+      return;
+    }
+
+    if (w.weapon === 'stingergun') {
+      // a long thin dart rifle, held two-handed, with the magazine of darts
+      // standing up behind the breech so you can count what is left
+      const a = this.aim;
+      const kick = sw && sw.kind === 'bow' ? clamp(1 - sw.t / 0.18, 0, 1) : 0;
+      const reach = 10 - kick * 3;
+      const hx2 = x + Math.cos(a) * reach, hy2 = shoulderY + Math.sin(a) * reach;
+      limb(ctx, x, shoulderY, a, reach, 3, Theme.skin);
+      limb(ctx, x - f * 2, shoulderY + 2, a + (f > 0 ? 0.42 : -0.42), 6, 3, Theme.skin);
+      ctx.save();
+      ctx.translate(Math.round(hx2), Math.round(hy2));
+      ctx.rotate(a + kick * (f > 0 ? -0.22 : 0.22));
+      pxRect(ctx, -7, 1, 4, 4, '#5a3a24');        // stock
+      pxRect(ctx, -6, -2, 14, 4, Theme.steelDark); // body
+      pxRect(ctx, -6, -2, 13, 1, Theme.steel);
+      pxRect(ctx, 7, -1, 9, 2, Theme.steel);       // the long barrel
+      pxRect(ctx, 7, -1, 8, 1, '#dfe7f5');
+      pxRect(ctx, -2, -5, 5, 3, '#5a8a2a');        // dart magazine
+      if (this.reloadT > 0) {
+        pxRect(ctx, -2, -8, 5, 3, Theme.steelDark);
+      } else {
+        for (let i = 0; i < Math.min(3, this.ammo); i++) {
+          pxRect(ctx, -2 + i * 2, -7, 1, 2, '#a8e04a');
+        }
+      }
+      if (kick > 0) {
+        glowDot(ctx, 17, 0, 8 + kick * 12, '#a8e04a', 0.3 + kick * 0.4);
+        pxRect(ctx, 15, -1, 3 + kick * 6, 2, '#eaffb0');
+      }
+      ctx.restore();
+      return;
+    }
+
     if (w.weapon === 'shardgun') {
       const a = this.aim;
       const kick = sw && sw.kind === 'bow' ? clamp(1 - sw.t / 0.22, 0, 1) : 0;
@@ -3710,6 +3830,7 @@ export class Player {
 
   drawSwingFx(ctx) {
     const sw = this.swing;
+    if (sw && sw.kind === 'thrust') return this.drawThrustFx(ctx, sw);
     if (!sw || sw.kind !== 'melee') return;
     const p = clamp(sw.t / (SWORD.swingTime * 1.4), 0, 1);
     if (p >= 1) return;

@@ -11,7 +11,7 @@ import { PostFX, parseShaderPack, DEFAULT_COMPOSITE } from './postfx.js';
 import {
   VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, DROP_POINT, PERK, WAVES, PLAYER as PCFG,
   BOSS_ROOM_INTERVAL, NUKERANG, FINAL_ROOM, SHARDGUN, TWINDAGGER, SWORD, BOW, ORIGAMI,
-  ARMOR, PAPER_SHIELD, ANVIL, GRAPPLE, WORM_SPEAR,
+  ARMOR, PAPER_SHIELD, ANVIL, GRAPPLE, WORM_SPEAR, STINGER_GUN, BLOCK,
 } from './config.js';
 import { Player, Enemy, Projectile, SHARD_TINT, INK, doodleShape, doodleLine } from './entities.js';
 import { makeBoss } from './boss.js';
@@ -1492,7 +1492,9 @@ export class Game {
     let r = SWORD.range * 0.5;
     if (w) {
       if (w.id === 'twindagger') r = TWINDAGGER.range;
+      else if (w.weapon === 'spear') r = WORM_SPEAR.range + (p.armorBuff?.meleeRange ?? 0) * BLOCK;
       else if (w.weapon === 'melee') r = SWORD.range;
+      else if (w.weapon === 'stingergun') r = STINGER_GUN.range;
       else if (w.weapon === 'bow') r = BOW.range;
       else if (w.weapon === 'shardgun') r = SHARDGUN.range;
       else if (w.weapon === 'boomerang') r = NUKERANG.range;
@@ -1520,7 +1522,9 @@ export class Game {
       ? (w.id === 'twindagger' ? TWINDAGGER.cooldown
         : w.weapon === 'bow' ? BOW.cooldown
           : w.weapon === 'shardgun' ? SHARDGUN.cooldown
-            : w.weapon === 'paper' ? ORIGAMI.forms.missile.cooldown
+            : w.weapon === 'stingergun' ? STINGER_GUN.cooldown
+              : w.weapon === 'spear' ? WORM_SPEAR.cooldown
+                : w.weapon === 'paper' ? ORIGAMI.forms.missile.cooldown
               : w.weapon === 'boomerang' ? NUKERANG.cooldown : SWORD.cooldown)
       : 0.35;
     const busy = p.reloadT > 0 ? p.reloadT / ((this.player.gunCfg()?.reload) || 1)

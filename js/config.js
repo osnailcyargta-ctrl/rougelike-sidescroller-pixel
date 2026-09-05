@@ -278,7 +278,7 @@ export const ENEMY_TYPES = {
     knockback: 150,
     burrowDepth: 30, burrowSpeed: 140,
     buriedTime: 1.5, surfaceTime: 1.4,
-    leapUp: 330, leapGravity: 900,
+    leapUp: 400, leapAcross: 120, leapGravity: 900,
     spitChance: 0.5, spitCount: 3, spitDamage: 10, spitSpeed: 190, spitSpread: 0.55,
     dropId: 'wormspear', dropChance: 0.02,
   },
