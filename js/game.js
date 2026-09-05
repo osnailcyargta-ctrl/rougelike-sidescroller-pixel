@@ -12,7 +12,8 @@ import {
   VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, DROP_POINT, PERK, WAVES, PLAYER as PCFG,
   BOSS_ROOM_INTERVAL, NUKERANG, FINAL_ROOM, SHARDGUN, TWINDAGGER, SWORD, BOW, ORIGAMI,
   ARMOR, PAPER_SHIELD, ANVIL, GRAPPLE, STINGER_GUN, BLOCK, DROPS, GIANT_EGG, FORGE_VISIBLE_ROWS,
-  SEEDED_THROUGH_ROOM, SOUL_DART, BOSS_RUSH,
+  HITBOX,
+  SEEDED_THROUGH_ROOM, SOUL_DART, STIDENT, BOSS_RUSH,
 } from './config.js';
 import { Player, Enemy, Projectile, SHARD_TINT, INK, doodleShape, doodleLine } from './entities.js';
 import { makeBoss, makeBossPreview } from './boss.js';
@@ -1429,7 +1430,23 @@ export class Game {
 
   // Every boss leaves souls behind - except the god, which has none to give.
   rollBossDrop(boss) {
-    if (!boss || boss.def.id === 'alphads') return;
+    if (!boss) return;
+    // Poitnus leaves its own weapon: the trident to someone who fights up
+    // close, the gun to everyone else, since a Stident in an Origamist's bag
+    // is a rock they cannot swing.
+    if (boss.def.id === 'poitnus' && this.player) {
+      const id = this.player.classId === 'melee' ? 'stident' : 'stingergun';
+      const x = clamp(boss.x ?? VIEW_W / 2, 24, VIEW_W - 24);
+      const y = clamp((boss.y ?? 100) + 20, 30, GROUND_Y - 20);
+      if (!this.player.inventory.has(id)) {
+        this.pickups.push(new Pickup(id, x, y, null, { falling: true, vy: -140 }));
+        burst(x, y, 26, {
+          color: RARITY[ITEMS[id].rarity].color, color2: '#ffffff',
+          speedMin: 30, speedMax: 150, lifeMin: 0.3, lifeMax: 0.8, gravity: 140,
+        });
+      }
+    }
+    if (boss.def.id === 'alphads') return;
     const [lo, hi] = DROPS.soulsPerBoss;
     const x = clamp(boss.x ?? boss.hx ?? VIEW_W / 2, 24, VIEW_W - 24);
     const y = clamp(boss.y ?? boss.hy ?? GROUND_Y - 40, 30, GROUND_Y - 20);
@@ -1742,7 +1759,11 @@ export class Game {
     if (!frozen) for (const e of this.enemies) {
       if (e.dead || e.spawnT > 0 || e.def.flying || e.noContact || e.untargetable) continue;
       if (Math.abs(e.cx - p.x) < (e.w + p.w) / 2 - 1 && Math.abs(e.cy - p.cy) < (e.h + p.h) / 2 - 1) {
-        if (p.dashT <= 0) p.hurt(Math.round(e.dmg * 0.35), e.x);
+        if (p.dashT <= 0) {
+          p.hurt(Math.round(e.dmg * 0.35), e.x);
+          // some bodies are poisonous to be near, not just to be hit by
+          if (e.def.poisonSeconds > 0) p.applyPoison(e.def.poisonSeconds);
+        }
       }
     }
     for (let i = this.enemies.length - 1; i >= 0; i--) {
@@ -2002,6 +2023,7 @@ export class Game {
     drawTexts(ctx);
     // aim reticle lives inside the camera so it tracks the cursor exactly
     if (this.screen === 'playing' && !this.invOpen && this.player && !this.player.dead) {
+      if (Options.showHitbox) this.drawHitboxes(ctx);
       if (Options.showRange) this.drawRangeRing(ctx);
       if (Options.showCooldown) this.drawCooldownRing(ctx);
       drawAimLeash(ctx, this);
@@ -2028,6 +2050,108 @@ export class Game {
     this.drawToast(ctx);
   }
 
+  // --- hitboxes -----------------------------------------------------------
+  // What the game actually measures, drawn exactly where it measures it. Not
+  // an approximation of the sprite: these read the same numbers the collision
+  // code does, so if a hit looks wrong this is what to believe.
+  //
+  //   blue      you
+  //   red       an enemy
+  //   yellow    something of yours that can hurt them
+  //   dark red  something of theirs that can hurt you
+
+  drawHitboxes(ctx) {
+    const p = this.player;
+    ctx.save();
+    ctx.lineWidth = 1;
+
+    // Dark red on a dark game is very nearly invisible, so anything drawn in
+    // it gets a thin bright edge outside the line. The colour still says which
+    // is which; the halo is only so the shape can be found at all.
+    const box = (cx, cy, w, h, color, fill) => {
+      const x = Math.round(cx - w / 2) + 0.5, y = Math.round(cy - h / 2) + 0.5;
+      const bw = Math.round(w), bh = Math.round(h);
+      if (fill) { ctx.fillStyle = rgba(color, 0.2); ctx.fillRect(x, y, bw, bh); }
+      if (color === HITBOX.enemyAttack) {
+        ctx.strokeStyle = rgba('#ffffff', 0.28);
+        ctx.strokeRect(x - 1, y - 1, bw + 2, bh + 2);
+      }
+      ctx.strokeStyle = rgba(color, 0.95);
+      ctx.strokeRect(x, y, bw, bh);
+    };
+    const dot = (cx, cy, r, color) => {
+      ctx.strokeStyle = color.length > 7 ? color : rgba(color, 0.9);
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(1.5, r), 0, TAU);
+      ctx.stroke();
+    };
+
+    // --- you
+    if (p && !p.dead) box(p.x, p.cy, p.w, p.h, HITBOX.player, true);
+
+    // --- them. An enemy that cannot be hit is drawn hollow and dashed, so
+    // "my shots pass through it" has an answer on screen.
+    for (const e of this.enemies) {
+      if (e.dead) continue;
+      const untouchable = e.spawnT > 0 || e.untargetable;
+      ctx.setLineDash(untouchable ? [2, 3] : []);
+      box(e.cx, e.cy, e.w, e.h, HITBOX.enemy, !untouchable);
+      ctx.setLineDash([]);
+    }
+
+    // --- what each side has in the air
+    for (const pr of this.projectiles) {
+      if (pr.dead) continue;
+      const mine = pr.team === 'player';
+      const c = mine ? HITBOX.playerAttack : HITBOX.enemyAttack;
+      // a spent projectile has stopped being an attack
+      if (!mine) dot(pr.x, pr.y, 6, '#ffffff33');
+      dot(pr.x, pr.y, pr.spent ? 3 : 5, c);
+      if (!pr.spent) box(pr.x, pr.y, 8, 8, c, true);
+    }
+
+    // --- your swing, drawn as the arc the hit test actually sweeps
+    if (p && p.swing && (p.swing.kind === 'melee' || p.swing.kind === 'thrust')) {
+      const sw = p.swing;
+      const live = sw.t < (sw.kind === 'thrust' ? STIDENT.thrustTime : SWORD.swingTime);
+      if (live && sw.range) {
+        ctx.strokeStyle = rgba(HITBOX.playerAttack, 0.95);
+        ctx.fillStyle = rgba(HITBOX.playerAttack, 0.22);
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.cy);
+        ctx.arc(p.x, p.cy, sw.range, sw.angle - sw.arc, sw.angle + sw.arc);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    // --- their melee, for the frames it is actually live
+    for (const e of this.enemies) {
+      if (e.dead || !e.slash) continue;
+      const reach = (e.def.attackRange ?? 16) + 6;
+      const x = Math.round(e.x + (e.facing > 0 ? 0 : -reach)) + 0.5;
+      const y = Math.round(e.cy - 24) + 0.5;
+      ctx.fillStyle = rgba(HITBOX.enemyAttack, 0.22);
+      ctx.fillRect(x, y, reach, 48);
+      ctx.strokeStyle = rgba('#ffffff', 0.28);
+      ctx.strokeRect(x - 1, y - 1, reach + 2, 50);
+      ctx.strokeStyle = rgba(HITBOX.enemyAttack, 0.95);
+      ctx.strokeRect(x, y, reach, 48);
+    }
+
+    // --- and the beams, which are attacks with no body at all
+    if (this.boss && this.boss.ray && this.boss.ray.ox !== undefined) {
+      const b = this.boss.ray;
+      ctx.strokeStyle = rgba(HITBOX.enemyAttack, 0.85);
+      ctx.beginPath();
+      ctx.moveTo(b.ox, b.oy ?? 0);
+      ctx.lineTo(b.ox, GROUND_Y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   // A faint ring at the reach of whatever you are holding, for players who
   // want to see exactly where a swing or a shot stops.
   drawRangeRing(ctx) {
@@ -2036,6 +2160,7 @@ export class Game {
     let r = SWORD.range * 0.5;
     if (w) {
       if (w.id === 'twindagger') r = TWINDAGGER.range;
+      else if (w.weapon === 'trident') r = STIDENT.range + (p.armorBuff?.meleeRange ?? 0) * BLOCK;
       else if (w.weapon === 'melee') r = SWORD.range;
       else if (w.weapon === 'stingergun') r = STINGER_GUN.range;
       else if (w.weapon === 'bow') r = BOW.range;
@@ -2055,10 +2180,11 @@ export class Game {
     ctx.setLineDash([]);
     // A swing snaps to one of eight directions, so the ring says which one it
     // is about to take - otherwise the cursor and the strike disagree.
-    const melee = !w || w.weapon === 'melee';
+    const melee = !w || w.weapon === 'melee' || w.weapon === 'trident';
     if (melee) {
       const a = snapAngle(p.aim, 8);
-      const arc = (w && w.id === 'twindagger' ? TWINDAGGER.arc : SWORD.arc) * 0.95;
+      const arc = (w && w.id === 'twindagger' ? TWINDAGGER.arc
+        : w && w.weapon === 'trident' ? STIDENT.arc : SWORD.arc) * 0.95;
       ctx.strokeStyle = rgba(Theme.uiAccent, 0.5);
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -2080,7 +2206,8 @@ export class Game {
         : w.weapon === 'bow' ? BOW.cooldown
           : w.weapon === 'shardgun' ? SHARDGUN.cooldown
             : w.weapon === 'stingergun' ? STINGER_GUN.cooldown
-              : w.weapon === 'paper' ? ORIGAMI.forms.missile.cooldown
+              : w.weapon === 'trident' ? STIDENT.cooldown
+                : w.weapon === 'paper' ? ORIGAMI.forms.missile.cooldown
               : w.weapon === 'boomerang' ? NUKERANG.cooldown : SWORD.cooldown)
       : 0.35;
     const busy = p.reloadT > 0 ? p.reloadT / ((this.player.gunCfg()?.reload) || 1)

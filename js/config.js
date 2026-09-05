@@ -188,6 +188,16 @@ export const SOUL_DART = {
   speed: 380,
 };
 
+// Poitnus' own weapon, taken off its corpse. A trident with three of its
+// stingers for prongs.
+export const STIDENT = {
+  range: 5 * BLOCK, damage: 37, cooldown: 0.72,
+  arc: 0.34,                       // a stab down the line, like the prongs
+  thrustTime: 0.2,
+  poisonChance: 0.66,
+  poisonSeconds: 2.0,
+};
+
 export const SHARDGUN = {
   range: 5 * BLOCK, damage: 20, ammo: 1, reload: 1.5, cooldown: 0.45,
   pellets: 5, speed: 400, spread: 0.30,
@@ -232,6 +242,15 @@ export const CEILING_ROOM = 15;        // where the Undead Ceiling hangs
 // perks a room offers, what a boss leaves. Past it the run goes off-script on
 // purpose - the last stretch should not be something you can rehearse.
 export const SEEDED_THROUGH_ROOM = 15;
+
+// The four colours the hitbox overlay uses. Kept together so the legend and
+// the drawing can never disagree about which is which.
+export const HITBOX = {
+  player: '#4aa8ff',        // you
+  enemy: '#ff4a4a',         // them
+  playerAttack: '#ffd23c',  // yours, and it hurts them
+  enemyAttack: '#8c1414',   // theirs, and it hurts you
+};
 
 // Boss Rush: the four room bosses back to back, nothing in between. Each one
 // is a "room", so the reward between them is the same choice of two perks a
@@ -324,6 +343,7 @@ export const ENEMY_TYPES = {
     id: 'poitnusBody', name: 'Poitnus', hp: 1400, speed: 0, damage: 22,
     w: 54, h: 40, attackCooldown: 1, attackRange: 30,
     flying: true, boss: true, slamImmune: true,
+    poisonSeconds: 1.0,          // touching it is an attack too
   },
   // The clutch it lays, and the shell you set down yourself. Both are eggs;
   // only one of them can be hurt.
@@ -456,6 +476,9 @@ export const BOSS_TYPES = {
     maxBrood: 10,                   // stingers on screen; at the cap it stops laying
     volleysPerCycle: 3,
     volleyGap: 1.0,
+    // Everything it does leaves poison behind - the stingers, the body, the
+    // eggs it drops on you. A short dose, but it never stops coming.
+    poisonSeconds: 1.0,
   },
 
   // A twenty-block worm that lives under the floor and only surfaces to strike.

@@ -15,6 +15,7 @@ export const OPTION_DEFS = [
   { id: 'touchScale', label: 'PAD SIZE', group: 'touch', type: 'range', def: 1.0, max: 1.5 },
   { id: 'touchOpacity', label: 'PAD OPACITY', group: 'touch', type: 'range', def: 0.6, max: 1 },
   { id: 'lowPower', label: 'LOW POWER MODE', group: 'touch', type: 'bool', def: false },
+  { id: 'autoGraphics', label: 'AUTO GRAPHICS', group: 'touch', type: 'bool', def: true },
 
   // --- indicators
   { id: 'showFps', label: 'SHOW FPS', group: 'indicator', type: 'bool', def: false },
@@ -26,6 +27,7 @@ export const OPTION_DEFS = [
   { id: 'showWaveCounter', label: 'WAVE COUNTER', group: 'indicator', type: 'bool', def: true },
   { id: 'showReticle', label: 'AIM RETICLE', group: 'indicator', type: 'bool', def: true },
   { id: 'showCooldown', label: 'ATTACK COOLDOWN RING', group: 'indicator', type: 'bool', def: true },
+  { id: 'showHitbox', label: 'SHOW HITBOXES', group: 'indicator', type: 'bool', def: false },
   { id: 'showBossTimer', label: 'BOSS ENRAGE TIMER', group: 'indicator', type: 'bool', def: true },
 
   // --- visuals

@@ -265,7 +265,8 @@ export class PoitnusBoss {
       x: s.x, y: s.y,
       vx: Math.cos(a) * cfg.speed, vy: Math.sin(a) * cfg.speed,
       damage: Math.round(cfg.damage * this.dmgScale),
-      team: 'enemy', kind: 'bolt', life: 4, game: this.game,
+      team: 'enemy', kind: 'bolt', life: 4, poisonPlayer: this.def.poisonSeconds,
+      game: this.game,
     }));
     Sfx.bow();
     Camera.add(1.6);

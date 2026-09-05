@@ -6,7 +6,7 @@ import {
 } from './gfx.js';
 import { Sfx } from './audio.js';
 import {
-  VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, SHARDGUN, TWINDAGGER, ORIGAMI, NUKERANG, GRAPPLE, ARMOR, BLOCK, ENEMY_TYPES, PERK, ROOM_SCALING, roomScaleSteps, STINGER_GUN, SOUL_DART, GIANT_EGG, DROPS,
+  VIEW_W, VIEW_H, GRAVITY, GROUND_Y, PLATFORMS, PLAYER, SWORD, BOW, SHARDGUN, TWINDAGGER, ORIGAMI, NUKERANG, GRAPPLE, ARMOR, BLOCK, ENEMY_TYPES, PERK, ROOM_SCALING, roomScaleSteps, STINGER_GUN, SOUL_DART, STIDENT, GIANT_EGG, DROPS,
 } from './config.js';
 import { ITEMS, Inventory } from './items.js';
 import { Binds, Input } from './input.js';
@@ -156,7 +156,7 @@ export function doodleShape(ctx, pts, fill, stroke, width, seed = 0, wob = 1) {
 
 // What each class considers its own weapons, for the Damage Booster.
 const CLASS_WEAPONS = {
-  melee: ['melee', 'boomerang'],
+  melee: ['melee', 'boomerang', 'trident'],
   ranger: ['bow', 'shardgun', 'stingergun'],
   origamist: ['paper'],
 };
@@ -364,10 +364,10 @@ export class Enemy {
 
   // Poison is fire and slime at once: it ticks damage like a burn and drags
   // like slime, on one timer, and it never stacks with itself.
-  applyPoison() {
+  applyPoison(duration = PERK.poisonDuration) {
     if (this.st.poison <= 0) this.st.poisonTick = 0;
-    this.st.poison = PERK.poisonDuration;
-    this.applySlow(PERK.poisonSlow, PERK.poisonDuration);
+    this.st.poison = Math.max(this.st.poison, duration);
+    this.applySlow(PERK.poisonSlow, duration);
   }
 
   applyMark() {
@@ -1727,6 +1727,8 @@ export class Projectile {
       x: 0, y: 0, vx: 0, vy: 0, damage: 5, team: 'player', kind: 'arrow',
       life: 2, t: 0, dead: false, traveled: 0, maxDist: Infinity, gravity: 0,
       mark: false, slow: false, homing: 0, target: null, trail: [],
+      poisonPlayer: 0,       // seconds of poison this leaves on the player
+      poison: false,         // and whether it poisons an enemy at all
       spent: false, stuck: false, stuckT: 0, stuckTo: null, spin: 0,
       phase: 'out', owner: null, hitLog: null, wobble: 0,
       keepTop: false,        // arrow rain arcs above the screen and falls back
@@ -2167,6 +2169,14 @@ export class Projectile {
       }
     } else {
       target.hurt(this.damage, this.x);
+      // some things that hit you leave more than a bruise
+      if (this.poisonPlayer > 0 && target.applyPoison) {
+        target.applyPoison(this.poisonPlayer);
+        burst(this.x, this.y, 7, {
+          color: '#a8e04a', color2: '#eaffb0', speedMin: 20, speedMax: 100,
+          lifeMin: 0.2, lifeMax: 0.5, gravity: 140,
+        });
+      }
       burst(this.x, this.y, 8, { color: Theme.enemyStinger, speedMin: 20, speedMax: 90, lifeMin: 0.15, lifeMax: 0.4 });
     }
   }
@@ -2378,6 +2388,9 @@ export class Player {
     this.ammo = BOW.ammo;
     this.reloadT = 0;
     this.lastGunId = null;
+    this.mags = {};        // gun id -> rounds left in it
+    this.poisonT = 0;      // seconds of poison left on you
+    this.poisonTick = 0;
     this.daggerHits = 0;
     this.emberDash = 0;
     this.slimeT = PERK.slimeInterval;
@@ -2605,6 +2618,7 @@ export class Player {
       this.hp = Math.min(this.maxHp, this.hp + PLAYER.regenPerSecond * dt);
     }
     this.updateReload(dt);
+    this.updatePoison(dt);
     this.updatePerks(dt);
 
     const c = this.controls ? input : null;
@@ -2662,9 +2676,10 @@ export class Player {
       const swinging = this.grapple && this.grapple.state === 'attached';
       const accel = (this.onGround ? PLAYER.accel : PLAYER.airAccel) *
         (swinging ? GRAPPLE.airControl : 1);
+      const drag = this.poisonT > 0 ? 1 - PERK.poisonSlow : 1;
       if (move !== 0) {
-        this.vx += move * accel * dt;
-        this.vx = clamp(this.vx, -PLAYER.speed, PLAYER.speed);
+        this.vx += move * accel * dt * drag;
+        this.vx = clamp(this.vx, -PLAYER.speed * drag, PLAYER.speed * drag);
       } else if (this.onGround && !swinging) {
         this.vx = Math.abs(this.vx) < PLAYER.friction * dt ? 0 : this.vx - sign(this.vx) * PLAYER.friction * dt;
       } else if (!swinging) {
@@ -3091,19 +3106,27 @@ export class Player {
   }
 
   updateReload(dt) {
-    // Swapping guns hands you a fresh magazine of the right size and drops any
-    // reload that was in progress on the other one.
+    // Each gun keeps its own magazine. Swapping used to hand you a full one,
+    // which made switching away and back a free reload; now the gun you come
+    // back to is exactly as empty as you left it. A reload that was running is
+    // still dropped - you cannot leave one cooking on a gun you are not
+    // holding.
     const w = this.inventory.selectedWeapon();
     const id = w ? w.id : null;
     if (id !== this.lastGunId) {
+      if (this.lastGunId && this.gunCfg(ITEMS[this.lastGunId])) this.mags[this.lastGunId] = this.ammo;
       this.lastGunId = id;
       const cfg = this.gunCfg(w);
-      if (cfg) { this.ammo = cfg.ammo; this.reloadT = 0; }
+      if (cfg) {
+        this.ammo = this.mags[id] !== undefined ? this.mags[id] : cfg.ammo;
+        this.reloadT = 0;
+      }
     }
     if (this.reloadT > 0) {
       this.reloadT -= dt;
       if (this.reloadT <= 0) {
         this.ammo = (this.gunCfg() ?? BOW).ammo;
+        if (this.lastGunId) this.mags[this.lastGunId] = this.ammo;
         Sfx.reload();
       }
     }
@@ -3115,6 +3138,37 @@ export class Player {
     if (this.reloadT > 0 || this.ammo >= cfg.ammo) return;
     this.reloadT = cfg.reload;
     Sfx.reload();
+  }
+
+  // Poison on the player works the way it does on everything else: it ticks
+  // damage and it drags. It goes through invulnerability frames on purpose -
+  // you cannot dash out of something already in your blood - but it can never
+  // be the thing that kills you outright, so the last point of health is safe
+  // from it.
+  applyPoison(duration = PERK.poisonDuration) {
+    if (this.dead) return;
+    if (this.poisonT <= 0) this.poisonTick = 0;
+    this.poisonT = Math.max(this.poisonT, duration);
+  }
+
+  updatePoison(dt) {
+    if (this.poisonT <= 0) return;
+    this.poisonT -= dt;
+    this.poisonTick += dt;
+    while (this.poisonTick >= PERK.poisonTick) {
+      this.poisonTick -= PERK.poisonTick;
+      if (this.hp > 1) {
+        this.hp = Math.max(1, this.hp - PERK.poisonTickDamage);
+        floatText(this.cx + rand(-4, 4), this.cy - 14, PERK.poisonTickDamage, '#a8e04a', { life: 0.6 });
+      }
+    }
+    if (Math.random() < dt * 26) {
+      spawnParticle({
+        x: this.x + rand(-5, 5), y: this.cy + rand(-8, 8), vx: rand(-12, 12), vy: rand(-30, -8),
+        life: rand(0.3, 0.7), size: 1, color: '#a8e04a', color2: '#eaffb0',
+        gravity: -20, kind: 'shrink',
+      });
+    }
   }
 
   updatePerks(dt) {
@@ -3202,6 +3256,9 @@ export class Player {
         this.doSwing(SWORD.range + reach,
                      Math.round(this.boosted(SWORD.damage, 'melee') * dmgMult), SWORD.arc);
       }
+    } else if (weapon.weapon === 'trident') {
+      this.attackCd = STIDENT.cooldown * (1 + (this.armorBuff?.meleeCooldown ?? 0));
+      this.doThrust();
     } else if (weapon.weapon === 'stingergun') {
       if (this.reloadT > 0) return;
       if (this.ammo <= 0) { this.startReload(); return; }
@@ -3229,6 +3286,9 @@ export class Player {
       });
       if (soul) impactRing(this.x + Math.cos(a) * 12, this.cy + Math.sin(a) * 12,
                            { color: SOUL_TINT, r0: 1, r1: 16, life: 0.22, width: 1.5 });
+      // empty means reloading, not waiting for you to pull the trigger on a
+      // gun that has nothing in it
+      if (this.ammo <= 0) this.startReload();
     } else if (weapon.weapon === 'paper') {
       // paper never fires directly: it opens the fold wheel and waits
       this.game.openFoldWheel();
@@ -3305,6 +3365,47 @@ export class Player {
   // cursor happens to be, and alternates stroke: the first comes down, the
   // next comes back up, on both sides of the body. Mirroring by facing made
   // the same key produce two different-looking attacks, which read as a bug.
+  // A stab, not an arc: everything in a narrow line ahead is run through at
+  // once. Three prongs, so the reach is a line and not a sweep.
+  doThrust() {
+    const cfg = STIDENT;
+    const a = snapAngle(this.aim, 8);
+    const reach = cfg.range + (this.armorBuff?.meleeRange ?? 0) * BLOCK;
+    const dmg = Math.round(this.boosted(cfg.damage, 'melee') * (1 + (this.armorBuff?.meleeDamage ?? 0)));
+    this.swing = { t: 0, angle: a, kind: 'thrust', range: reach, arc: cfg.arc };
+    Sfx.swing();
+    const fiery = this.inventory.has('fireyblade');
+    for (const e of this.game.enemies) {
+      if (e.dead || e.spawnT > 0 || e.untargetable) continue;
+      const nx = clamp(this.x, e.cx - e.w / 2, e.cx + e.w / 2);
+      const ny = clamp(this.cy, e.cy - e.h / 2, e.cy + e.h / 2);
+      const d = dist(this.x, this.cy, nx, ny);
+      if (d > reach) continue;
+      const ang = Math.atan2(ny - this.cy, nx - this.x);
+      if (d > 2 && Math.abs(shortAngle(a, ang)) > cfg.arc) continue;
+      this.registerHit();
+      const burned = fiery && Math.random() < PERK.burnChance;
+      const venom = Math.random() < cfg.poisonChance;
+      e.damage(dmg, {
+        knockback: 110, fromX: this.x, angle: ang, spread: 0.4,
+        color: venom ? '#a8e04a' : burned ? Theme.fire : '#ffffff', shake: 4,
+      });
+      if (burned && !e.dead) e.applyBurn();
+      if (venom && !e.dead) {
+        e.applyPoison(cfg.poisonSeconds);
+        burst(e.cx, e.cy, 9, {
+          color: '#a8e04a', color2: '#eaffb0', speedMin: 20, speedMax: 110,
+          lifeMin: 0.2, lifeMax: 0.5, gravity: 140,
+        });
+      }
+    }
+    Camera.add(4);
+    burst(this.x + Math.cos(a) * reach * 0.7, this.cy + Math.sin(a) * reach * 0.7, 9, {
+      color: '#5fd8a8', color2: '#ffffff', speedMin: 30, speedMax: 130,
+      lifeMin: 0.12, lifeMax: 0.3, angle: a, spread: 0.45, gravity: 40,
+    });
+  }
+
   doSwing(range, damage, arc, opts = {}) {
     const a = snapAngle(this.aim, 8);
     this.swingAlt = (this.swingAlt ?? 0) + 1;
@@ -3523,6 +3624,38 @@ export class Player {
     if (dashing) ctx.restore();
   }
 
+  // The trident's wake: a lance straight down the aim out to its reach, which
+  // is what says the stab is a line and not a swept arc.
+  drawThrustFx(ctx, sw) {
+    const p = clamp(sw.t / (STIDENT.thrustTime * 2), 0, 1);
+    if (p >= 1) return;
+    const e = 1 - Math.pow(1 - p, 2);
+    const a = sw.angle;
+    const r0 = 8, r1 = 8 + (sw.range - 8) * Math.min(1, e * 1.6);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.lineCap = 'round';
+    // three prongs, so three lines
+    for (const off of [-0.10, 0, 0.10]) {
+      const lead = off === 0 ? 1 : 0.86;
+      ctx.strokeStyle = rgba('#5fd8a8', (1 - p) * (off === 0 ? 0.7 : 0.45));
+      ctx.lineWidth = (off === 0 ? 3.4 : 2.2) * (1 - p) + 0.6;
+      ctx.beginPath();
+      ctx.moveTo(this.x + Math.cos(a + off) * r0, this.cy + Math.sin(a + off) * r0);
+      ctx.lineTo(this.x + Math.cos(a + off) * r1 * lead, this.cy + Math.sin(a + off) * r1 * lead);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = rgba('#ffffff', (1 - p) * 0.5);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(this.x + Math.cos(a) * r0, this.cy + Math.sin(a) * r0);
+    ctx.lineTo(this.x + Math.cos(a) * r1, this.cy + Math.sin(a) * r1);
+    ctx.stroke();
+    const tx = this.x + Math.cos(a) * r1, ty = this.cy + Math.sin(a) * r1;
+    glowDot(ctx, tx, ty, 14 * (1 - p), '#a8e04a', (1 - p) * 0.5);
+    ctx.restore();
+  }
+
   drawWeapon(ctx, x, y, f, dashing = false, swordDash = false) {
     const w = this.inventory.selectedWeapon();
     const sw = this.swing;
@@ -3677,6 +3810,37 @@ export class Player {
       return;
     }
 
+    if (w.weapon === 'trident') {
+      // A stab, so the arm drives straight down the aim and snaps back rather
+      // than sweeping. Both hands on the shaft, three stingers on the end.
+      const a = sw && sw.kind === 'thrust' ? sw.angle : snapAngle(this.aim, 8);
+      const p0 = sw && sw.kind === 'thrust' ? clamp(sw.t / STIDENT.thrustTime, 0, 1) : 1;
+      const push = p0 < 0.34 ? p0 / 0.34 : 1 - (p0 - 0.34) / 0.66;
+      const lunge = Math.pow(clamp(push, 0, 1), 0.6);
+      const reach = 6 + lunge * 8;
+      const gx = x + Math.cos(a) * reach, gy = shoulderY + Math.sin(a) * reach;
+      limb(ctx, x - f * 2, shoulderY + 3, a, 4 + lunge * 6, 3, Theme.skin);
+      limb(ctx, x, shoulderY, a, reach, 3, Theme.skin);
+      limb(ctx, gx - Math.cos(a) * 8, gy - Math.sin(a) * 8, a, 28, 2, '#6b4a30');
+      const hx2 = gx + Math.cos(a) * 20, hy2 = gy + Math.sin(a) * 20;
+      ctx.save();
+      ctx.translate(Math.round(hx2), Math.round(hy2));
+      ctx.rotate(a);
+      pxRect(ctx, -6, -1, 6, 2, Theme.steelDark);
+      pxRect(ctx, -1, -5, 2, 11, Theme.steelDark);     // the crossbar
+      // three prongs: the middle one reaches furthest
+      for (const [py, len] of [[-5, 5], [-1, 8], [3, 5]]) {
+        pxRect(ctx, 1, py, len, 2, '#5fd8a8');
+        pxRect(ctx, 1 + len, py, 2, 2, '#c6ffe4');
+      }
+      ctx.restore();
+      if (lunge > 0.2) {
+        glowDot(ctx, hx2 + Math.cos(a) * 9, hy2 + Math.sin(a) * 9,
+                9 + lunge * 12, '#5fd8a8', 0.25 + lunge * 0.4);
+      }
+      return;
+    }
+
     if (w.weapon === 'stingergun') {
       // a long thin dart rifle, held two-handed, with the magazine of darts
       // standing up behind the breech so you can count what is left
@@ -3801,6 +3965,7 @@ export class Player {
   // back along the stroke and fainter, so the swing leaves a real smear.
   drawSwingFx(ctx) {
     const sw = this.swing;
+    if (sw && sw.kind === 'thrust') return this.drawThrustFx(ctx, sw);
     if (!sw || sw.kind !== 'melee') return;
     const p = clamp(sw.t / (SWORD.swingTime * 1.4), 0, 1);
     if (p >= 1) return;

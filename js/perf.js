@@ -93,7 +93,9 @@ export function syncPerfOptions() {
 // resize the display when it does, because pixelCap moved.
 export function perfTick(dt, workMs = 0) {
   if (dt > 0) Perf.fps = Perf.fps ? Perf.fps + (1 / dt - Perf.fps) * 0.08 : 1 / dt;
-  if (!Perf.auto) return null;
+  // Two separate things say no: the player turning the whole feature off in
+  // settings, and the player having picked a tier by hand this session.
+  if (!Options.autoGraphics || !Perf.auto) return null;
   if (settle > 0) { settle -= dt; return null; }
 
   // a single long frame is a hitch, not a trend: only the window average counts

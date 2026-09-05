@@ -128,6 +128,11 @@ export const ITEMS = {
     desc: ['Ranged weapon. 3 darts, 1.4s reload.', '20 damage, and every dart poisons:',
            'it burns and drags at once.'],
   },
+  stident: {
+    id: 'stident', name: 'Stident', rarity: 'rare', stack: 1, weapon: 'trident',
+    desc: ['Melee. 5 block thrust, 37 damage.', 'Three of Poitnus\' own stingers',
+           'on a shaft. Two hits in three', 'leave poison behind for 2s.'],
+  },
   shardgun: {
     id: 'shardgun', name: 'Shardgun', rarity: 'rare', stack: 1, weapon: 'shardgun',
     desc: ['Ranged weapon. 1 shell, 1.5s reload.', 'Fires 5 shards over 5 blocks; they',
@@ -171,7 +176,7 @@ export const DROP_POOL = [
 ];
 // Things you only ever need one of.
 export const UNIQUE_ONCE = new Set(['graplinghook', 'nukerang', 'shardgun', 'twindagger',
-  'bookairplane', 'bookmissile', 'damagebooster', 'stingergun']);
+  'bookairplane', 'bookmissile', 'damagebooster', 'stingergun', 'stident']);
 const PERK_WEIGHTS = {
   lifecrystal: 3, fireyblade: 3, bloodstone: 3,
   lightningarrow: 2, wetslime: 2, aegis: 2,
@@ -515,6 +520,20 @@ export function drawItemIcon(ctx, id, x, y, s = 12, t = 0) {
       P(0, 5 + lift, 2, 4, '#7cc8ff');
       const glow = 0.5 + 0.5 * Math.sin(t * 7);
       P(1, 6 + lift, 2, 2, glow > 0.5 ? '#d8f2ff' : '#7cc8ff');
+      break;
+    }
+    case 'stident': {
+      // three barbed prongs on a shaft, the middle one longest
+      P(1, 6, 8, 2, '#6b4a30');
+      P(2, 5, 6, 1, '#8a6238');
+      P(8, 4, 1, 6, Theme.steelDark);
+      const wob = Math.sin(t * 3) * 0.4;
+      for (const py of [2.5, 5.5, 8.5]) {
+        P(9, py + wob * (py === 5.5 ? 0 : 1), py === 5.5 ? 3 : 2, 1, '#5fd8a8');
+        P(py === 5.5 ? 12 : 11, py + wob * (py === 5.5 ? 0 : 1), 1, 1, '#c6ffe4');
+      }
+      const glow = 0.5 + 0.5 * Math.sin(t * 6);
+      P(9, 5.5, 1, 1, glow > 0.5 ? '#eaffb0' : '#a8e04a');
       break;
     }
     case 'ironbar': {
