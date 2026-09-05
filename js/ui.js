@@ -26,6 +26,8 @@ export const UI = {
   dbgScroll: { items: 0, mobs: 0 },
   dbgRoom: 1,              // the room the debug menu's teleport is pointed at
   shaderScroll: 0,         // first visible row of the saved-shader list
+  shaderDrag: null,        // an in-progress drag of that list
+  pressedId: null,         // which button the pointer went down on
   fps: 0,
   tab: 'indicator',        // which settings tab is showing
 };
@@ -140,8 +142,16 @@ export function button(ctx, id, x, y, w, h, label, opts = {}) {
     drawText(ctx, '<', x + w - 9 - p + slide, y + (h - 7) / 2, Theme.uiAccent, 1);
     ctx.restore();
   }
-  const clicked = hot && Input.mouseDown.left;
-  if (clicked) Sfx.ui();
+  // Two ways to fire. By default a button acts the moment it is pressed,
+  // which is what every menu here has always done. `release` waits for the
+  // finger to come up on the same button it went down on, so a list can tell
+  // a tap from the start of a drag - and `suppress` is how the list says the
+  // press turned into one.
+  if (hot && Input.mouseDown.left) UI.pressedId = id;
+  const clicked = opts.release
+    ? (hot && Input.mouseUp.left && UI.pressedId === id && !opts.suppress)
+    : (hot && Input.mouseDown.left && !opts.suppress);
+  if (clicked) { UI.pressedId = null; Sfx.ui(); }
   return clicked;
 }
 

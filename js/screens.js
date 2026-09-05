@@ -427,18 +427,43 @@ function drawShaderTab(ctx, game, t) {
              x0, ry0 + 28, rgba(Theme.uiDim, 0.8), 1);
   }
 
-  // a wheel over the list, exactly like the forge and the debug grids
+  // Wheel or finger. A press inside the rows starts a candidate drag; it only
+  // becomes a scroll once the finger has actually moved, so a tap still reads
+  // as a tap. That is also why the row buttons act on release here and not on
+  // press: a drag that happens to start on ON must not toggle anything.
+  const listH = SHADER_ROWS * rh;
   const maxOff = Math.max(0, list.length - SHADER_ROWS);
-  if (maxOff > 0 && inside(x0, ry0, w, SHADER_ROWS * rh) && Input.wheel !== 0) {
+  const onList = inside(x0, ry0, w, listH);
+  if (maxOff > 0 && onList && Input.wheel !== 0) {
     UI.shaderScroll = clamp((UI.shaderScroll ?? 0) + Math.sign(Input.wheel), 0, maxOff);
     Sfx.ui();
   }
+  if (maxOff > 0 && onList && Input.mouseDown.left) {
+    UI.shaderDrag = { y0: Input.mouse.y, off0: UI.shaderScroll ?? 0, moved: 0 };
+  }
+  const d = UI.shaderDrag;
+  if (d && Input.mouse.left) {
+    const dy = Input.mouse.y - d.y0;
+    d.moved = Math.max(d.moved, Math.abs(dy));
+    if (d.moved > 3) UI.shaderScroll = clamp(d.off0 - dy / rh, 0, maxOff);
+  }
+  const dragging = !!d && d.moved > 3;
+  if (d && !Input.mouse.left) UI.shaderDrag = null;
+
   const off = clamp(UI.shaderScroll ?? 0, 0, maxOff);
   UI.shaderScroll = off;
 
-  for (let i = off; i < Math.min(list.length, off + SHADER_ROWS); i++) {
+  // Rows scroll by the pixel rather than by the row, so a finger drags the
+  // list itself and not a stepper. The window is clipped, so the part-row at
+  // each end is cut off cleanly.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x0, ry0, w, listH);
+  ctx.clip();
+  const first = Math.max(0, Math.floor(off));
+  for (let i = first; i < Math.min(list.length, first + SHADER_ROWS + 1); i++) {
     const e = list[i];
-    const y = ry0 + (i - off) * rh;
+    const y = Math.round(ry0 + (i - off) * rh);
     const on = game.shaderId === e.id;
     pxRect(ctx, x0, y, w, rh - 2, rgba(on ? Theme.uiAccent : '#000000', on ? 0.16 : 0.35));
     if (on) pxRect(ctx, x0, y, 2, rh - 2, Theme.uiAccent);
@@ -447,14 +472,26 @@ function drawShaderTab(ctx, game, t) {
     drawText(ctx, kb, x0 + 268, y + 4, rgba(Theme.uiDim, 0.9), 1, 'right');
     // which of the three stores it landed in, so a full one is not a mystery
     drawText(ctx, `S${(e.store ?? 0) + 1}`, x0 + 292, y + 4, rgba(Theme.uiDim, 0.7), 1, 'right');
-    if (button(ctx, 'shon' + e.id, x0 + w - 74, y, 46, 13, on ? 'ON' : 'OFF', { selected: on })) {
+    if (button(ctx, 'shon' + e.id, x0 + w - 74, y, 46, 13, on ? 'ON' : 'OFF',
+               { selected: on, release: true, suppress: dragging })) {
       game.toggleSavedShader(e.id);
     }
-    if (button(ctx, 'shdel' + e.id, x0 + w - 24, y, 24, 13, 'X')) game.deleteSavedShader(e.id);
+    if (button(ctx, 'shdel' + e.id, x0 + w - 24, y, 24, 13, 'X',
+               { release: true, suppress: dragging })) {
+      game.deleteSavedShader(e.id);
+    }
   }
+  ctx.restore();
+
   if (maxOff > 0) {
-    drawText(ctx, `${off + 1}-${Math.min(list.length, off + SHADER_ROWS)} OF ${list.length}  WHEEL TO SCROLL`,
-             x0 + w, ry0 + SHADER_ROWS * rh + 2, rgba(Theme.uiDim, 0.8), 1, 'right');
+    // a bar on the edge, so it is obvious the list moves before anyone tries
+    const track = listH - 2;
+    const knob = Math.max(10, Math.round(track * (SHADER_ROWS / list.length)));
+    const ky = Math.round(ry0 + 1 + (track - knob) * (off / maxOff));
+    pxRect(ctx, x0 + w + 3, ry0 + 1, 2, track, rgba('#000000', 0.6));
+    pxRect(ctx, x0 + w + 3, ky, 2, knob, dragging ? Theme.uiAccent : rgba(Theme.uiAccent, 0.75));
+    drawText(ctx, `${list.length} SAVED  DRAG OR WHEEL TO SCROLL`,
+             x0 + w, ry0 + listH + 2, rgba(Theme.uiDim, 0.8), 1, 'right');
   }
 
   // --- what the shelf is holding
