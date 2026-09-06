@@ -14,6 +14,7 @@ export const CODEX_VIEW = {
   ceiling: [{ zoom: 0.44, cx: 240, cy: 28 }],
   alphads: [{ zoom: 0.9, cx: 240, cy: 88 }],
   poitnus: [{ zoom: 0.62, cx: 262, cy: 76 }],
+  crabomet: [{ zoom: 0.74, cx: 240, cy: 214 }],
 };
 
 export function codexView(id, phase) {
@@ -21,7 +22,7 @@ export function codexView(id, phase) {
   return v[Math.min(phase - 1, v.length - 1)];
 }
 
-export const CODEX_ORDER = ['golem', 'bigdude', 'ceiling', 'poitnus', 'alphads'];
+export const CODEX_ORDER = ['golem', 'bigdude', 'crabomet', 'ceiling', 'poitnus', 'alphads'];
 
 // Everything the pages say that is not already in BOSS_TYPES. Damage lines are
 // worked out from the boss's own numbers rather than typed twice, so tuning a
@@ -50,6 +51,17 @@ export const CODEX = {
     ],
     drops: ['1-2 Soul', 'Paper Missile Tutor, once', 'A choice of two perks'],
     phases: ['Twenty blocks of worm that', 'only surfaces to strike.'],
+  },
+  crabomet: {
+    where: 'ROOM 11-13',
+    spawn: ['A comet falls in a room after', 'Big Dude. The next room holds', 'whatever came down with it.'],
+    damage: (d, k) => [
+      ['CLAWS', d.claw.damage * k],
+      ['COMET', d.comet.damage * k],
+      ['ROLL', d.roll.damage * k],
+    ],
+    drops: ['1-2 Soul', 'A choice of two perks'],
+    phases: ['Claw, claw, then it leaves the', 'screen and lands on you. Then it', 'folds up and rolls, faster and', 'faster.'],
   },
   ceiling: {
     where: `ROOM ${CEILING_ROOM}`,

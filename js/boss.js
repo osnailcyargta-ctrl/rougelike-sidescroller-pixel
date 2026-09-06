@@ -11,6 +11,7 @@ import { WormBoss } from './worm.js';
 import { AlphadsBoss } from './alphads.js';
 import { CeilingBoss } from './ceiling.js';
 import { PoitnusBoss } from './poitnus.js';
+import { CrabometBoss } from './crabomet.js';
 
 // How far a ray from (ox, oy) travels before it leaves the arena.
 function rayLength(ox, oy, dx, dy) {
@@ -916,7 +917,7 @@ export function makeBossPreview(game, id, phase = 1) {
 
 // Where each one turns up, which is also the order the codex lists them in.
 export const CODEX_ROOM = {
-  golem: 5, bigdude: 10, ceiling: CEILING_ROOM, alphads: FINAL_ROOM, poitnus: 0,
+  golem: 5, bigdude: 10, ceiling: CEILING_ROOM, alphads: FINAL_ROOM, poitnus: 0, crabomet: 12,
 };
 
 // Paint a preview at whatever transform the caller has set up. The Golem has
@@ -946,5 +947,6 @@ export function makeBoss(game, roomIndex, which = null) {
   if (id === 'alphads') return new AlphadsBoss(game, roomIndex);
   if (id === 'ceiling') return new CeilingBoss(game, roomIndex);
   if (id === 'poitnus') return new PoitnusBoss(game, roomIndex);
+  if (id === 'crabomet') return new CrabometBoss(game, roomIndex);
   return new GolemBoss(game, roomIndex);
 }

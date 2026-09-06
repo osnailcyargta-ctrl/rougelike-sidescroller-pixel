@@ -19,10 +19,11 @@ const window01 = (t, a, b) => clamp((t - a) / Math.max(0.0001, b - a), 0, 1);
 
 const SUBTITLE = {
   golem: 'ANCHOR OF THE DEEP VAULT',
-  bigdude: 'TWENTY BLOCKS OF APPETITE',
+  bigdude: 'THE BIGGEST DUDE I EVER SEEN',
   alphads: 'THE AETHER GOD',
   ceiling: 'THE ROOF OF MEAT',
   poitnus: 'THE ANCIENT STINGER',
+  crabomet: 'THE THING THAT FELL',
 };
 
 export class Cutscene {

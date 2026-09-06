@@ -345,6 +345,11 @@ export const ENEMY_TYPES = {
     flying: true, boss: true, slamImmune: true,
     poisonSeconds: 1.0,          // touching it is an attack too
   },
+  crabometBody: {
+    id: 'crabometBody', name: 'Crab-omet', hp: 1000, speed: 0, damage: 20,
+    w: 58, h: 34, attackCooldown: 1, attackRange: 30,
+    boss: true, slamImmune: true,
+  },
   // The clutch it lays, and the shell you set down yourself. Both are eggs;
   // only one of them can be hurt.
   giantstingeregg: {
@@ -481,9 +486,43 @@ export const BOSS_TYPES = {
     poisonSeconds: 1.0,
   },
 
+  // It fell out of the sky and it has not stopped burning. Half crab, half
+  // comet: it stabs with both claws, throws itself off the top of the screen
+  // to come back down on your head, and folds into a burning ball to roll you
+  // flat. Not on the schedule - it turns up in a room the sky warned you about.
+  crabomet: {
+    id: 'crabomet', name: 'Crab-omet', short: 'Crab-omet',
+    title: 'THE THING THAT FELL', kind: 'comet',
+    hp: 1000,
+    w: 58, h: 34,
+    // Touching it costs what touching any body costs; the numbers that matter
+    // are the three moves below.
+    walkSpeed: 78, standOff: 34,      // how close it wants to be to use the claws
+    // Both claws, one after the other, driven straight through you.
+    claw: { damage: 26, windUp: 0.42, reach: 46, stab: 0.12, hold: 0.1, recover: 0.26 },
+    // Off the top of the screen, then straight back down where you stand.
+    comet: {
+      windUp: 0.4, riseSpeed: 700, aloft: 0.45, fallSpeed: 1450,
+      damage: 34, radius: 74, aim: 0.12,   // how late it locks on to you
+    },
+    // Curls up over half a second, then rolls: slow at first, then very fast.
+    roll: {
+      curl: 0.55, speed0: 46, speed1: 430, accel: 1.9, time: 3.4,
+      damage: 24, uncurl: 0.45, bounces: 3,
+    },
+    // claw, wait 1s, claw, wait 0.3s, comet, wait 0.6s, roll, and round again
+    steps: [
+      { move: 'claw', wait: 1.0 },
+      { move: 'claw', wait: 0.3 },
+      { move: 'comet', wait: 0.6 },
+      { move: 'roll', wait: 1.0 },
+    ],
+  },
+
   // A twenty-block worm that lives under the floor and only surfaces to strike.
   bigdude: {
-    id: 'bigdude', name: 'Big Dude', short: 'Big Dude', kind: 'worm',
+    id: 'bigdude', name: 'Big Dude', short: 'Big Dude',
+    title: 'THE BIGGEST DUDE I EVER SEEN', kind: 'worm',
     hp: 600,
     segments: 20, segSpacing: 16,   // 20 blocks of body
     headR: 15, bodyR: 11, tailR: 4,
@@ -494,6 +533,16 @@ export const BOSS_TYPES = {
     buriedTime: 3.0, waitTime: 2.0,
     spitCount: 20, spitDamage: 12, spitSpeed: 205, spitSpread: 1.25,
   },
+};
+
+// The comet that arrives before the thing inside it. After Big Dude and before
+// room 13, each room rolls once for a sky nobody likes the look of; if it
+// comes up, the NEXT room has a third wave with something in it.
+export const COMET_OMEN = {
+  chance: 0.10,
+  afterBoss: 'bigdude',    // nothing falls until this one is dead
+  beforeRoom: 13,          // and nothing falls this late
+  message: 'A STRANGE COMET HAS FALLEN',
 };
 
 export const PERK = {
