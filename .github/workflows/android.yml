@@ -78,16 +78,16 @@ jobs:
           set -euo pipefail
           mkdir -p out
           cp android/app/build/outputs/apk/debug/app-debug.apk \
-             "out/aether-descent-$VERSION_NAME-debug.apk"
+             "out/ascent-to-the-aether-$VERSION_NAME-debug.apk"
           cp android/app/build/outputs/apk/release/app-release.apk \
-             "out/aether-descent-$VERSION_NAME.apk"
+             "out/ascent-to-the-aether-$VERSION_NAME.apk"
           ls -lh out
 
       # Proof the thing actually contains a playable game, not an empty shell.
       - name: Check the bundle made it in
         run: |
           set -euo pipefail
-          APK="out/aether-descent-$VERSION_NAME.apk"
+          APK="out/ascent-to-the-aether-$VERSION_NAME.apk"
           unzip -l "$APK" > /tmp/apk.txt
           for f in assets/www/index.html assets/www/js/game.js assets/www/js/poitnus.js assets/www/css/style.css; do
             grep -q "$f" /tmp/apk.txt || { echo "missing from the APK: $f"; exit 1; }
@@ -108,8 +108,22 @@ jobs:
             exit 1
           fi
 
+      # A build signed by anything but the committed key cannot install over
+      # the last one, which would cost every player their save. Check it.
+      - name: Check it is signed with the key in the repo
+        run: |
+          set -euo pipefail
+          APK="out/ascent-to-the-aether-$VERSION_NAME.apk"
+          FP=$(keytool -printcert -jarfile "$APK" | grep -m1 'SHA256:' | tr -d ' ')
+          WANT=$(keytool -list -v -keystore android/keys/ascent.jks \
+                   -storepass ascent-to-the-aether -alias ascent \
+                   | grep -m1 'SHA256:' | tr -d ' ')
+          echo "apk  $FP"
+          echo "key  $WANT"
+          [ "$FP" = "$WANT" ] || { echo "signed with the wrong key"; exit 1; }
+
       - uses: actions/upload-artifact@v4
         with:
-          name: aether-descent-apk-${{ env.VERSION_NAME }}
+          name: ascent-to-the-aether-apk-${{ env.VERSION_NAME }}
           path: out/*.apk
           if-no-files-found: error

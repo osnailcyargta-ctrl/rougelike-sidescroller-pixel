@@ -1,4 +1,4 @@
-# Aether Descent, packaged
+# Ascent to the Aether, packaged
 
 A WebView around the game, with the game itself copied inside the APK. It
 plays in flight mode from the moment it is installed; the network is only ever
@@ -19,7 +19,7 @@ loading screen says so instead of handing over a dead overlay.
 
 ## Opening a .shdr with the game
 
-Tapping a `.shdr` in a file manager, or sharing one to Aether Descent, hands
+Tapping a `.shdr` in a file manager, or sharing one to Ascent to the Aether, hands
 the pack straight to the game: it goes on the SHADERS shelf in settings and is
 switched on. Arriving mid-run does not interrupt anything.
 
@@ -34,6 +34,29 @@ arrives at `onNewIntent` rather than starting the game again. The file is read
 off the main thread, capped at 512KB, and handed to `window.__aetherOpenShader`
 once that door exists - opening a pack from a cold start gets there long before
 the page has booted, so it waits rather than firing into nothing.
+
+## Installing over the last build
+
+Every build is signed with the key committed at `android/keys/ascent.jks`, so
+a new APK installs straight over the one already on the phone: settings, saved
+shaders and the Boss Rush unlock all survive. CI checks the signature against
+that key and fails the build if it does not match.
+
+Before this, both build types were signed with Gradle's own debug key - which
+is generated per machine, and a CI runner is a new machine every run. Every
+build came out with a different signature, Android refused the update, and the
+only way in was to uninstall first, taking the save with it.
+
+**The build that introduced this is the last one that needs an uninstall.** It
+cannot match a key that was thrown away with the runner that made it. After
+that, updates go straight over the top.
+
+The key is self-signed and public, so it proves nothing about who built an
+APK - anyone with this repository can sign something Android will take as an
+update to this app. That is the trade for not wiping saves, and it is fine for
+a game passed around as a file. To publish anywhere real, point `storeFile` at
+a key that is not in the repo (`-PascentKeystore=...`) and the build works
+unchanged.
 
 ## Updating
 

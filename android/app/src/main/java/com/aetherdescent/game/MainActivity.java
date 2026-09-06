@@ -311,10 +311,10 @@ public class MainActivity extends Activity {
     col.setClickable(true);
 
     TextView title = new TextView(this);
-    title.setText("AETHER DESCENT");
+    title.setText("ASCENT TO THE AETHER");
     title.setTextColor(0xFFFFB43C);
     title.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
-    title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
+    title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
     title.setLetterSpacing(0.25f);
     title.setGravity(Gravity.CENTER);
     col.addView(title);
