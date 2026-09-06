@@ -93,8 +93,8 @@ function drawLogoMark(ctx, cx, cy, t, scale = 1) {
 }
 
 function titleGlyphs(ctx, t) {
-  const title = 'AETHER';
-  const sub = 'DESCENT';
+  const title = 'ASCENT';
+  const sub = 'TO THE AETHER';
   const s = 4;
   const w = textWidth(title, s);
   const x0 = (VIEW_W - w) / 2;
@@ -446,7 +446,7 @@ function drawShaderTab(ctx, game, t) {
     drawText(ctx, 'NOTHING SAVED YET.', x0, ry0 + 6, Theme.uiDim, 1);
     drawText(ctx, 'UPLOAD A .SHDR, DROP ONE ON THE WINDOW, OR OPEN ONE',
              x0, ry0 + 18, rgba(Theme.uiDim, 0.8), 1);
-    drawText(ctx, 'WITH AETHER DESCENT FROM YOUR FILES.',
+    drawText(ctx, 'WITH ASCENT TO THE AETHER FROM YOUR FILES.',
              x0, ry0 + 28, rgba(Theme.uiDim, 0.8), 1);
   }
 

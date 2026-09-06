@@ -1,4 +1,4 @@
-# Aether Descent
+# Ascent to the Aether
 
 A pixel-art **roguelike sidescroller** that runs entirely in the browser — no
 build step, no dependencies, no asset downloads. Every sprite, particle and
