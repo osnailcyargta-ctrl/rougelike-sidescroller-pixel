@@ -90,6 +90,7 @@ export function layoutRoom(room) {
     p.off = false;
     p.phase = i * 1.7;
     p.motion = 'none';
+    p.hangFrom = null;
     p.style = ch.platforms;
   }
   const left = PLATFORMS.find((p) => p.tag === 'left');
@@ -111,6 +112,7 @@ export function layoutRoom(room) {
     centre.motion = 'swing';
     top.motion = 'swing';
     centre.phase = top.phase + 1.15;      // the delay you can see
+    centre.hangFrom = top;                // and its chains run up to that one
     if (room === DIRT_ROOM) {
       // the worm's room: bare floor, nothing overhead in the middle
       centre.off = true;
@@ -139,8 +141,8 @@ const MOTION = {
 export function updatePlatforms(dt, t, frozen) {
   for (const p of PLATFORMS) {
     const m = MOTION[p.motion];
-    if (p.off || !m) { p.dx = 0; continue; }
-    const before = p.x;
+    if (p.off || !m) { p.dx = 0; p.dy = 0; continue; }
+    const beforeX = p.x, beforeY = p.y;
     const k = frozen ? p.frozenT ?? t : t;
     p.frozenT = k;
     const wave = Math.sin(k * TAU * m.speed + p.phase);
@@ -150,7 +152,11 @@ export function updatePlatforms(dt, t, frozen) {
     } else {
       p.y = p.homeY + wave * m.amp;
     }
-    p.dx = frozen ? 0 : p.x - before;
+    // How far it moved this frame. Anything standing on it, stuck in it or
+    // hanging off it is moved by exactly this much - a platform that rises out
+    // from under its passengers is a platform nobody can use.
+    p.dx = frozen ? 0 : p.x - beforeX;
+    p.dy = frozen ? 0 : p.y - beforeY;
   }
 }
 
@@ -241,6 +247,10 @@ function bakeField(ctx, room) {
   // a warm band of haze where the trees meet the ground
   ctx.fillStyle = grad(ctx, [[0, rgba(P.haze, 0)], [1, rgba(P.haze, 0.35)]], GROUND_Y - 40, GROUND_Y);
   ctx.fillRect(0, GROUND_Y - 40, VIEW_W, 40);
+
+  // The last room of the field ends against the castle, and the castle is
+  // standing there from the first wave - shut, which is the point of it.
+  if (room === CHAPTERS[0].to) drawFortress(ctx, VIEW_W - 34, GROUND_Y, 0);
 }
 
 function cloud(ctx, x, y, s, col) {
@@ -633,17 +643,24 @@ function platformHill(ctx, p, t) {
 function platformChain(ctx, p, t) {
   const P = PAL.castle;
   const x = Math.round(p.x), y = Math.round(p.y), w = Math.round(p.w), h = Math.round(p.h);
+  // What it hangs from. The low middle slab hangs off the one above it rather
+  // than off the ceiling, which is why the two of them swing together with the
+  // lower one always a beat behind.
+  const above = p.hangFrom && !p.hangFrom.off ? p.hangFrom : null;
+  const topY = above ? above.y + above.h : 0;
+  const anchorBase = above ? above.x : p.homeX;
   // the chains, drawn first so the slab covers where they meet it
   for (const ox of [6, w - 8]) {
     const cx = x + ox;
-    const anchorX = p.homeX + ox;
-    for (let yy = 0; yy < y; yy += 5) {
-      const k = yy / Math.max(1, y);
+    const anchorX = anchorBase + ox;
+    for (let yy = topY; yy < y; yy += 5) {
+      const k = (yy - topY) / Math.max(1, y - topY);
       const lx = Math.round(lerp(anchorX, cx, k));
       pxRect(ctx, lx, yy, 2, 3, P.chain);
       pxRect(ctx, lx, yy, 1, 1, P.chainLit);
     }
     pxRect(ctx, cx - 1, y - 3, 4, 4, P.chainLit);
+    if (above) pxRect(ctx, Math.round(anchorX) - 1, topY - 1, 4, 3, P.chainLit);
   }
   // the slab
   pxSolid(ctx, x, y, w, h, P.stone, { ink: P.ink, light: P.stoneLit, dark: P.stoneDark });
@@ -719,7 +736,8 @@ export function reflectAmount(room) { return chapterFor(room).reflect; }
 // of light. The interaction is the same everywhere; only the shape is not.
 
 export function exitTint(kind) {
-  if (kind === 'gate') return PAL.field.sunGlow;
+  if (kind === 'sign' || kind === 'gate') return PAL.field.sunGlow;
+  if (kind === 'portal') return PAL.aether.glow;
   if (kind === 'door') return PAL.castle.torch;
   if (kind === 'rift') return PAL.hell.lavaHot;
   return PAL.aether.glow;
@@ -728,9 +746,11 @@ export function exitTint(kind) {
 export function drawExit(ctx, e) {
   const k = e.open;
   if (k <= 0.01) return;
+  if (e.kind === 'sign') return exitSign(ctx, e, k);
   if (e.kind === 'gate') return exitGate(ctx, e, k);
   if (e.kind === 'door') return exitDoor(ctx, e, k);
   if (e.kind === 'rift') return exitRift(ctx, e, k);
+  if (e.kind === 'portal') return exitPortal(ctx, e, k);
   return exitStair(ctx, e, k);
 }
 
@@ -863,11 +883,14 @@ function exitStair(ctx, e, k) {
   ctx.restore();
 }
 
-// The fortress at the end of the field: a wall of grey stone with a gate in
-// it, and the gate opens when the field is yours.
-function exitFortress(ctx, e, k) {
+function exitFortress(ctx, e, k) { drawFortress(ctx, e.x, e.y, k); }
+
+// The fortress at the end of the field: a plain wall of grey stone with a gate
+// in it. `k` is how far open the gate is - 0 while the field is still yours to
+// win, 1 once it is.
+export function drawFortress(ctx, ex, ey, k) {
   const C = PAL.castle;
-  const x = Math.round(e.x), base = Math.round(e.y);
+  const x = Math.round(ex), base = Math.round(ey);
   const wallX = x - 66, wallW = VIEW_W - wallX;
   const wallTop = 26;
   // the wall, running off the right of the frame
@@ -912,13 +935,89 @@ function exitFortress(ctx, e, k) {
   const pcY = gy + Math.round((1 - k) * 26);
   for (let i = 0; i <= gw; i += 7) pxRect(ctx, gx + i, gy - 10, 2, pcY - gy + 10, C.chain);
   pxRect(ctx, gx - 2, pcY, gw + 4, 2, C.chainLit);
-  // torches either side
-  for (const ox of [-gw / 2 - 12, gw / 2 + 10]) {
-    const fx = x + ox;
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    glowDot(ctx, fx, base - 46, 26, C.torch, 0.3);
-    ctx.restore();
-    pxRect(ctx, fx - 1, base - 52, 3, 10, C.torchCore);
+}
+
+// Out in the field there is no door. A post pushes up out of the turf with an
+// arrow on it, the edge of the map lets go, and you walk.
+function exitSign(ctx, e, k) {
+  const P = PAL.field;
+  const rise = 1 - Math.pow(1 - k, 3);
+  const base = Math.round(e.y);
+  const x = Math.round(e.x);
+  const h = Math.round(40 * rise);
+  if (h < 4) return;
+  // the earth it came up through
+  pxRect(ctx, x - 7, base - 2, 14, 3, P.dirtDark);
+  pxRect(ctx, x - 5, base - 3, 10, 1, P.dirtLit);
+  // the post
+  pxSolid(ctx, x - 2, base - h, 4, h, P.trunk, { ink: P.ink, light: P.trunkDark, dark: null });
+  // the board, pointed to the right
+  const by = base - h - 2;
+  const bw = 34, bh = 14;
+  pxSolid(ctx, x - 12, by, bw, bh, '#8a6a42', { ink: P.ink, light: '#ad8b5c', dark: null });
+  for (let i = 0; i < 5; i++) {
+    pxRect(ctx, x - 12 + bw + i, by + 1 + i, 1, bh - 2 - i * 2, '#8a6a42');
+    pxRect(ctx, x - 12 + bw + i, by + 1 + i, 1, 1, P.ink);
+    pxRect(ctx, x - 12 + bw + i, by + bh - 2 - i, 1, 1, P.ink);
   }
+  // the arrow burned into it
+  const ay = by + bh / 2;
+  pxRect(ctx, x - 7, ay - 1, 16, 2, '#3d2a18');
+  for (let i = 0; i < 5; i++) pxRect(ctx, x + 9 - i, ay - 1 - i, 1, 2 + i * 2, '#3d2a18');
+  // and a nudge of light pulling right
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const pulse = (Math.sin(e.t * 3) * 0.5 + 0.5);
+  glowDot(ctx, x + 26 + pulse * 10, ay, 14, P.sunGlow, 0.25 * k);
+  ctx.restore();
+}
+
+// The old way through: a hole in the air with something turning inside it.
+function exitPortal(ctx, e, k) {
+  const P = PAL.aether;
+  const w = 22 * k, h = 38 * k;
+  const cy = e.y - 22;
+  const breathe = 1 + Math.sin(e.t * 2.2) * 0.05;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const pool = ctx.createRadialGradient(e.x, e.y, 0, e.x, e.y, 44 * k);
+  pool.addColorStop(0, rgba(P.glow, 0.3 * k));
+  pool.addColorStop(1, rgba(P.glow, 0));
+  ctx.fillStyle = pool;
+  ctx.fillRect(e.x - 48, e.y - 26, 96, 34);
+  for (let i = 5; i >= 0; i--) {
+    ctx.fillStyle = rgba(i % 2 ? P.glow : P.glowSoft, 0.10 + 0.05 * Math.sin(e.t * 3 + i));
+    ctx.beginPath();
+    ctx.ellipse(e.x, cy, (w / 2) * (1 + i * 0.13) * breathe, (h / 2) * (1 + i * 0.13) * breathe, 0, 0, TAU);
+    ctx.fill();
+  }
+  ctx.restore();
+  // the mouth, with arms turning in it
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(e.x, cy, (w / 2) * breathe, (h / 2) * breathe, 0, 0, TAU);
+  ctx.clip();
+  ctx.fillStyle = rgba('#0b1020', 0.92);
+  ctx.fillRect(e.x - w, cy - h, w * 2, h * 2);
+  ctx.globalCompositeOperation = 'lighter';
+  for (let arm = 0; arm < 3; arm++) {
+    ctx.strokeStyle = rgba(arm % 2 ? P.glow : '#ffffff', 0.3);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i <= 22; i++) {
+      const u = i / 22;
+      const ang = e.t * 1.5 + arm * (TAU / 3) + u * 5.2;
+      const rr = u * (w / 2);
+      const px = e.x + Math.cos(ang) * rr;
+      const py = cy + Math.sin(ang) * rr * (h / w);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.strokeStyle = rgba(P.glow, 0.9);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.ellipse(e.x, cy, (w / 2) * breathe, (h / 2) * breathe, 0, 0, TAU);
+  ctx.stroke();
 }

@@ -16,7 +16,8 @@ import {
   HITBOX,
   SEEDED_THROUGH_ROOM, SOUL_DART, STIDENT, BOSS_RUSH,
 } from './config.js';
-import { Player, Enemy, Projectile, SHARD_TINT, INK, doodleShape, doodleLine } from './entities.js';
+import { Player, Enemy, Projectile, SHARD_TINT, INK, doodleShape, doodleLine,
+  openRightWall, closeRightWall } from './entities.js';
 import { makeBoss, makeBossPreview } from './boss.js';
 import { Cutscene } from './cutscene.js';
 import {
@@ -206,8 +207,8 @@ export class Game {
     // the Aether is nearly white and the Inferno nearly black; the same
     // bloom cannot serve both, so the chapter sets the exposure
     const inRoom = this.screen === 'playing' || this.screen === 'paused';
-    this.postfx.bloomScale = inRoom ? bloomFor(this.roomIndex) : 1;
-    this.postfx.chromaScale = inRoom ? chromaFor(this.roomIndex) : 1;
+    this.postfx.bloomScale = inRoom ? bloomFor(this.envRoom) : 1;
+    this.postfx.chromaScale = inRoom ? chromaFor(this.envRoom) : 1;
     if (!raw) this.postfx.render(dt);
   }
 
@@ -635,6 +636,13 @@ export class Game {
     return streamFor(`${tag}:${index}`);
   }
 
+  // The room whose walls we are in. A rush has five rooms of its own, but it
+  // borrows the place each of those fights belongs to, so everything that
+  // paints or lays out a room asks for this rather than for the room number.
+  get envRoom() {
+    return this.mode === 'bossrush' ? (BOSS_RUSH.env[this.roomIndex] ?? 5) : this.roomIndex;
+  }
+
   isBossRoom(index = this.roomIndex) {
     return this.mode === 'bossrush' ? true : index % BOSS_ROOM_INTERVAL === 0;
   }
@@ -653,6 +661,7 @@ export class Game {
       this.toast('BOSS RUSH UNLOCKED');
     }
     this.roomCleared = false;
+    closeRightWall();          // every room starts closed in again
     this.portal = null;
     this.boss = null;
     this.cutscene.active = false;
@@ -663,15 +672,16 @@ export class Game {
     this.shields.length = 0;
     // the chapter decides what this room is made of, and what moves in it
     const wasChapter = this.chapter;
-    layoutRoom(index);
-    this.chapter = chapterFor(index).id;
+    const env = this.mode === 'bossrush' ? (BOSS_RUSH.env[index] ?? 5) : index;
+    layoutRoom(env);
+    this.chapter = chapterFor(env).id;
     if (this.mode !== 'bossrush' && this.chapter !== wasChapter) {
-      this.showChapterCard(chapterFor(index));
+      this.showChapterCard(chapterFor(env));
     }
     // every second room comes with a forge, riding whatever hangs overhead -
     // but only in a chapter that has forges at all, and never in the worm's
     // room, which has nothing over the middle of it
-    const ch = chapterFor(index);
+    const ch = chapterFor(env);
     const drift = PLATFORMS.find((pl) => pl.tag === 'drift' && !pl.off);
     this.anvil = (ch.anvil && index % ANVIL.everyRooms === 0 && drift) ? new Anvil(drift) : null;
     this.forge = null;
@@ -1944,6 +1954,14 @@ export class Game {
     for (const pk of this.pickups) pk.update(dt);
     if (this.anvil) this.anvil.update(dt, this.player);
     if (this.portal) this.portal.update(dt);
+    // in the field there is nothing to click: past the edge of the map is the
+    // next room
+    if (this.portal && (this.portal.kind === 'sign' || this.portal.kind === 'gate') && this.roomCleared &&
+        this.player && this.player.x > VIEW_W + 10) {
+      this.startRoom(this.roomIndex + 1);
+      this.player.x = 14;
+      return;
+    }
 
     for (let i = this.shockwaves.length - 1; i >= 0; i--) {
       const s = this.shockwaves[i];
@@ -1962,7 +1980,23 @@ export class Game {
     for (const e of [this.player, ...this.enemies]) {
       if (!e || e.dead) continue;
       const p = e.platform;
-      if (p && p.dx) e.x = clamp(e.x + p.dx, e.w / 2, VIEW_W - e.w / 2);
+      if (!p || p.off) continue;
+      if (p.dx) e.x = clamp(e.x + p.dx, e.w / 2, VIEW_W - e.w / 2);
+      // Riding it upward matters more than riding it sideways: the landing
+      // test only catches a body falling onto a platform, so a rising one
+      // would climb out from under its passengers and drop them.
+      if (p.dy) {
+        e.y = p.y;
+        if (p.dy < 0 && e.vy > 0) e.vy = 0;
+        e.onGround = true;
+      }
+    }
+    // and anything the room put down on a platform goes with it
+    for (const pk of this.pickups) {
+      const p = pk.platform;
+      if (!p || p.off || pk.falling) continue;
+      if (p.dx) pk.x = clamp(pk.x + p.dx, 6, VIEW_W - 6);
+      if (p.dy) pk.y = p.y;
     }
     for (const pr of this.projectiles) {
       if (pr.dead || !pr.stuck || !pr.stuckTo || !pr.stuckTo.dx) continue;
@@ -2063,10 +2097,18 @@ export class Game {
 
   finishClearRoom() {
     // the way out is whatever this chapter uses for a way out
-    const ch = chapterFor(this.roomIndex);
-    this.portal = new Portal(VIEW_W - 34, GROUND_Y, ch.exit);
+    const ch = chapterFor(this.envRoom);
+    // The room that hands you to the Inferno does it through a portal, not
+    // through another castle door: you are not walking there.
+    const kind = this.roomIndex === ch.to && ch.id === 'castle' ? 'portal'
+      : this.roomIndex === ch.to && ch.id === 'field' ? 'gate'
+      : ch.exit;
+    this.portal = new Portal(VIEW_W - 34, GROUND_Y, kind);
     // the last room of a chapter ends at something bigger than a doorway
     this.portal.grand = this.roomIndex === ch.to;
+    // out in the field the map itself lets go, and you walk off the side
+    // the field lets you walk out either way: past the sign, or in at the gate
+    if (kind === 'sign' || kind === 'gate') openRightWall(this.player);
     Camera.add(4);
     Sfx.pickup();
     // the last room of the field ends at the fortress, and the fortress opens
@@ -2205,9 +2247,9 @@ export class Game {
 
     ctx.save();
     Camera.apply(ctx);
-    drawBackground(ctx, this.time, this.roomIndex);
-    drawLightShafts(ctx, this.time, this.roomIndex);
-    drawArena(ctx, this.time, this.roomIndex);
+    drawBackground(ctx, this.time, this.envRoom);
+    drawLightShafts(ctx, this.time, this.envRoom);
+    drawArena(ctx, this.time, this.envRoom);
     if (!this.roomCleared) drawSpawnPads(ctx, this.time, activeSpawnPads(this.waveIndex));
 
     // slam shockwaves
@@ -2282,7 +2324,7 @@ export class Game {
   // whole thing switches off with the effects budget.
 
   drawFloorReflections(ctx) {
-    const amount = reflectAmount(this.roomIndex);
+    const amount = reflectAmount(this.envRoom);
     if (!Perf.reflections || amount <= 0.01) return;
     const cast = [];
     if (this.player && !this.player.dead) cast.push(this.player);
@@ -2312,8 +2354,8 @@ export class Game {
     // and the sheen over the top of it, so it reads as a surface and not as a
     // second sprite standing upside down
     ctx.save();
-    const tint = floorTint(this.roomIndex);
-    ctx.fillStyle = linGrad(ctx, 'reflectFade' + this.roomIndex, 0, GROUND_Y, 0, GROUND_Y + 26, [
+    const tint = floorTint(this.envRoom);
+    ctx.fillStyle = linGrad(ctx, 'reflectFade' + this.envRoom, 0, GROUND_Y, 0, GROUND_Y + 26, [
       [0, rgba(tint, 0)], [0.45, rgba(tint, 0.3 + (1 - amount) * 0.4)], [1, rgba(tint, 0.95)],
     ]);
     ctx.fillRect(0, GROUND_Y + 1, VIEW_W, 26);

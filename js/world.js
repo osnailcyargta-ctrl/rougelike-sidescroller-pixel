@@ -115,9 +115,9 @@ export function drawArena(ctx, t, roomIndex = 1) {
 
 // Spawn pads glow while a wave is inbound.
 export function drawSpawnPads(ctx, t, active) {
-  const pads = [SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER];
-  for (let i = 0; i < pads.length; i++) {
-    const p = pads[i];
+  for (let i = 0; i < 3; i++) {
+    const p = spawnPoint(i);
+    if (!p) continue;
     const on = active.includes(i);
     const a = on ? 0.4 + 0.4 * Math.sin(t * 9 + i) : 0.12;
     pxRect(ctx, p.x - 10, p.y - 1, 20, 1, rgba(Theme.enemyGrunt, a));
@@ -151,6 +151,9 @@ export class Pickup {
     this.vx = opts.vx ?? 0;
     this.vy = opts.vy ?? 0;
     this.landed = !this.falling;
+    // whatever it is standing on, so it rides that instead of hanging in the
+    // air when the platform moves out from under it
+    this.platform = opts.platform ?? null;
   }
 
   // Simple arc: gravity, one soft bounce, then it settles wherever it lands.
@@ -161,11 +164,12 @@ export class Pickup {
     this.y += this.vy * dt;
     this.vx *= Math.pow(0.25, dt);
     let floor = GROUND_Y;
+    let on = null;
     for (const pl of PLATFORMS) {
       if (pl.off) continue;
       if (this.x < pl.x - 2 || this.x > pl.x + pl.w + 2) continue;
       const top = pl.y;
-      if (py <= top + 1 && this.y >= top && this.vy > 0) floor = Math.min(floor, top);
+      if (py <= top + 1 && this.y >= top && this.vy > 0 && top < floor) { floor = top; on = pl; }
     }
     if (this.y >= floor) {
       this.y = floor;
@@ -181,6 +185,7 @@ export class Pickup {
         this.vx = 0;
         this.falling = false;
         this.landed = true;
+        this.platform = on;
       }
     }
   }
@@ -400,9 +405,10 @@ export function buildWave(roomIndex, waveIndex) {
   const early = EARLY_WAVE_COUNTS[roomIndex];
   const count = early ? early[waveIndex - 1]
     : clamp(base + (waveIndex === 2 ? 2 : 0), 3, WAVES.maxPerWave);
-  const spawns = waveIndex === 1
-    ? [SPAWN_LEFT, SPAWN_RIGHT]
-    : [SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER];
+  // read live, so a wave lands on the platforms where they actually are
+  const spawns = activeSpawnPads(waveIndex)
+    .map((i) => spawnPoint(i) ?? PAD_HOME[i])
+    .filter(Boolean);
   const list = [];
   // Through room 15 this wave has its own stream, so the same seed always
   // sends the same enemies to the same places no matter what you did on the
@@ -426,4 +432,15 @@ export function buildWave(roomIndex, waveIndex) {
 
 export function activeSpawnPads(waveIndex) {
   return waveIndex === 1 ? [0, 1] : [0, 1, 2];
+}
+
+// Where wave i comes in. The pads sit on the three standing platforms, so
+// they are read off those platforms rather than off fixed points - otherwise
+// the glow stays behind when the platform swings away from it.
+const PAD_TAG = ['left', 'right', 'center'];
+const PAD_HOME = [SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER];
+export function spawnPoint(i) {
+  const pl = PLATFORMS.find((p) => p.tag === PAD_TAG[i]);
+  if (!pl || pl.off) return null;
+  return { x: pl.x + pl.w / 2, y: pl.y };
 }

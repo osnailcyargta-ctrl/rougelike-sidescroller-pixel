@@ -26,11 +26,21 @@ function swingEase(p) {
   return 1 - Math.pow(1 - k, 2.4);
 }
 
+// The right-hand wall of the room. In the field the way onward is simply to
+// keep walking, so once the last wave is down the wall is taken away and the
+// player walks off the edge of the screen; the next room puts it back.
+export const Bounds = { right: VIEW_W, openFor: null };
+
+export function openRightWall(who) { Bounds.right = VIEW_W + 44; Bounds.openFor = who ?? true; }
+export function closeRightWall() { Bounds.right = VIEW_W; Bounds.openFor = null; }
+
 function moveAndCollide(e, dt, opts = {}) {
   e.x += e.vx * dt;
   const half = e.w / 2;
+  // only the player may leave; nothing else follows them out
+  const right = (Bounds.openFor && e === Bounds.openFor ? Bounds.right : VIEW_W) - half;
   if (e.x < half) { e.x = half; e.vx = Math.max(0, e.vx); }
-  if (e.x > VIEW_W - half) { e.x = VIEW_W - half; e.vx = Math.min(0, e.vx); }
+  if (e.x > right) { e.x = right; e.vx = Math.min(0, e.vx); }
 
   const prevBottom = e.y;
   e.y += e.vy * dt;

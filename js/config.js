@@ -20,7 +20,7 @@ export const CHAPTERS = [
     reflect: 0,               // grass does not shine
     anvil: false,             // nobody has set up a forge out here
     drift: false,             // and nothing floats overhead
-    exit: 'gate',             // a fortress gate at the far end
+    exit: 'sign',             // a signpost, and you simply keep walking
     accent: '#8fd94a',
   },
   {
@@ -45,9 +45,9 @@ export const CHAPTERS = [
     id: 'aether', name: 'THE AETHER', sub: 'ABOVE IT ALL', from: 17, to: 20,
     platforms: 'cloud',       // white stone with no underside, only light
     reflect: 0.9,             // a mirror you can walk on
-    anvil: true,
+    anvil: false,             // nothing is forged this close to the end
     drift: false,
-    exit: 'stair',
+    exit: 'portal',
     accent: '#7fd0ff',
   },
 ];
@@ -63,7 +63,8 @@ export function isChapterEnd(room) { return chapterFor(room).to === room; }
 // Room 10 is the one room of the castle with earth under it: a dry patch in
 // the middle of the flagstones, which is the only place the worm can surface.
 export const DIRT_ROOM = 10;
-export const DIRT_PATCH = { x: 150, w: 180 };
+const DIRT_ROOM_ENV = 10;
+export const DIRT_PATCH = { x: 104, w: 272 };
 
 export const PLATFORMS = [
   { x: 40, y: 170, w: 96, h: 8, tag: 'left' },
@@ -317,6 +318,10 @@ export const BOSS_RUSH = {
   order: [],
   atRoom: {},
   // two on offer, one taken, from the class you picked
+  // Which room each rush fight borrows its walls from. The rush has five
+  // rooms of its own, but they are not new places - they are the places you
+  // met these five in.
+  env: { 1: 5, 2: DIRT_ROOM_ENV, 3: 15, 4: DIRT_ROOM_ENV, 5: 20 },
   weaponPicks: 2,
   // and between bosses: three on offer, two taken, then a short countdown
   rewardOffer: 3,

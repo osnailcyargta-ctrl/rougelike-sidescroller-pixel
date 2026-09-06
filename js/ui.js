@@ -248,7 +248,7 @@ export function drawHUD(ctx, game) {
   const p = game.player;
   if (!p) return;
   const t = UI.t;
-  const ch = chapterFor(game.roomIndex);
+  const ch = chapterFor(game.envRoom ?? game.roomIndex);
 
   // --- the left block: what you are holding, and how much of you is left
   const px = hudInset();
