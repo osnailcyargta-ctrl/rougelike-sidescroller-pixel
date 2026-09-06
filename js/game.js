@@ -2433,9 +2433,6 @@ export class Game {
     }
     ctx.globalAlpha = a * (0.75 + 0.25 * Math.sin(this.time * 6));
     drawTextShadow(ctx, COMET_OMEN.message, VIEW_W / 2, 52, '#ff8a3c', 2, 'center');
-    ctx.globalAlpha = a;
-    drawTextShadow(ctx, 'SOMETHING CAME DOWN IN THE NEXT ROOM', VIEW_W / 2, 66,
-                   rgba('#ffe6a8', 0.85), 1, 'center');
     ctx.restore();
     ctx.globalAlpha = 1;
   }

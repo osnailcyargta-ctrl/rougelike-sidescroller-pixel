@@ -4,7 +4,7 @@
 // Nothing here is discovered - the whole list is readable from the start, so
 // you can plan a run - except the tick beside a name, which is the one thing
 // you have to earn. Those ticks belong to the run you are in and go with it.
-import { BOSS_TYPES, CEILING_ROOM, FINAL_ROOM } from './config.js';
+import { BOSS_TYPES, BOSS_ORDER, CEILING_ROOM, FINAL_ROOM } from './config.js';
 
 // How each portrait is framed: the world point to put in the middle of the
 // box, and how much to shrink it by. Tuned by eye against the real sprites.
@@ -22,7 +22,9 @@ export function codexView(id, phase) {
   return v[Math.min(phase - 1, v.length - 1)];
 }
 
-export const CODEX_ORDER = ['golem', 'bigdude', 'crabomet', 'ceiling', 'poitnus', 'alphads'];
+// The bestiary lists whatever the game has, in the order the game says. A new
+// boss with a page turns up here on its own.
+export const CODEX_ORDER = BOSS_ORDER;
 
 // Everything the pages say that is not already in BOSS_TYPES. Damage lines are
 // worked out from the boss's own numbers rather than typed twice, so tuning a

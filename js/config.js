@@ -256,10 +256,10 @@ export const HITBOX = {
 // is a "room", so the reward between them is the same choice of two perks a
 // boss room normally gives.
 export const BOSS_RUSH = {
-  order: ['golem', 'bigdude', 'ceiling', 'poitnus', 'alphads'],
-  // the room number each is fought at, so it arrives at the strength it would
-  // have had in a full run rather than at its room-5 numbers
-  atRoom: { golem: 5, bigdude: 10, ceiling: 15, poitnus: 18, alphads: 20 },
+  // order and atRoom are filled in from BOSS_TYPES below - see BOSS_ORDER.
+  // Adding a boss there is the whole job; nothing here needs touching.
+  order: [],
+  atRoom: {},
   // two on offer, one taken, from the class you picked
   weaponPicks: 2,
   // and between bosses: three on offer, two taken, then a short countdown
@@ -406,7 +406,7 @@ export const ENEMY_TYPES = {
 // The golem. Phase 2 begins the moment its shared HP pool drops to phase2Hp.
 export const BOSS_TYPES = {
   golem: {
-    id: 'golem', name: 'Aether Golem', short: 'Golem', kind: 'lasers',
+    id: 'golem', place: 1, atRoom: 5, name: 'Aether Golem', short: 'Golem', kind: 'lasers',
     hp: 990, phase2Hp: 462,          // +65% over its original 600 pool
     bodyW: 48, bodyH: 60, headW: 32, headH: 27,
     contactDamage: 18,
@@ -422,7 +422,7 @@ export const BOSS_TYPES = {
   // Room 15. It does not stand on the floor - it IS the ceiling, a sheet of
   // grafted flesh with one enormous eye, and it never moves sideways.
   ceiling: {
-    id: 'ceiling', name: 'Undead Ceiling', short: 'Ceiling', title: 'THE ROOF OF MEAT',
+    id: 'ceiling', place: 4, atRoom: 15, name: 'Undead Ceiling', short: 'Ceiling', title: 'THE ROOF OF MEAT',
     kind: 'ceiling',
     hp: 2000,
     dmgScale: 2,              // it hits twice as hard as its numbers read
@@ -443,7 +443,7 @@ export const BOSS_TYPES = {
   },
   // The last thing in the vault. It never lands, and it never stops.
   alphads: {
-    id: 'alphads', name: 'Alphads', short: 'Alphads', title: 'THE AETHER GOD',
+    id: 'alphads', place: 6, atRoom: 20, name: 'Alphads', short: 'Alphads', title: 'THE AETHER GOD',
     kind: 'god',
     hp: 2000,
     dmgScale: 2,              // twice the bite for the same listed numbers
@@ -467,7 +467,7 @@ export const BOSS_TYPES = {
   // platform. It never lands, it never stops moving, and it seeds the floor
   // with the eggs its whole brood came from.
   poitnus: {
-    id: 'poitnus', name: 'Poitnus', short: 'Poitnus',
+    id: 'poitnus', place: 5, atRoom: 18, name: 'Poitnus', short: 'Poitnus',
     title: 'THE ANCIENT STINGER', kind: 'stinger',
     hp: 1400,
     w: 54, h: 40,
@@ -491,7 +491,7 @@ export const BOSS_TYPES = {
   // to come back down on your head, and folds into a burning ball to roll you
   // flat. Not on the schedule - it turns up in a room the sky warned you about.
   crabomet: {
-    id: 'crabomet', name: 'Crab-omet', short: 'Crab-omet',
+    id: 'crabomet', place: 3, atRoom: 12, name: 'Crab-omet', short: 'Crab-omet',
     title: 'THE THING THAT FELL', kind: 'comet',
     hp: 1000,
     w: 58, h: 34,
@@ -521,7 +521,7 @@ export const BOSS_TYPES = {
 
   // A twenty-block worm that lives under the floor and only surfaces to strike.
   bigdude: {
-    id: 'bigdude', name: 'Big Dude', short: 'Big Dude',
+    id: 'bigdude', place: 2, atRoom: 10, name: 'Big Dude', short: 'Big Dude',
     title: 'THE BIGGEST DUDE I EVER SEEN', kind: 'worm',
     hp: 600,
     segments: 20, segSpacing: 16,   // 20 blocks of body
@@ -538,6 +538,24 @@ export const BOSS_TYPES = {
 // The comet that arrives before the thing inside it. After Big Dude and before
 // room 13, each room rolls once for a sky nobody likes the look of; if it
 // comes up, the NEXT room has a third wave with something in it.
+// Every boss, in the order you meet them, worked out from the definitions
+// above rather than typed again. A boss with a `place` is in the bestiary, in
+// the Boss Rush, and in every count that reads either - so adding one is a
+// single edit and nothing goes stale behind it.
+export const BOSS_ORDER = Object.values(BOSS_TYPES)
+  .filter((b) => b.place !== undefined)
+  .sort((a, b) => a.place - b.place)
+  .map((b) => b.id);
+
+BOSS_RUSH.order = BOSS_ORDER;
+// the room each is fought at, so it arrives at the strength it would have had
+// in a full run rather than at its room-5 numbers
+BOSS_RUSH.atRoom = Object.fromEntries(BOSS_ORDER.map((id) => [id, BOSS_TYPES[id].atRoom]));
+
+// How many bosses a normal run walks into on the schedule - the room bosses,
+// not the ones you have to make happen.
+export const SCHEDULED_BOSSES = Math.floor(FINAL_ROOM / BOSS_ROOM_INTERVAL);
+
 export const COMET_OMEN = {
   chance: 0.10,
   afterBoss: 'bigdude',    // nothing falls until this one is dead

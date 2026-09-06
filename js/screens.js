@@ -4,7 +4,7 @@ import { clamp, rand, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
 import { drawText, drawTextShadow, drawTextFit, textWidth } from './font.js';
 import { pxRect, glowDot, spawnParticle } from './gfx.js';
-import { VIEW_W, VIEW_H, FINAL_ROOM, BOSS_RUSH } from './config.js';
+import { VIEW_W, VIEW_H, FINAL_ROOM, BOSS_RUSH, SCHEDULED_BOSSES } from './config.js';
 import { Unlocks, BOSS_RUSH_ROOM } from './codex.js';
 import { panel, button, slider, textField, drawTooltip, inside, UI } from './ui.js';
 import { Options, optionsIn, saveOptions, resetOptions, applyVisualOptions } from './settings.js';
@@ -653,7 +653,8 @@ export function drawModeSelect(ctx, game, t) {
   const cards = [
     {
       id: 'normal', name: 'NORMAL', color: Theme.platformGlow, ok: true,
-      lines: ['ALL 20 ROOMS.', 'WAVES, ANVILS, DROPS,', 'AND FOUR BOSSES ON', 'THE WAY THROUGH.'],
+      lines: [`ALL ${FINAL_ROOM} ROOMS.`, 'WAVES, ANVILS, DROPS,',
+              `AND ${SCHEDULED_BOSSES} BOSSES ON`, 'THE WAY THROUGH.'],
     },
     {
       id: 'bossrush', name: 'BOSS RUSH', color: Theme.hp, ok: !locked,

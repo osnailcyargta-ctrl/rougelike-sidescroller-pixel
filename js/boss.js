@@ -915,10 +915,10 @@ export function makeBossPreview(game, id, phase = 1) {
   return boss;
 }
 
-// Where each one turns up, which is also the order the codex lists them in.
-export const CODEX_ROOM = {
-  golem: 5, bigdude: 10, ceiling: CEILING_ROOM, alphads: FINAL_ROOM, poitnus: 0, crabomet: 12,
-};
+// Where each one turns up, which is what the portrait scales it to. Read off
+// the boss itself, so a new one needs no entry here.
+export const CODEX_ROOM = Object.fromEntries(
+  Object.values(BOSS_TYPES).filter((b) => b.atRoom).map((b) => [b.id, b.atRoom]));
 
 // Paint a preview at whatever transform the caller has set up. The Golem has
 // no draw() of its own - its parts carry the art - so both are tried.
