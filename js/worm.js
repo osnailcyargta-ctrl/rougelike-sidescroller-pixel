@@ -8,7 +8,7 @@ import {
   Camera, burst, spawnParticle, impactRing, dropShadow, limb, limbInk, pxRect, pxSolid, glowDot, glowEye,
 } from './gfx.js';
 import { Sfx } from './audio.js';
-import { VIEW_W, VIEW_H, GROUND_Y, BOSS_TYPES, ROOM_SCALING, BOSS_ROOM_INTERVAL } from './config.js';
+import { VIEW_W, VIEW_H, GROUND_Y, BOSS_TYPES, ROOM_SCALING, BOSS_ROOM_INTERVAL, DIRT_ROOM, DIRT_PATCH } from './config.js';
 import { Enemy, Projectile } from './entities.js';
 
 const TINT = {

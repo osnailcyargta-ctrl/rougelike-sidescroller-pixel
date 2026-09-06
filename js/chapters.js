@@ -482,8 +482,12 @@ function floorCastle(ctx, room) {
   // the worm's room has bare earth through the middle of the flagstones
   if (room === DIRT_ROOM) {
     const { x, w } = DIRT_PATCH;
-    ctx.fillStyle = grad(ctx, [[0, P.dirtLit], [1, P.dirtDark]], GROUND_Y, VIEW_H);
-    ctx.fillRect(x, GROUND_Y, w, VIEW_H - GROUND_Y);
+    // a hole in the flagstones, sunk a little and lit along its lip, because
+    // this patch is the only reason the fight in this room works
+    ctx.fillStyle = grad(ctx, [[0, P.dirtLit], [0.5, P.dirt], [1, P.dirtDark]], GROUND_Y - 2, VIEW_H);
+    ctx.fillRect(x, GROUND_Y - 2, w, VIEW_H - GROUND_Y + 2);
+    pxRect(ctx, x - 1, GROUND_Y - 3, w + 2, 1, rgba('#000000', 0.6));
+    pxRect(ctx, x, GROUND_Y - 2, w, 1, P.dirtLit);
     for (let i = 0; i < 40; i++) {
       const px = x + r() * w, py = GROUND_Y + 4 + r() * (VIEW_H - GROUND_Y - 6);
       pxRect(ctx, px, py, 1 + Math.round(r() * 2), 1, rgba(P.dirt, 0.7));
@@ -836,9 +840,10 @@ function exitStair(ctx, e, k) {
     if (kk <= 0) break;
     const w = Math.round(30 * kk);
     const yy = base - 6 - i * 9;
-    const xx = x - w / 2 + i * 3;
+    const xx = Math.round(x - w / 2 + i * 3);
+    pxRect(ctx, xx - 1, yy - 1, w + 2, 5, P.ink);      // the outline first
     pxRect(ctx, xx, yy, w, 3, '#ffffff');
-    pxRect(ctx, xx, yy, w, 1, P.ink);
+    pxRect(ctx, xx, yy + 2, w, 1, P.stoneMid);
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     const g = ctx.createLinearGradient(0, yy + 3, 0, yy + 14);

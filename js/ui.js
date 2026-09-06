@@ -333,9 +333,10 @@ export function drawHUD(ctx, game) {
 function drawBossBar(ctx, game) {
   const boss = game.boss;
   if (!boss || boss.dead) return;
-  const w = 220;
+  // narrow enough to clear the two HUD blocks either side of it
+  const w = 160;
   const x = Math.round((VIEW_W - w) / 2);
-  const y = 16;
+  const y = 22;
   const k = clamp(boss.hp / boss.maxHp, 0, 1);
   const phaseK = clamp(boss.phase2At / boss.maxHp, 0, 1);
   drawTextFit(ctx, boss.name, VIEW_W / 2, y - 10, Theme.uiAccent, VIEW_W - 24, 1, 'center', '#000000cc');
@@ -352,13 +353,14 @@ function drawBossBar(ctx, game) {
   }
   ctx.strokeStyle = rgba(Theme.uiDim, 0.9);
   ctx.strokeRect(x - 0.5, y - 0.5, w + 1, 7);
-  if (boss.phase2At > 0) drawTextShadow(ctx, `PHASE ${boss.phase}`, x + w + 6, y, Theme.uiDim, 1);
+  if (boss.phase2At > 0) drawTextShadow(ctx, `PHASE ${boss.phase}`, x, y + 9, Theme.uiDim, 1);
   if (Options.showBossHpNum) {
+    // under the bar, not beside it: beside it lands on the health panel
     drawTextShadow(ctx, `${Math.ceil(Math.max(0, boss.hp))}/${boss.maxHp}`,
-                   x - 6, y, Theme.ui, 1, 'right');
+                   x + w, y + 9, Theme.ui, 1, 'right');
   }
   // some bosses carry a title under the bar
-  if (boss.title) drawTextFit(ctx, boss.title, VIEW_W / 2, y + 9, rgba(Theme.uiDim, 0.95), VIEW_W - 24, 1, 'center', '#000000cc');
+  if (boss.title) drawTextFit(ctx, boss.title, VIEW_W / 2, y + 9, rgba(Theme.uiDim, 0.95), w - 60, 1, 'center', '#000000cc');
   // a boss on a clock shows how much of it is left
   if (Options.showBossTimer && boss.def?.crushAfter && !boss.crushArmed) {
     const left = Math.max(0, boss.def.crushAfter - (boss.fightT ?? 0));
