@@ -22,11 +22,11 @@ export const TIERS = [
   // single most expensive step, handing the finished 2D canvas to the GPU as
   // a texture, which profiling puts at around 40% of the work on a slow
   // device. Nothing else on the list comes close.
-  { name: 'LOW', postfx: false, pixelCap: 1.0, blurIters: 1, particleScale: 0.35, particleCap: 260, glowParticles: false },
+  { name: 'LOW', postfx: false, pixelCap: 1.0, blurIters: 1, particleScale: 0.35, particleCap: 260, glowParticles: false, reflections: false },
   // reduced: keeps the look, loses the excess
-  { name: 'MID', postfx: true, pixelCap: 1.5, blurIters: 2, particleScale: 0.65, particleCap: 500, glowParticles: true },
+  { name: 'MID', postfx: true, pixelCap: 1.5, blurIters: 2, particleScale: 0.65, particleCap: 500, glowParticles: true, reflections: true },
   // full
-  { name: 'HIGH', postfx: true, pixelCap: 2.0, blurIters: 3, particleScale: 1.0, particleCap: 900, glowParticles: true },
+  { name: 'HIGH', postfx: true, pixelCap: 2.0, blurIters: 3, particleScale: 1.0, particleCap: 900, glowParticles: true, reflections: true },
 ];
 
 export const Perf = {

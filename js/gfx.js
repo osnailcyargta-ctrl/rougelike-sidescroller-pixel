@@ -4,6 +4,7 @@ import { clamp, lerp, rand, randInt, rgba, TAU, mixHex } from './util.js';
 import { Theme } from './theme.js';
 import { Options } from './settings.js';
 import { Perf } from './perf.js';
+import { VIEW_W, VIEW_H } from './config.js';
 
 export const Camera = {
   x: 0, y: 0, shake: 0, shakeT: 0, ox: 0, oy: 0,
@@ -548,6 +549,39 @@ export function shadeFor(hex) {
 
 // A body block: outline, fill, lit top row, shaded bottom row. Pass a flash
 // colour and the whole thing goes white without losing its shape.
+// --- baked layers ---------------------------------------------------------
+// Some of what a room is made of never changes while you are standing in it:
+// the sky, the skyline, the floor, the platforms that do not move. Painting
+// all of that again sixty times a second is work nobody asked for, so it goes
+// into an offscreen canvas once and is blitted after that. The signature is
+// whatever would make the picture wrong - the room, the palette - and when it
+// changes the layer repaints itself.
+
+const layers = new Map();
+
+export function bakedLayer(key, sig, draw) {
+  let L = layers.get(key);
+  if (!L) {
+    const c = document.createElement('canvas');
+    c.width = VIEW_W;
+    c.height = VIEW_H;
+    L = { c, ctx: c.getContext('2d'), sig: null };
+    layers.set(key, L);
+  }
+  if (L.sig !== sig) {
+    L.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    L.ctx.globalAlpha = 1;
+    L.ctx.globalCompositeOperation = 'source-over';
+    L.ctx.clearRect(0, 0, VIEW_W, VIEW_H);
+    draw(L.ctx);
+    L.sig = sig;
+  }
+  return L.c;
+}
+
+/** Throw the baked pictures away - a new run, or a palette that moved. */
+export function clearBakedLayers() { layers.clear(); }
+
 export function pxSolid(ctx, x, y, w, h, fill, opts = {}) {
   x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
   if (w <= 0 || h <= 0) return;

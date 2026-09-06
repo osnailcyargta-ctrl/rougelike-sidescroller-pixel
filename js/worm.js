@@ -226,12 +226,20 @@ export class WormBoss {
     } else if (s.burrow !== undefined) {
       this.state = 'burrow';
       this.stateDur = s.burrow;
-      this.targetX = clamp(this.game.player.x + rand(-90, 90), 40, VIEW_W - 40);
+      this.targetX = this.diggable(clamp(this.game.player.x + rand(-90, 90), 40, VIEW_W - 40));
     } else {
       this.state = 'wait';
       this.stateDur = s.wait;
-      this.targetX = clamp(this.game.player.x + rand(-70, 70), 40, VIEW_W - 40);
+      this.targetX = this.diggable(clamp(this.game.player.x + rand(-70, 70), 40, VIEW_W - 40));
     }
+  }
+
+  // Its room is flagstones with one patch of bare earth in the middle, and a
+  // worm cannot come up through a flagstone. Everywhere else in the tower the
+  // whole floor is earth and it may surface anywhere.
+  diggable(x) {
+    if (this.roomIndex !== DIRT_ROOM) return clamp(x, 20, VIEW_W - 20);
+    return clamp(x, DIRT_PATCH.x + 14, DIRT_PATCH.x + DIRT_PATCH.w - 14);
   }
 
   // Cruising below the floor, sliding toward where it means to come up.
@@ -250,7 +258,7 @@ export class WormBoss {
     const d = this.def;
     const p = this.game.player;
     // burst up through the floor a little short of the player and arc over them
-    const from = clamp(p.x - sign(p.x - this.hx || 1) * rand(40, 80), 30, VIEW_W - 30);
+    const from = this.diggable(clamp(p.x - sign(p.x - this.hx || 1) * rand(40, 80), 30, VIEW_W - 30));
     this.hx = from;
     this.hy = GROUND_Y + 22;
     this.vx = sign(p.x - from || 1) * d.leapAcross * rand(0.8, 1.15);
@@ -311,7 +319,7 @@ export class WormBoss {
       this.stateT = 0;
       this.stateDur = 0.25;
       this.vy = 0;
-      this.targetX = clamp(this.game.player.x + rand(-70, 70), 40, VIEW_W - 40);
+      this.targetX = this.diggable(clamp(this.game.player.x + rand(-70, 70), 40, VIEW_W - 40));
     }
   }
 

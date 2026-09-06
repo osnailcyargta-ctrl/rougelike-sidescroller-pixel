@@ -44,6 +44,7 @@ function moveAndCollide(e, dt, opts = {}) {
     e.platform = null;
   } else if (e.vy >= 0 && !opts.ignorePlatforms) {
     for (const p of PLATFORMS) {
+      if (p.off) continue;
       if (prevBottom <= p.y + 0.5 && e.y >= p.y &&
           e.x + half > p.x && e.x - half < p.x + p.w) {
         e.y = p.y;
@@ -61,6 +62,7 @@ function moveAndCollide(e, dt, opts = {}) {
 export function groundLevelAt(x) {
   let best = GROUND_Y;
   for (const p of PLATFORMS) {
+    if (p.off) continue;
     if (x > p.x && x < p.x + p.w && p.y < best) best = p.y;
   }
   return best;
@@ -71,7 +73,7 @@ export function groundLevelAt(x) {
 // that wants to be carried asks for this once and keeps the reference.
 export function platformAt(x, y, tol = 2) {
   for (const p of PLATFORMS) {
-    if (!p.drift) continue;
+    if (p.off || p.motion === 'none') continue;
     if (x >= p.x - tol && x <= p.x + p.w + tol && y >= p.y - tol && y <= p.y + p.h + tol) return p;
   }
   return null;
@@ -80,6 +82,7 @@ export function platformAt(x, y, tol = 2) {
 export function surfaceBelow(x, y) {
   let best = GROUND_Y;
   for (const p of PLATFORMS) {
+    if (p.off) continue;
     if (x > p.x && x < p.x + p.w && p.y >= y - 1 && p.y < best) best = p.y;
   }
   return best;
@@ -2813,6 +2816,7 @@ export class Player {
     if (x <= 2) return { x: 2, y };
     if (x >= VIEW_W - 2) return { x: VIEW_W - 2, y };
     for (const p of PLATFORMS) {
+      if (p.off) continue;
       if (x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h) return { x, y };
     }
     return null;

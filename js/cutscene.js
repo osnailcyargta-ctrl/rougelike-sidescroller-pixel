@@ -10,6 +10,8 @@ import { VIEW_W, VIEW_H, GROUND_Y } from './config.js';
 
 const INTRO_LEN = 4.6;
 const OUTRO_LEN = 4.4;
+const PHASE_LEN = 2.3;
+const GATE_LEN = 4.0;
 const BAR_H = 34;
 
 // eased 0..1 helpers
@@ -23,7 +25,6 @@ const SUBTITLE = {
   alphads: 'THE AETHER GOD',
   ceiling: 'THE ROOF OF MEAT',
   poitnus: 'THE ANCIENT STINGER',
-  crabomet: 'THE THING THAT FELL',
 };
 
 export class Cutscene {
@@ -43,12 +44,15 @@ export class Cutscene {
     this.streaks = [];     // radial speed lines thrown out by each shock
   }
 
-  play(type, boss) {
+  play(type, boss, at = null) {
     this.active = true;
     this.type = type;
     this.t = 0;
-    this.len = type === 'intro' ? INTRO_LEN : OUTRO_LEN;
+    this.len = type === 'intro' ? INTRO_LEN
+      : type === 'outro' ? OUTRO_LEN
+      : type === 'phase' ? PHASE_LEN : GATE_LEN;
     this.boss = boss;
+    this.at = at;                 // a point to look at when there is no boss
     this.booms = 0;
     this.nextBoom = 0.35;
     this.roars = 0;
@@ -61,8 +65,9 @@ export class Cutscene {
     this.roared = false;
     this.finalFlash = false;
     this.flash = type === 'outro' ? 1 : 0;
-    this.title = (boss?.name ?? 'BOSS').toUpperCase();
-    this.subtitle = SUBTITLE[boss?.def?.id] ?? '';
+    this.title = type === 'gate' ? 'THE GATE OPENS' : (boss?.name ?? 'BOSS').toUpperCase();
+    this.subtitle = type === 'gate' ? 'THE CASTLE TAKES YOU IN' : (SUBTITLE[boss?.def?.id] ?? '');
+    if (type === 'phase') { this.title = (boss?.name ?? 'BOSS').toUpperCase(); this.subtitle = 'PHASE II'; }
     this.focus = this.bossFocus();
     Camera.setCinematic(type === 'intro' ? 1.13 : 1.16, this.focus.x, this.focus.y);
     Camera.add(type === 'intro' ? 8 : 14);
@@ -71,6 +76,7 @@ export class Cutscene {
   }
 
   bossFocus() {
+    if (this.at) return this.at;
     const b = this.boss;
     if (!b) return { x: VIEW_W / 2, y: 150 };
     if (b.kind === 'ceiling') {
@@ -124,10 +130,16 @@ export class Cutscene {
     this.focus.y = lerp(this.focus.y, f.y, 1 - Math.pow(0.05, dt));
     const push = this.type === 'intro'
       ? lerp(1.02, 1.16, easeOut(this.t / 2.2))
-      : lerp(1.20, 1.05, easeOut(this.t / this.len));
+      : this.type === 'phase'
+        ? lerp(1.30, 1.10, easeOut(this.t / this.len))
+        : this.type === 'gate'
+          ? lerp(1.05, 1.25, easeOut(this.t / this.len))
+          : lerp(1.20, 1.05, easeOut(this.t / this.len));
     Camera.setCinematic(push, this.focus.x, this.focus.y);
 
     if (this.type === 'intro') this.updateIntro(dt);
+    else if (this.type === 'phase') this.updatePhase(dt);
+    else if (this.type === 'gate') this.updateGate(dt);
     else this.updateOutro(dt);
 
     if (this.t >= this.len) this.finish();
@@ -328,6 +340,75 @@ export class Cutscene {
     }
   }
 
+  // Something in it gives, and what is left of it is angrier. Two seconds,
+  // one shock, and the card that says which half of the fight you are in.
+  updatePhase(dt) {
+    if (this.roars < 1 && this.t > 0.12) {
+      this.roars = 1;
+      const f = this.focus;
+      Camera.add(16);
+      Camera.punch(2.6);
+      this.game.hitstop(0.16);
+      screenFlash(0.7, Theme.hp, 0.4);
+      Sfx.slam();
+      this.flash = 0.85;
+      impactRing(f.x, f.y, { color: Theme.hp, r0: 6, r1: 190, life: 0.8, width: 4 });
+      impactRing(f.x, f.y, { color: '#ffffff', r0: 3, r1: 120, life: 0.5, width: 2 });
+      burst(f.x, f.y, 40, {
+        color: Theme.hp, color2: '#ffffff', kind: 'streak', speedMin: 110, speedMax: 380,
+        lifeMin: 0.2, lifeMax: 0.6, gravity: 0, drag: 0.9,
+      });
+      for (let i = 0; i < 20; i++) {
+        this.streaks.push({ a: rand(0, TAU), r: rand(14, 50), len: rand(30, 110), life: rand(0.25, 0.5), t: 0 });
+      }
+    }
+    // the room keeps shaking under it
+    if (Math.random() < dt * 20) {
+      spawnParticle({
+        x: this.focus.x + rand(-60, 60), y: GROUND_Y, vx: rand(-30, 30), vy: rand(-90, -20),
+        life: rand(0.4, 1.0), size: 1, color: Theme.hp, gravity: 220, kind: 'shrink',
+      });
+    }
+  }
+
+  // The fortress at the end of the field. Three heaves on the chains, then it
+  // comes apart down the middle and the castle is looking at you.
+  updateGate(dt) {
+    const at = this.focus;
+    while (this.roars < 3 && this.t >= Cutscene.ROAR_AT[this.roars] * 0.75) {
+      this.roars++;
+      Camera.add(6 + this.roars * 2);
+      Camera.punch(0.8 + this.roars * 0.3);
+      Sfx.slam();
+      this.flash = 0.2 + this.roars * 0.1;
+      burst(at.x, at.y + 20, 14 + this.roars * 6, {
+        color: '#caa06a', kind: 'smoke', speedMin: 20, speedMax: 90, lifeMin: 0.5, lifeMax: 1.3,
+        sizeMin: 1, sizeMax: 4, gravity: -20, glow: false,
+      });
+    }
+    // dust off the lintel the whole time
+    if (Math.random() < dt * 26) {
+      spawnParticle({
+        x: at.x + rand(-26, 26), y: at.y - rand(20, 54), vx: rand(-8, 8), vy: rand(20, 70),
+        life: rand(0.5, 1.2), size: 1, color: '#d8c8a8', gravity: 80, kind: 'shrink', glow: false,
+      });
+    }
+    // and the light of the hall beyond, once it is open
+    if (this.t > 2.2 && Math.random() < dt * 40) {
+      spawnParticle({
+        x: at.x + rand(-14, 14), y: at.y - rand(4, 46), vx: rand(-16, 16), vy: rand(-40, -8),
+        life: rand(0.5, 1.3), size: 1, color: '#ffd08a', gravity: -14, kind: 'shrink',
+      });
+    }
+    if (!this.finalFlash && this.t > 2.2) {
+      this.finalFlash = true;
+      this.flash = 0.9;
+      Camera.add(12);
+      screenFlash(0.5, '#ffd08a', 0.4);
+      Sfx.wave();
+    }
+  }
+
   boomPoint(n) {
     const b = this.boss;
     if (b && b.kind === 'worm' && b.segments?.length) {
@@ -361,6 +442,8 @@ export class Cutscene {
     this.drawShafts(ctx, inK * (1 - outK));
     this.drawStreaks(ctx);
     if (this.type === 'intro') this.drawIntro(ctx, bars);
+    else if (this.type === 'phase') this.drawPhase(ctx, bars);
+    else if (this.type === 'gate') this.drawGate(ctx, bars);
     else this.drawOutro(ctx, bars);
 
     // letterbox last, so nothing spills into the bars
@@ -434,6 +517,47 @@ export class Cutscene {
       pxRect(ctx, bx, cy + 45, bw, 5, Theme.hp);
       pxRect(ctx, bx, cy + 45, bw, 1, rgba('#ffffff', 0.5));
     }
+  }
+
+  // A card that says the fight just changed, struck across the screen.
+  drawPhase(ctx, bars) {
+    const t = this.t;
+    const inK = easeOut(window01(t, 0.05, 0.4));
+    const outK = 1 - window01(t, this.len - 0.5, this.len - 0.1);
+    if (inK <= 0 || outK <= 0) return;
+    const cy = 108;
+    // a slab of colour that slides across and holds the words
+    const slideK = easeOut(inK);
+    const w = Math.round(VIEW_W * slideK);
+    ctx.save();
+    ctx.globalAlpha = outK;
+    ctx.fillStyle = rgba(Theme.hp, 0.22);
+    ctx.fillRect(VIEW_W / 2 - w / 2, cy - 12, w, 30);
+    pxRect(ctx, VIEW_W / 2 - w / 2, cy - 12, w, 1, Theme.hp);
+    pxRect(ctx, VIEW_W / 2 - w / 2, cy + 17, w, 1, Theme.hp);
+    if (slideK > 0.5) {
+      const s2 = fitScale('PHASE II', VIEW_W - 40, 3);
+      drawText(ctx, 'PHASE II', VIEW_W / 2 + 2, cy - 3, rgba('#000000', 0.8), s2, 'center');
+      drawText(ctx, 'PHASE II', VIEW_W / 2, cy - 5, '#ffffff', s2, 'center');
+      ctx.globalAlpha = outK * window01(t, 0.5, 0.9);
+      drawTextShadow(ctx, this.title, VIEW_W / 2, cy + 22, Theme.hp, fitScale(this.title, VIEW_W - 60, 1), 'center');
+    }
+    ctx.restore();
+  }
+
+  // The name of the place you are walking into, over the gate opening.
+  drawGate(ctx, bars) {
+    const t = this.t;
+    const k = window01(t, 2.2, 2.9);
+    const outK = 1 - window01(t, this.len - 0.6, this.len - 0.15);
+    if (k <= 0 || outK <= 0) return;
+    const cy = 96;
+    ctx.save();
+    ctx.globalAlpha = outK * k;
+    const s2 = fitScale(this.title, VIEW_W - 40, 2);
+    drawTextShadow(ctx, this.title, VIEW_W / 2, cy, '#ffd08a', s2, 'center');
+    drawTextShadow(ctx, this.subtitle, VIEW_W / 2, cy + 18, Theme.ui, 1, 'center');
+    ctx.restore();
   }
 
   drawOutro(ctx, bars) {

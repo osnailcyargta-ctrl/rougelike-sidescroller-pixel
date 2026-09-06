@@ -9,6 +9,62 @@ export const GROUND_Y = 236;              // top surface of the floor
 
 // One-way platforms: { x, y, w, h }. The 'drift' one slides along X and
 // carries whatever is standing on it; dx is filled in each frame.
+// --- chapters -------------------------------------------------------------
+// The tower is four places, not one. Each owns a stretch of rooms and decides
+// what the room is made of: what the floor is, whether it reflects, how the
+// platforms behave, whether there is an anvil, and how you leave.
+export const CHAPTERS = [
+  {
+    id: 'field', name: 'GRASSY FIELD', sub: 'THE WAY IN', from: 1, to: 4,
+    platforms: 'hill',        // little rises out of the ground, not floating
+    reflect: 0,               // grass does not shine
+    anvil: false,             // nobody has set up a forge out here
+    drift: false,             // and nothing floats overhead
+    exit: 'gate',             // a fortress gate at the far end
+    accent: '#8fd94a',
+  },
+  {
+    id: 'castle', name: 'THE CASTLE', sub: 'STONE AND CHAIN', from: 5, to: 14,
+    platforms: 'chain',       // hung from the ceiling, rising and falling
+    reflect: 0.35,            // wet flagstones
+    anvil: true,
+    drift: false,             // the middle pair swings instead of drifting
+    exit: 'door',
+    accent: '#c8a24a',
+  },
+  {
+    id: 'hell', name: 'THE INFERNO', sub: 'UNDER THE FLOOR', from: 15, to: 16,
+    platforms: 'ember',       // cracked basalt slabs riding the heat
+    reflect: 0.5,             // molten light on black glass
+    anvil: true,
+    drift: false,
+    exit: 'rift',
+    accent: '#ff6a2a',
+  },
+  {
+    id: 'aether', name: 'THE AETHER', sub: 'ABOVE IT ALL', from: 17, to: 20,
+    platforms: 'cloud',       // white stone with no underside, only light
+    reflect: 0.9,             // a mirror you can walk on
+    anvil: true,
+    drift: false,
+    exit: 'stair',
+    accent: '#7fd0ff',
+  },
+];
+
+export function chapterFor(room) {
+  for (const c of CHAPTERS) if (room >= c.from && room <= c.to) return c;
+  return CHAPTERS[CHAPTERS.length - 1];
+}
+
+/** True on the last room of a chapter - where the way out is something new. */
+export function isChapterEnd(room) { return chapterFor(room).to === room; }
+
+// Room 10 is the one room of the castle with earth under it: a dry patch in
+// the middle of the flagstones, which is the only place the worm can surface.
+export const DIRT_ROOM = 10;
+export const DIRT_PATCH = { x: 150, w: 180 };
+
 export const PLATFORMS = [
   { x: 40, y: 170, w: 96, h: 8, tag: 'left' },
   { x: VIEW_W - 136, y: 170, w: 96, h: 8, tag: 'right' },
@@ -345,11 +401,6 @@ export const ENEMY_TYPES = {
     flying: true, boss: true, slamImmune: true,
     poisonSeconds: 1.0,          // touching it is an attack too
   },
-  crabometBody: {
-    id: 'crabometBody', name: 'Crab-omet', hp: 1000, speed: 0, damage: 20,
-    w: 58, h: 34, attackCooldown: 1, attackRange: 30,
-    boss: true, slamImmune: true,
-  },
   // The clutch it lays, and the shell you set down yourself. Both are eggs;
   // only one of them can be hurt.
   giantstingeregg: {
@@ -486,39 +537,6 @@ export const BOSS_TYPES = {
     poisonSeconds: 1.0,
   },
 
-  // It fell out of the sky and it has not stopped burning. Half crab, half
-  // comet: it stabs with both claws, throws itself off the top of the screen
-  // to come back down on your head, and folds into a burning ball to roll you
-  // flat. Not on the schedule - it turns up in a room the sky warned you about.
-  crabomet: {
-    id: 'crabomet', place: 3, atRoom: 12, name: 'Crab-omet', short: 'Crab-omet',
-    title: 'THE THING THAT FELL', kind: 'comet',
-    hp: 1000,
-    w: 58, h: 34,
-    // Touching it costs what touching any body costs; the numbers that matter
-    // are the three moves below.
-    walkSpeed: 78, standOff: 34,      // how close it wants to be to use the claws
-    // Both claws, one after the other, driven straight through you.
-    claw: { damage: 26, windUp: 0.42, reach: 46, stab: 0.12, hold: 0.1, recover: 0.26 },
-    // Off the top of the screen, then straight back down where you stand.
-    comet: {
-      windUp: 0.4, riseSpeed: 700, aloft: 0.45, fallSpeed: 1450,
-      damage: 34, radius: 74, aim: 0.12,   // how late it locks on to you
-    },
-    // Curls up over half a second, then rolls: slow at first, then very fast.
-    roll: {
-      curl: 0.55, speed0: 46, speed1: 430, accel: 1.9, time: 3.4,
-      damage: 24, uncurl: 0.45, bounces: 3,
-    },
-    // claw, wait 1s, claw, wait 0.3s, comet, wait 0.6s, roll, and round again
-    steps: [
-      { move: 'claw', wait: 1.0 },
-      { move: 'claw', wait: 0.3 },
-      { move: 'comet', wait: 0.6 },
-      { move: 'roll', wait: 1.0 },
-    ],
-  },
-
   // A twenty-block worm that lives under the floor and only surfaces to strike.
   bigdude: {
     id: 'bigdude', place: 2, atRoom: 10, name: 'Big Dude', short: 'Big Dude',
@@ -535,9 +553,6 @@ export const BOSS_TYPES = {
   },
 };
 
-// The comet that arrives before the thing inside it. After Big Dude and before
-// room 13, each room rolls once for a sky nobody likes the look of; if it
-// comes up, the NEXT room has a third wave with something in it.
 // Every boss, in the order you meet them, worked out from the definitions
 // above rather than typed again. A boss with a `place` is in the bestiary, in
 // the Boss Rush, and in every count that reads either - so adding one is a
@@ -555,13 +570,6 @@ BOSS_RUSH.atRoom = Object.fromEntries(BOSS_ORDER.map((id) => [id, BOSS_TYPES[id]
 // How many bosses a normal run walks into on the schedule - the room bosses,
 // not the ones you have to make happen.
 export const SCHEDULED_BOSSES = Math.floor(FINAL_ROOM / BOSS_ROOM_INTERVAL);
-
-export const COMET_OMEN = {
-  chance: 0.10,
-  afterBoss: 'bigdude',    // nothing falls until this one is dead
-  beforeRoom: 13,          // and nothing falls this late
-  message: 'A STRANGE COMET HAS FALLEN',
-};
 
 export const PERK = {
   aegisShield: 20,          // absorb per Aegis Shard

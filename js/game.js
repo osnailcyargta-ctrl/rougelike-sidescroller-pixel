@@ -4,14 +4,14 @@ import { Theme, applyTheme, resetTheme, DEFAULT_THEME } from './theme.js';
 import {
   Camera, updateFx, drawParticles, drawTexts, drawRings, clearFx, burst, floatText,
   spawnParticle, impactRing, boltPath, strokeBolt, glowDot, pxRect, screenFlash, drawFlash,
+  linGrad, clearBakedLayers,
 } from './gfx.js';
 import { Input, initInput, inputTick, inputEndFrame, Binds } from './input.js';
 import { Sfx, resumeAudio, setVolume, AudioCfg } from './audio.js';
 import { PostFX, parseShaderPack, DEFAULT_COMPOSITE } from './postfx.js';
 import {
-  VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, DROP_POINT, PERK, WAVES, PLAYER as PCFG,
+  VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, DROP_POINT, PERK, WAVES, PLAYER as PCFG, chapterFor, CHAPTERS,
   BOSS_ROOM_INTERVAL, NUKERANG, FINAL_ROOM, SHARDGUN, TWINDAGGER, SWORD, BOW, ORIGAMI,
-  COMET_OMEN,
   ARMOR, PAPER_SHIELD, ANVIL, GRAPPLE, STINGER_GUN, BLOCK, DROPS, GIANT_EGG, FORGE_VISIBLE_ROWS,
   HITBOX,
   SEEDED_THROUGH_ROOM, SOUL_DART, STIDENT, BOSS_RUSH,
@@ -24,12 +24,13 @@ import {
   loadUnlocks, checkBossRushUnlock, Defeated,
 } from './codex.js';
 import { drawBackground, drawArena, drawLightShafts, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal, Anvil } from './world.js';
+import { layoutRoom, reflectAmount, bloomFor, chromaFor, floorTint, exitTint, PAL } from './chapters.js';
 import { ITEMS, RARITY, HOTBAR_SIZE, DROP_POOL, UNIQUE_ONCE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
 import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, drawForge, drawCodex, panel, button } from './ui.js';
 import { updateTouchPad, drawTouchPad, drawAimLeash, Pad } from './touch.js';
 import { Perf, perfTick, syncPerfOptions, TIERS } from './perf.js';
 import { forgeLayout, forgeRowRect, forgeListRect, closeRect, inRect, codexLayout, codexRowRect } from './layout.js';
-import { drawText, drawTextShadow } from './font.js';
+import { drawText, drawTextShadow, textWidth, fitScale } from './font.js';
 import { Options, loadOptions, saveOptions, applyVisualOptions, captureShaderBase, saveShader, loadShader } from './settings.js';
 import { loadShaderLibrary, saveShaderToLibrary, removeShaderFromLibrary, findShader,
   saveActiveShaderId, loadActiveShaderId } from './shaderlib.js';
@@ -112,16 +113,13 @@ export class Game {
     this.invOpen = false;
     this.debugOpen = false;
     this.debug = { god: false, infHealth: false };
-    // The comet: whether the sky has already warned you, and which room the
-    // thing it dropped is waiting in.
-    this.cometSeen = false;
-    this.cometRoom = 0;
     this.timeStopT = 0;      // Alphads' held breath
     this.fold = null;        // the origami fold wheel, open only while paused
     this.victoryT = 0;
     this.hint = null;
     this.hintT = 0;
-    this.omenT = 0;      // how long the comet warning still has on screen
+    this.chapterCard = null;
+    this.chapter = null;
 
     // saved settings first, so the very first frame already looks right
     loadOptions();
@@ -205,6 +203,11 @@ export class Game {
       // canvas is opaque and exactly covers it, so its stale frame never shows.
       this.scene.style.visibility = raw ? 'visible' : 'hidden';
     }
+    // the Aether is nearly white and the Inferno nearly black; the same
+    // bloom cannot serve both, so the chapter sets the exposure
+    const inRoom = this.screen === 'playing' || this.screen === 'paused';
+    this.postfx.bloomScale = inRoom ? bloomFor(this.roomIndex) : 1;
+    this.postfx.chromaScale = inRoom ? chromaFor(this.roomIndex) : 1;
     if (!raw) this.postfx.render(dt);
   }
 
@@ -423,9 +426,6 @@ export class Game {
     this.shields.length = 0;
     this.kills = 0;
     this.roomIndex = 1;
-    this.cometSeen = false;
-    this.cometRoom = 0;
-    this.omenT = 0;
     this.deathT = 0;
     this.invOpen = false;
     this.boss = null;
@@ -642,29 +642,7 @@ export class Game {
   wavesInRoom(index = this.roomIndex) {
     // in a rush there is no trash to clear: the room is the boss
     if (this.mode === 'bossrush') return 1;
-    // the room a comet came down in gets a third wave too - that is what is
-    // in it
-    if (index === this.cometRoom) return WAVES.bossRoomWaves;
     return this.isBossRoom(index) ? WAVES.bossRoomWaves : WAVES.perRoom;
-  }
-
-  // --- the comet -----------------------------------------------------------
-  // After Big Dude is dead and before room 13, each room rolls once for a sky
-  // nobody likes the look of. It happens at most once in a run, and when it
-  // does, the next room has something in it that was not on the schedule.
-
-  rollCometOmen(index) {
-    if (this.mode !== 'normal' || this.cometSeen) return;
-    if (!Defeated.has(COMET_OMEN.afterBoss)) return;
-    if (index >= COMET_OMEN.beforeRoom || index >= this.lastRoom) return;
-    const roll = this.roomRoll('comet', index);
-    const v = roll ? roll() : Math.random();
-    if (v >= COMET_OMEN.chance) return;
-    this.cometSeen = true;
-    this.cometRoom = index + 1;
-    this.omenT = 5.0;
-    Sfx.slam();
-    Camera.add(6);
   }
 
   startRoom(index) {
@@ -683,9 +661,19 @@ export class Game {
     this.enemies.length = 0;
     this.projectiles.length = 0;
     this.shields.length = 0;
-    // every second room comes with a forge, riding the drifting platform
-    const drift = PLATFORMS.find((pl) => pl.tag === 'drift');
-    this.anvil = (index % ANVIL.everyRooms === 0 && drift) ? new Anvil(drift) : null;
+    // the chapter decides what this room is made of, and what moves in it
+    const wasChapter = this.chapter;
+    layoutRoom(index);
+    this.chapter = chapterFor(index).id;
+    if (this.mode !== 'bossrush' && this.chapter !== wasChapter) {
+      this.showChapterCard(chapterFor(index));
+    }
+    // every second room comes with a forge, riding whatever hangs overhead -
+    // but only in a chapter that has forges at all, and never in the worm's
+    // room, which has nothing over the middle of it
+    const ch = chapterFor(index);
+    const drift = PLATFORMS.find((pl) => pl.tag === 'drift' && !pl.off);
+    this.anvil = (ch.anvil && index % ANVIL.everyRooms === 0 && drift) ? new Anvil(drift) : null;
     this.forge = null;
     this.player.x = 120;
     this.player.y = GROUND_Y;
@@ -694,7 +682,6 @@ export class Game {
     this.player.releaseGrapple(true);
     this.player.resetChains();
     if (index > 1) this.player.healPct(1);
-    this.rollCometOmen(index);
     // the Origamist restocks between rooms
     if (index > 1 && this.player.classId === 'origamist') {
       const got = this.givePaper(ORIGAMI.roomPaper);
@@ -707,16 +694,13 @@ export class Game {
     this.waveIndex = n;
     this.waveTimer = 0;
     this.waveCooldown = null;
-    const cometWave = this.roomIndex === this.cometRoom && n === this.wavesInRoom();
-    if ((this.isBossRoom() || cometWave) && n === this.wavesInRoom()) {
+    if (this.isBossRoom() && n === this.wavesInRoom()) {
       this.pendingSpawns = [];
       this.player.healPct(1);      // full HP going into the boss
       const rush = this.rushBossFor();
-      this.boss = cometWave
-        ? makeBoss(this, this.roomIndex, 'crabomet')
-        : this.mode === 'bossrush'
-          ? makeBoss(this, BOSS_RUSH.atRoom[rush] ?? 5, rush)
-          : makeBoss(this, this.roomIndex);
+      this.boss = this.mode === 'bossrush'
+        ? makeBoss(this, BOSS_RUSH.atRoom[rush] ?? 5, rush)
+        : makeBoss(this, this.roomIndex);
       this.boss.intro = 99;        // held until the cutscene hands control back
       this.cutscene.play('intro', this.boss);
     } else {
@@ -728,6 +712,13 @@ export class Game {
   onEnemyKilled(enemy) {
     this.kills++;
     if (enemy && !enemy.def.boss) this.rollPaperDrop(enemy);
+  }
+
+  /** A boss reaching its second half: two seconds, one shock, one card. */
+  bossPhaseCutscene(boss) {
+    if (!boss || this.screen !== 'playing' || this.cutscene.active) return;
+    boss.intro = Math.max(boss.intro ?? 0, 2.4);   // it does not act during it
+    this.cutscene.play('phase', boss);
   }
 
   // Called by a boss the moment its pool empties.
@@ -1734,7 +1725,7 @@ export class Game {
     uiBeginFrame(dt);
     this.time += dt;
     if (this.hintT > 0) this.hintT -= dt;
-    if (this.omenT > 0) this.omenT -= dt;
+    this.updateChapterCard(dt);
     if (this.screen === 'victory') this.victoryT += dt;
 
     let gdt = dt;
@@ -1764,19 +1755,19 @@ export class Game {
       // is actually in progress.
       if (this.codex) {
         this.updateCodex(dt);
-        updateWorld(dt, true);
+        updateWorld(dt, true, this.time);
       } else if (this.screen === 'perkSlot') {
         this.updatePerkSlot(dt);
-        updateWorld(dt, true);
+        updateWorld(dt, true, this.time);
       } else if (this.screen === 'rushReward') {
         this.updateRushReward(dt);
-        updateWorld(dt, true);
+        updateWorld(dt, true, this.time);
       } else if (this.debugOpen) {
-        updateWorld(dt, true);
+        updateWorld(dt, true, this.time);
       } else if (this.screen === 'playing' || this.screen === 'gameover') {
         this.update(gdt);
       } else {
-        updateWorld(dt, true);
+        updateWorld(dt, true, this.time);
       }
 
       updateFx(this.screen === 'playing' || this.screen === 'gameover' ? gdt : dt);
@@ -1840,7 +1831,7 @@ export class Game {
   }
 
   update(dt) {
-    updateWorld(dt, this.worldFrozen);
+    updateWorld(dt, this.worldFrozen, this.time);
     if (this.screen === 'playing' && !this.cutscene.active) this.runTime += dt;
 
     if (this.cutscene.active) {
@@ -2018,7 +2009,7 @@ export class Game {
     // A rush has no room to walk around picking things up in: the spoils are
     // offered on their own screen and the next boss follows on a timer.
     if (this.mode === 'bossrush') { this.openRushReward(); return; }
-    if (this.isBossRoom() || this.roomIndex === this.cometRoom) {
+    if (this.isBossRoom()) {
       // two offers on the centre platform, one pick
       const inv = this.player.inventory;
       const [rolledA, rolled] = rollPerkPair(inv, this.roomRoll('perk'));
@@ -2071,9 +2062,85 @@ export class Game {
   }
 
   finishClearRoom() {
-    this.portal = new Portal(VIEW_W - 34, GROUND_Y);
+    // the way out is whatever this chapter uses for a way out
+    const ch = chapterFor(this.roomIndex);
+    this.portal = new Portal(VIEW_W - 34, GROUND_Y, ch.exit);
+    // the last room of a chapter ends at something bigger than a doorway
+    this.portal.grand = this.roomIndex === ch.to;
     Camera.add(4);
     Sfx.pickup();
+    // the last room of the field ends at the fortress, and the fortress opens
+    if (this.roomIndex === CHAPTERS[0].to) {
+      this.cutscene.play('gate', null, { x: this.portal.x - 6, y: GROUND_Y - 30 });
+    }
+  }
+
+  // --- the card that names the place --------------------------------------
+
+  showChapterCard(ch) {
+    this.chapterCard = { ch, t: 0, len: 3.4 };
+    Sfx.wave();
+  }
+
+  updateChapterCard(dt) {
+    const c = this.chapterCard;
+    if (!c) return;
+    c.t += dt;
+    if (c.t >= c.len) this.chapterCard = null;
+  }
+
+  // Big type, arriving in pieces, over a bar of the chapter's own colour.
+  drawChapterCard(ctx) {
+    const c = this.chapterCard;
+    // a cutscene has its own card; two at once is neither
+    if (!c || this.cutscene.active) return;
+    const t = c.t;
+    const inK = clamp(t / 0.55, 0, 1);
+    const outK = 1 - clamp((t - (c.len - 0.7)) / 0.7, 0, 1);
+    const a = Math.min(inK, outK);
+    if (a <= 0) return;
+    const ease = 1 - Math.pow(1 - inK, 3);
+    const cy = 96;
+    ctx.save();
+    ctx.globalAlpha = a;
+
+    // the bar wipes open from the middle
+    const w = Math.round(VIEW_W * ease);
+    ctx.fillStyle = rgba('#000000', 0.55);
+    ctx.fillRect(VIEW_W / 2 - w / 2, cy - 20, w, 52);
+    pxRect(ctx, VIEW_W / 2 - w / 2, cy - 20, w, 1, c.ch.accent);
+    pxRect(ctx, VIEW_W / 2 - w / 2, cy + 31, w, 1, c.ch.accent);
+    // a light running along the top edge as it opens
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    glowDot(ctx, VIEW_W / 2 - w / 2, cy - 20, 24, c.ch.accent, 0.5 * (1 - ease));
+    glowDot(ctx, VIEW_W / 2 + w / 2, cy + 31, 24, c.ch.accent, 0.5 * (1 - ease));
+    ctx.restore();
+
+    // the name, a letter at a time, each landing with its own small flare
+    const title = c.ch.name;
+    const scale = fitScale(title, VIEW_W - 40, 3);
+    const tw = textWidth(title, scale);
+    for (let i = 0; i < title.length; i++) {
+      const k = clamp((t * 7 - i * 0.7), 0, 1);
+      if (k <= 0) continue;
+      const e = 1 - Math.pow(1 - k, 3);
+      const x = (VIEW_W - tw) / 2 + i * 6 * scale;
+      const y = cy - 12 + (1 - e) * 14;
+      ctx.globalAlpha = a * e;
+      drawText(ctx, title[i], x + 2, y + 2, rgba('#000000', 0.8), scale);
+      drawText(ctx, title[i], x, y, i % 2 ? c.ch.accent : '#ffffff', scale);
+      if (k < 1) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        glowDot(ctx, x + 2 * scale, y + 3 * scale, 18 * (1 - e), '#ffffff', 0.6 * (1 - e));
+        ctx.restore();
+      }
+    }
+    ctx.globalAlpha = a * clamp((t - 0.7) / 0.5, 0, 1);
+    drawTextShadow(ctx, c.ch.sub, VIEW_W / 2, cy + 18, Theme.ui, 1, 'center');
+    ctx.restore();
+    ctx.globalAlpha = 1;
   }
 
   interact() {
@@ -2111,7 +2178,7 @@ export class Game {
       if (dist(mx, my, this.portal.x, this.portal.y - 18) < 26) {
         Camera.punch(-1.6);
         if (dist(p.x, p.cy, this.portal.x, this.portal.y - 18) > 70) return;
-        burst(this.portal.x, this.portal.y - 18, 30, { color: Theme.platformGlow, speedMin: 30, speedMax: 160, lifeMin: 0.3, lifeMax: 0.7 });
+        burst(this.portal.x, this.portal.y - 18, 30, { color: exitTint(this.portal.kind), speedMin: 30, speedMax: 160, lifeMin: 0.3, lifeMax: 0.7 });
         Camera.add(6);
         this.startRoom(this.roomIndex + 1);
         return;
@@ -2139,8 +2206,8 @@ export class Game {
     ctx.save();
     Camera.apply(ctx);
     drawBackground(ctx, this.time, this.roomIndex);
-    drawLightShafts(ctx, this.time);
-    drawArena(ctx, this.time);
+    drawLightShafts(ctx, this.time, this.roomIndex);
+    drawArena(ctx, this.time, this.roomIndex);
     if (!this.roomCleared) drawSpawnPads(ctx, this.time, activeSpawnPads(this.waveIndex));
 
     // slam shockwaves
@@ -2157,6 +2224,7 @@ export class Game {
       ctx.restore();
     }
 
+    this.drawFloorReflections(ctx);
     for (const pk of this.pickups) pk.draw(ctx);
     if (this.anvil) this.anvil.draw(ctx);
     if (this.portal) this.portal.draw(ctx);
@@ -2203,8 +2271,59 @@ export class Game {
     // over the pause menu, since that is where a phone reaches it from
     if (this.codex) drawCodex(ctx, this);
     if (this.debugOpen) drawDebugMenu(ctx, this);
-    this.drawOmen(ctx);
+    this.drawChapterCard(ctx);
     this.drawToast(ctx);
+  }
+
+  // --- the floor looks back at you -----------------------------------------
+  // The stone is wet, so what stands on it is in it: the same sprite, mirrored
+  // about the floor line, squashed, and fading out as it goes down. It is a
+  // second draw per body, so only the things worth reflecting get one, and the
+  // whole thing switches off with the effects budget.
+
+  drawFloorReflections(ctx) {
+    const amount = reflectAmount(this.roomIndex);
+    if (!Perf.reflections || amount <= 0.01) return;
+    const cast = [];
+    if (this.player && !this.player.dead) cast.push(this.player);
+    for (const e of this.enemies) {
+      if (e.dead || e.spawnT > 0 || e.def.flying) continue;
+      // only what is standing on the floor, not what is up on a platform or
+      // halfway through a jump: the reflection would land nowhere
+      if (Math.abs(e.y - GROUND_Y) > 3) continue;
+      cast.push(e);
+      if (cast.length >= 6) break;        // a crowd reflects as a crowd anyway
+    }
+    if (!cast.length) return;
+
+    // No clip is needed: mirroring about the floor line can only ever put a
+    // reflection below it, and clipping is the expensive half of doing this.
+    ctx.save();
+    // mirror about the floor line, and flatten it: y' = GROUND_Y + (GROUND_Y - y) * k
+    const k = 0.5;
+    ctx.translate(0, GROUND_Y * (1 + k));
+    ctx.scale(1, -k);
+    ctx.globalAlpha = 0.5 * amount;
+    for (const e of cast) {
+      try { e.draw(ctx); } catch { /* a reflection is never worth a crash */ }
+    }
+    ctx.restore();
+
+    // and the sheen over the top of it, so it reads as a surface and not as a
+    // second sprite standing upside down
+    ctx.save();
+    const tint = floorTint(this.roomIndex);
+    ctx.fillStyle = linGrad(ctx, 'reflectFade' + this.roomIndex, 0, GROUND_Y, 0, GROUND_Y + 26, [
+      [0, rgba(tint, 0)], [0.45, rgba(tint, 0.3 + (1 - amount) * 0.4)], [1, rgba(tint, 0.95)],
+    ]);
+    ctx.fillRect(0, GROUND_Y + 1, VIEW_W, 26);
+    // and a band of the floor's own light over it, so the surface reads wet
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = linGrad(ctx, 'reflectSheen', 0, GROUND_Y, 0, GROUND_Y + 12, [
+      [0, rgba(Theme.groundEdge, 0.10 * amount)], [1, rgba(Theme.groundEdge, 0)],
+    ]);
+    ctx.fillRect(0, GROUND_Y + 1, VIEW_W, 12);
+    ctx.restore();
   }
 
   // --- hitboxes -----------------------------------------------------------
@@ -2407,34 +2526,6 @@ export class Game {
     }
     pxRect(ctx, m.x, m.y, 1, 1, Theme.uiAccent);
     ctx.restore();
-  }
-
-  // The sky, saying something. It sits above the middle of the screen with a
-  // streak burning across it, and it is the only warning you get.
-  drawOmen(ctx) {
-    if (!this.omenT || this.omenT <= 0) return;
-    const t = 5.0 - this.omenT;
-    const a = clamp(Math.min(t / 0.4, this.omenT / 0.8), 0, 1);
-    ctx.save();
-    ctx.globalAlpha = a;
-    // the comet itself, crossing behind the words
-    const k = clamp(t / 1.6, 0, 1);
-    const cx = lerp(-40, VIEW_W + 40, k), cy = lerp(20, 74, k * k);
-    if (k < 1) {
-      ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      for (let i = 0; i < 10; i++) {
-        const kk = clamp(k - i * 0.012, 0, 1);
-        glowDot(ctx, lerp(-40, VIEW_W + 40, kk), lerp(20, 74, kk * kk),
-                9 - i * 0.7, i < 3 ? '#ffe6a8' : '#ff8a3c', 0.3 - i * 0.026);
-      }
-      glowDot(ctx, cx, cy, 7, '#ffffff', 0.7);
-      ctx.restore();
-    }
-    ctx.globalAlpha = a * (0.75 + 0.25 * Math.sin(this.time * 6));
-    drawTextShadow(ctx, COMET_OMEN.message, VIEW_W / 2, 52, '#ff8a3c', 2, 'center');
-    ctx.restore();
-    ctx.globalAlpha = 1;
   }
 
   drawToast(ctx) {

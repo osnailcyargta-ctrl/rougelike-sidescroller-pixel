@@ -320,9 +320,9 @@ export class PostFX {
     gl.uniform1i(this.uni(p, 'uBloom'), 1);
     gl.uniform2f(this.uni(p, 'uResolution'), this.scene.width, this.scene.height);
     gl.uniform1f(this.uni(p, 'uTime'), this.time);
-    gl.uniform1f(this.uni(p, 'uBloomStrength'), Theme.bloomStrength);
+    gl.uniform1f(this.uni(p, 'uBloomStrength'), Theme.bloomStrength * (this.bloomScale ?? 1));
     gl.uniform1f(this.uni(p, 'uVignette'), Theme.vignette);
-    gl.uniform1f(this.uni(p, 'uChroma'), Theme.chroma);
+    gl.uniform1f(this.uni(p, 'uChroma'), Theme.chroma * (this.chromaScale ?? 1));
     gl.uniform1f(this.uni(p, 'uScanline'), Theme.scanline);
     gl.uniform1f(this.uni(p, 'uSaturation'), Theme.saturation);
     gl.uniform1f(this.uni(p, 'uHit'), this.hit);

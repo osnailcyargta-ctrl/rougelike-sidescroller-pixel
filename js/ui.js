@@ -1,11 +1,11 @@
 // Immediate-mode UI drawn straight onto the 480x270 pixel canvas so the
 // post-processing chain (and any user shader) affects the interface too.
-import { clamp, lerp, rand, rgba, TAU } from './util.js';
+import { clamp, lerp, rand, rgba, mixHex, TAU } from './util.js';
 import { Theme } from './theme.js';
 import { drawText, drawTextShadow, drawTextFit, textWidth, fitScale } from './font.js';
 import { pxRect, glowDot, Camera } from './gfx.js';
 import { VIEW_W, VIEW_H, BOW, SHARDGUN, STINGER_GUN, PLAYER, ENEMY_TYPES, BOSS_TYPES,
-  FINAL_ROOM, BOSS_ROOM_INTERVAL } from './config.js';
+  FINAL_ROOM, BOSS_ROOM_INTERVAL, chapterFor } from './config.js';
 import { ENEMY_TINT } from './entities.js';
 import { Options } from './settings.js';
 import { drawBossPreview, bossIdForRoom } from './boss.js';
@@ -62,18 +62,51 @@ export function closeButton(ctx, r, hot) {
 }
 
 export function panel(ctx, x, y, w, h, opts = {}) {
+  x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
   const a = opts.alpha ?? 0.92;
-  ctx.fillStyle = rgba(Theme.uiPanel, a);
-  ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+  const c = opts.accent ?? Theme.uiAccent;
+
+  // a shadow under it, so panels sit above the world instead of in it
+  ctx.fillStyle = rgba('#000000', 0.35 * a);
+  ctx.fillRect(x + 2, y + 3, w, h);
+
+  // the body: a slate that lightens toward the top
+  const g = ctx.createLinearGradient(0, y, 0, y + h);
+  g.addColorStop(0, rgba(mixHex(Theme.uiPanel, '#ffffff', 0.10), a));
+  g.addColorStop(0.35, rgba(Theme.uiPanel, a));
+  g.addColorStop(1, rgba(mixHex(Theme.uiPanel, '#000000', 0.35), a));
+  ctx.fillStyle = g;
+  ctx.fillRect(x, y, w, h);
+
+  // an inner top light and a bottom shade, one pixel each
+  pxRect(ctx, x + 1, y + 1, w - 2, 1, rgba('#ffffff', 0.10));
+  pxRect(ctx, x + 1, y + h - 2, w - 2, 1, rgba('#000000', 0.30));
+
+  // the frame
   ctx.strokeStyle = rgba(opts.border ?? Theme.uiDim, 0.9);
   ctx.lineWidth = 1;
-  ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, Math.round(w) - 1, Math.round(h) - 1);
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  // and the accent rail down the left side, which is what makes it ours
+  pxRect(ctx, x, y + 2, 1, h - 4, rgba(c, 0.7));
+  pxRect(ctx, x + 1, y + 3, 1, h - 6, rgba(c, 0.22));
+
   // corner ticks
-  const c = opts.accent ?? Theme.uiAccent;
-  pxRect(ctx, x, y, 3, 1, c); pxRect(ctx, x, y, 1, 3, c);
-  pxRect(ctx, x + w - 3, y, 3, 1, c); pxRect(ctx, x + w - 1, y, 1, 3, c);
-  pxRect(ctx, x, y + h - 1, 3, 1, c); pxRect(ctx, x, y + h - 3, 1, 3, c);
-  pxRect(ctx, x + w - 3, y + h - 1, 3, 1, c); pxRect(ctx, x + w - 1, y + h - 3, 1, 3, c);
+  const t = opts.ticks ?? 4;
+  pxRect(ctx, x, y, t, 1, c); pxRect(ctx, x, y, 1, t, c);
+  pxRect(ctx, x + w - t, y, t, 1, c); pxRect(ctx, x + w - 1, y, 1, t, c);
+  pxRect(ctx, x, y + h - 1, t, 1, c); pxRect(ctx, x, y + h - t, 1, t, c);
+  pxRect(ctx, x + w - t, y + h - 1, t, 1, c); pxRect(ctx, x + w - 1, y + h - t, 1, t, c);
+}
+
+// A short label sitting on a panel's top edge, the way a plate is riveted on.
+export function panelTitle(ctx, x, y, w, label, accent = Theme.uiAccent) {
+  const tw = textWidth(label, 1) + 10;
+  const tx = Math.round(x + (w - tw) / 2);
+  ctx.fillStyle = rgba('#000000', 0.85);
+  ctx.fillRect(tx, y - 4, tw, 9);
+  pxRect(ctx, tx, y - 4, tw, 1, accent);
+  pxRect(ctx, tx, y + 4, tw, 1, rgba(accent, 0.5));
+  drawText(ctx, label, tx + 5, y - 2, accent, 1);
 }
 
 // Hover state is eased per button rather than snapped, so the whole front end
@@ -93,60 +126,45 @@ export function button(ctx, id, x, y, w, h, label, opts = {}) {
   if (hot) UI.hovered = id;
   const sel = opts.selected;
   const k = hoverAmount(id, hot, UI.dt);
-  // the whole button leans out toward the cursor as it lights up
-  const grow = k * 1.5;
-  const bx = Math.round(x - grow), by = Math.round(y - grow * 0.5);
-  const bw = Math.round(w + grow * 2), bh = Math.round(h + grow);
+  const accent = opts.accent ?? Theme.uiAccent;
+  const bx = Math.round(x), by = Math.round(y), bw = Math.round(w), bh = Math.round(h);
 
+  // the glow it throws while the cursor is on it
   if (k > 0.02) {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    glowDot(ctx, x + w / 2, y + h / 2, w * 0.55, Theme.uiAccent, 0.10 * k);
+    glowDot(ctx, bx + bw / 2, by + bh / 2, bw * 0.6, accent, 0.12 * k);
     ctx.restore();
   }
-  const base = opts.disabled ? rgba('#000000', 0.4)
-    : sel ? rgba(Theme.platformGlow, 0.16) : rgba('#000000', 0.45);
+
+  // body
+  const base = opts.disabled ? rgba('#000000', 0.35)
+    : sel ? rgba(mixHex('#000000', accent, 0.22), 0.75) : rgba('#000000', 0.5);
   ctx.fillStyle = base;
   ctx.fillRect(bx, by, bw, bh);
   if (k > 0.02) {
-    ctx.fillStyle = rgba(Theme.uiAccent, 0.22 * k);
+    ctx.fillStyle = rgba(accent, 0.16 * k);
     ctx.fillRect(bx, by, bw, bh);
   }
-  const edge = opts.disabled ? rgba(Theme.uiDim, 0.4)
-    : sel ? Theme.platformGlow : rgba(Theme.uiDim, 0.8);
-  ctx.strokeStyle = k > 0.02 ? mixRgba(edge, Theme.uiAccent, k) : edge;
+  // a light along the top and a shade along the bottom: it reads as a key
+  pxRect(ctx, bx + 1, by, bw - 2, 1, rgba('#ffffff', opts.disabled ? 0.05 : 0.13 + 0.12 * k));
+  pxRect(ctx, bx + 1, by + bh - 1, bw - 2, 1, rgba('#000000', 0.35));
+
+  // frame
+  const edge = opts.disabled ? rgba(Theme.uiDim, 0.35)
+    : sel ? accent : rgba(Theme.uiDim, 0.75);
+  ctx.strokeStyle = k > 0.02 ? mixRgba(edge, accent, k) : edge;
+  ctx.lineWidth = 1;
   ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
-  // corner ticks that grow in with the hover
-  if (k > 0.02) {
-    const c = Math.round(3 + k * 3);
-    ctx.strokeStyle = rgba(Theme.uiAccent, k);
-    ctx.beginPath();
-    for (const [sx, sy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
-      const px = bx + (sx ? bw : 0) + 0.5, py = by + (sy ? bh : 0) + 0.5;
-      ctx.moveTo(px + (sx ? -c : c), py);
-      ctx.lineTo(px, py);
-      ctx.lineTo(px, py + (sy ? -c : c));
-    }
-    ctx.stroke();
-  }
-  const col = opts.disabled ? Theme.uiDim : k > 0.35 ? Theme.uiAccent : Theme.ui;
-  // every button in the game comes through here, so a label that does not fit
-  // shrinks rather than running off both ends of its own box
-  drawTextFit(ctx, label, x + w / 2, y + (h - 7) / 2, col, w - 8, opts.scale ?? 1, 'center');
-  if (k > 0.05) {
-    const p = Math.sin(UI.t * 8) * 1;
-    const slide = (1 - k) * 6;
-    ctx.save();
-    ctx.globalAlpha = k;
-    drawText(ctx, '>', x + 4 + p - slide, y + (h - 7) / 2, Theme.uiAccent, 1);
-    drawText(ctx, '<', x + w - 9 - p + slide, y + (h - 7) / 2, Theme.uiAccent, 1);
-    ctx.restore();
-  }
-  // Two ways to fire. By default a button acts the moment it is pressed,
-  // which is what every menu here has always done. `release` waits for the
-  // finger to come up on the same button it went down on, so a list can tell
-  // a tap from the start of a drag - and `suppress` is how the list says the
-  // press turned into one.
+
+  // the underline: the whole width when selected, growing from the middle on
+  // hover. This is the one moving part, and it is the whole language.
+  const uw = Math.round(bw * (sel ? 1 : k));
+  if (uw > 0) pxRect(ctx, bx + (bw - uw) / 2, by + bh - 1, uw, 1, accent);
+
+  const col = opts.disabled ? rgba(Theme.uiDim, 0.7) : k > 0.4 || sel ? '#ffffff' : Theme.ui;
+  drawTextFit(ctx, label, bx + bw / 2, by + (bh - 7) / 2, col, bw - 10, opts.scale ?? 1, 'center');
+
   if (hot && Input.mouseDown.left) UI.pressedId = id;
   const clicked = opts.release
     ? (hot && Input.mouseUp.left && UI.pressedId === id && !opts.suppress)
@@ -230,51 +248,76 @@ export function drawHUD(ctx, game) {
   const p = game.player;
   if (!p) return;
   const t = UI.t;
+  const ch = chapterFor(game.roomIndex);
 
-  // health. The touch pad parks a pause button in the corner, so the whole
-  // block slides right to leave it clear.
-  const bw = 118;
+  // --- the left block: what you are holding, and how much of you is left
   const px = hudInset();
-  const bx = px + 5;
-  panel(ctx, px, 6, bw + 10, 22, { alpha: 0.55 });
-  // Name what is in your hand, not the class you picked at the start - and
-  // not only weapons: a placeable in the hotbar is still something you hold.
+  const bw = 118;
+  const H = 30;
+  panel(ctx, px, 5, bw + 34, H, { alpha: 0.62, accent: ch.accent });
+
+  // the held thing, in its own framed slot
   const slot = p.inventory.selectedItem();
+  const ix = px + 5, iy = 8;
+  ctx.fillStyle = rgba('#000000', 0.55);
+  ctx.fillRect(ix, iy, 20, 20);
+  ctx.strokeStyle = rgba(ch.accent, 0.7);
+  ctx.strokeRect(ix + 0.5, iy + 0.5, 19, 19);
+  if (slot) {
+    const def = ITEMS[slot.id];
+    pxRect(ctx, ix + 1, iy + 1, 18, 1, rgba(RARITY[def.rarity].color, 0.8));
+    drawItemIcon(ctx, slot.id, ix + 3, iy + 3, 14, t);
+  }
+
+  const tx = ix + 25;
   const held = slot ? ITEMS[slot.id] : null;
-  // long names shrink to fit rather than being cut off - the readout to the
-  // right owns the rest of the panel
   const heldName = held ? held.name.toUpperCase() : 'UNARMED';
   const hpText = `${Math.ceil(p.hp)}/${p.maxHp}`;
-  drawTextFit(ctx, heldName, bx, 9, Theme.uiDim, bw - textWidth(hpText, 1) - 5, 1);
+  drawTextFit(ctx, heldName, tx, 9, Theme.ui, bw - textWidth(hpText, 1) - 6, 1);
+  drawTextShadow(ctx, hpText, tx + bw, 9, p.hp / p.maxHp < 0.3 ? Theme.hp : Theme.uiDim, 1, 'right');
+
+  // the health bar, cut into blocks so a number is not the only way to read it
   const hpFrac = clamp(p.hp / p.maxHp, 0, 1);
-  pxRect(ctx, bx, 18, bw, 5, Theme.hpBack);
-  const grad = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+  const hy = 19;
+  pxRect(ctx, tx - 1, hy - 1, bw + 2, 8, rgba('#000000', 0.75));
+  pxRect(ctx, tx, hy, bw, 6, Theme.hpBack);
+  const grad = ctx.createLinearGradient(tx, 0, tx + bw, 0);
   grad.addColorStop(0, Theme.hp);
   grad.addColorStop(1, '#ff9ab0');
   ctx.fillStyle = grad;
-  ctx.fillRect(bx, 18, Math.round(bw * hpFrac), 5);
+  ctx.fillRect(tx, hy, Math.round(bw * hpFrac), 6);
+  pxRect(ctx, tx, hy, Math.round(bw * hpFrac), 1, rgba('#ffffff', 0.35));
+  // one notch every 20 points of maximum health
+  const notches = Math.max(1, Math.round(p.maxHp / 20));
+  for (let i = 1; i < notches; i++) {
+    pxRect(ctx, tx + Math.round((bw * i) / notches), hy, 1, 6, rgba('#000000', 0.45));
+  }
   if (hpFrac < 0.3) {
-    ctx.fillStyle = rgba('#ffffff', 0.25 + 0.25 * Math.sin(t * 9));
-    ctx.fillRect(bx, 18, Math.round(bw * hpFrac), 5);
+    ctx.fillStyle = rgba('#ffffff', 0.2 + 0.25 * Math.sin(t * 9));
+    ctx.fillRect(tx, hy, Math.round(bw * hpFrac), 6);
   }
   ctx.strokeStyle = rgba(Theme.uiDim, 0.8);
-  ctx.strokeRect(bx - 0.5, 17.5, bw + 1, 6);
-  drawTextShadow(ctx, hpText, bx + bw, 9, Theme.ui, 1, 'right');
+  ctx.strokeRect(tx - 0.5, hy - 0.5, bw + 1, 7);
   if (p.shieldMax > 0) {
     const sw = Math.round(bw * clamp(p.shield / p.shieldMax, 0, 1));
-    pxRect(ctx, bx, 24, bw, 2, rgba('#0b2438', 0.9));
-    pxRect(ctx, bx, 24, sw, 2, '#8fd8ff');
-    if (sw > 0) glowDot(ctx, bx + sw, 25, 6, '#8fd8ff', 0.35);
+    pxRect(ctx, tx, hy + 7, bw, 2, rgba('#0b2438', 0.9));
+    pxRect(ctx, tx, hy + 7, sw, 2, '#8fd8ff');
+    if (sw > 0) glowDot(ctx, tx + sw, hy + 8, 6, '#8fd8ff', 0.35);
   }
 
-  // run status: where you are, which wave, how many are left
-  drawTextShadow(ctx, `ROOM ${game.roomIndex}`, VIEW_W - 7, 8, Theme.ui, 1, 'right');
+  // --- the right block: where you are and what is still coming
+  const rw = 78;
+  const rx = VIEW_W - rw - 5;
+  const rows = Options.showWaveCounter && !game.roomCleared ? 3 : 2;
+  panel(ctx, rx, 5, rw, 10 + rows * 9, { alpha: 0.62, accent: ch.accent });
+  drawTextFit(ctx, ch.name, rx + rw - 5, 9, rgba(ch.accent, 0.95), rw - 10, 1, 'right');
+  drawTextShadow(ctx, `ROOM ${game.roomIndex}`, rx + rw - 5, 18, Theme.ui, 1, 'right');
   if (Options.showWaveCounter) {
     const label = game.roomCleared ? 'CLEARED' : `WAVE ${game.waveIndex}/${game.wavesInRoom()}`;
-    drawTextShadow(ctx, label, VIEW_W - 7, 18, game.roomCleared ? Theme.uiAccent : Theme.uiDim, 1, 'right');
+    drawTextShadow(ctx, label, rx + rw - 5, 27, game.roomCleared ? Theme.uiAccent : Theme.uiDim, 1, 'right');
     if (!game.roomCleared) {
       const alive = game.enemies.filter((e) => !e.dead).length + game.pendingSpawns.length;
-      drawTextShadow(ctx, `LEFT ${alive}`, VIEW_W - 7, 28, Theme.uiDim, 1, 'right');
+      drawTextShadow(ctx, `LEFT ${alive}`, rx + rw - 5, 36, Theme.uiDim, 1, 'right');
     }
   }
   if (Options.showFps) {
@@ -328,19 +371,38 @@ function drawBossBar(ctx, game) {
 }
 
 function slotBox(ctx, x, y, s, selected, item, t) {
-  ctx.fillStyle = rgba('#000000', 0.55);
-  ctx.fillRect(x, y, s, s);
-  ctx.strokeStyle = selected ? Theme.uiAccent : rgba(Theme.uiDim, 0.7);
-  ctx.strokeRect(x + 0.5, y + 0.5, s - 1, s - 1);
+  x = Math.round(x); y = Math.round(y);
+  // the selected slot stands a pixel proud of the rest
+  const lift = selected ? 2 : 0;
+  const yy = y - lift;
+  ctx.fillStyle = rgba('#000000', selected ? 0.72 : 0.5);
+  ctx.fillRect(x, yy, s, s + lift);
+  // a lit top edge and a shaded bottom, so the slot has a shape
+  pxRect(ctx, x + 1, yy, s - 2, 1, rgba('#ffffff', selected ? 0.22 : 0.10));
+  pxRect(ctx, x + 1, yy + s + lift - 1, s - 2, 1, rgba('#000000', 0.4));
+  ctx.strokeStyle = selected ? Theme.uiAccent : rgba(Theme.uiDim, 0.6);
+  ctx.strokeRect(x + 0.5, yy + 0.5, s - 1, s + lift - 1);
   if (selected) {
-    glowDot(ctx, x + s / 2, y + s / 2, s * 0.9, Theme.uiAccent, 0.18);
-    pxRect(ctx, x, y - 2, s, 1, Theme.uiAccent);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    glowDot(ctx, x + s / 2, yy + s / 2, s * 0.95, Theme.uiAccent, 0.16);
+    ctx.restore();
+    pxRect(ctx, x, yy - 2, s, 1, Theme.uiAccent);
+    pxRect(ctx, x + 2, yy - 4, s - 4, 1, rgba(Theme.uiAccent, 0.4));
   }
   if (item) {
     const def = ITEMS[item.id];
-    pxRect(ctx, x + 1, y + 1, s - 2, 1, rgba(RARITY[def.rarity].color, 0.6));
-    drawItemIcon(ctx, item.id, x + (s - 12) / 2, y + (s - 12) / 2, 12, t);
-    if (item.count > 1) drawTextShadow(ctx, item.count, x + s - 2, y + s - 8, Theme.ui, 1, 'right');
+    // a rarity stripe down the left of the slot rather than across the top:
+    // it never sits under the icon, so both stay readable
+    pxRect(ctx, x + 1, yy + 1, 1, s + lift - 2, rgba(RARITY[def.rarity].color, 0.85));
+    drawItemIcon(ctx, item.id, x + (s - 12) / 2, yy + (s - 12) / 2, 12, t);
+    if (item.count > 1) {
+      const label = String(item.count);
+      const w = textWidth(label, 1) + 2;
+      ctx.fillStyle = rgba('#000000', 0.7);
+      ctx.fillRect(x + s - w - 1, yy + s + lift - 8, w + 1, 8);
+      drawTextShadow(ctx, label, x + s - 2, yy + s + lift - 7, Theme.ui, 1, 'right');
+    }
   }
 }
 

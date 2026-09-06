@@ -11,7 +11,6 @@ import { WormBoss } from './worm.js';
 import { AlphadsBoss } from './alphads.js';
 import { CeilingBoss } from './ceiling.js';
 import { PoitnusBoss } from './poitnus.js';
-import { CrabometBoss } from './crabomet.js';
 
 // How far a ray from (ox, oy) travels before it leaves the arena.
 function rayLength(ox, oy, dx, dy) {
@@ -130,6 +129,8 @@ export class GolemBoss {
 
   enterPhase2() {
     this.phase = 2;
+    // the head coming off is worth stopping the fight for
+    this.game.bossPhaseCutscene(this);
     this.hp = Math.max(1, this.hp);
     this.beams.length = 0;
     this.state = 'split';
@@ -947,6 +948,5 @@ export function makeBoss(game, roomIndex, which = null) {
   if (id === 'alphads') return new AlphadsBoss(game, roomIndex);
   if (id === 'ceiling') return new CeilingBoss(game, roomIndex);
   if (id === 'poitnus') return new PoitnusBoss(game, roomIndex);
-  if (id === 'crabomet') return new CrabometBoss(game, roomIndex);
   return new GolemBoss(game, roomIndex);
 }

@@ -1,83 +1,31 @@
 // Arena backdrop, platforms, pickups, portal and the wave composer.
 import { clamp, lerp, rand, randInt, choice, streamFor, rgba, mixHex, TAU, dist } from './util.js';
-import { Theme } from './theme.js';
-import { pxRect, glowDot, spawnParticle, burst, linGrad } from './gfx.js';
-import { VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER, BLOCK, WAVES, ANVIL, SEEDED_THROUGH_ROOM } from './config.js';
+import { Theme, ThemeRev } from './theme.js';
+import { pxRect, glowDot, spawnParticle, burst, linGrad, bakedLayer } from './gfx.js';
+import { VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER, BLOCK, WAVES, ANVIL, SEEDED_THROUGH_ROOM, chapterFor } from './config.js';
+import { bakeSky, bakeFloor, drawPlatform, drawChapterAmbience, updatePlatforms, drawExit, exitTint, PAL } from './chapters.js';
 import { ITEMS, RARITY, drawItemIcon } from './items.js';
 import { Sfx } from './audio.js';
 import { Options } from './settings.js';
 
 // --- background ----------------------------------------------------------
 
-const stars = [];
+// A few things drift over every chapter: dust in the air, and whatever the
+// chapter itself wants to do on top of its baked backdrop.
 const motes = [];
-const fog = [];
-// Three tower layers at different depths; each scrolls at its own rate.
-const TOWER_LAYERS = [
-  { count: 9, minH: 70, maxH: 130, minW: 18, maxW: 30, alpha: 0.34, par: 0.10, tint: 0.0, lit: 0.10 },
-  { count: 7, minH: 100, maxH: 175, minW: 26, maxW: 44, alpha: 0.52, par: 0.22, tint: 0.30, lit: 0.26 },
-  { count: 5, minH: 130, maxH: 215, minW: 34, maxW: 58, alpha: 0.72, par: 0.38, tint: 0.6, lit: 0.45 },
-];
-const towers = [];
-
-for (let i = 0; i < 90; i++) {
-  stars.push({
-    x: rand(VIEW_W), y: rand(GROUND_Y - 30), s: Math.random() < 0.2 ? 2 : 1,
-    p: rand(TAU), sp: rand(0.6, 2.4), warm: Math.random() < 0.25,
-  });
-}
-for (let i = 0; i < 46; i++) {
+for (let i = 0; i < 34; i++) {
   motes.push({
     x: rand(VIEW_W), y: rand(VIEW_H), vy: rand(-11, -3), vx: rand(-7, 7),
     s: Math.random() < 0.18 ? 2 : 1, p: rand(TAU), depth: rand(0.4, 1),
     warm: Math.random() < 0.3,
   });
 }
-for (let i = 0; i < 7; i++) {
-  fog.push({ x: rand(VIEW_W), y: rand(GROUND_Y - 90, GROUND_Y + 10), r: rand(60, 130), vx: rand(-5, 5), a: rand(0.05, 0.12) });
-}
-
-// Deterministic per-room tower layout, rebuilt only when the room changes.
-let towerRoom = -1;
-function buildTowers(roomIndex) {
-  towers.length = 0;
-  let seed = roomIndex * 9871 + 13;
-  const rnd = () => {
-    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-    return seed / 0x7fffffff;
-  };
-  for (let l = 0; l < TOWER_LAYERS.length; l++) {
-    const L = TOWER_LAYERS[l];
-    for (let i = 0; i < L.count; i++) {
-      const w = L.minW + rnd() * (L.maxW - L.minW);
-      towers.push({
-        layer: l,
-        x: (i + rnd() * 0.7) * (VIEW_W / L.count) - 20,
-        w,
-        h: L.minH + rnd() * (L.maxH - L.minH),
-        seed: rnd() * 10,
-        windows: Math.floor(2 + rnd() * 4),
-      });
-    }
-  }
-  towerRoom = roomIndex;
-}
 
 // `frozen` holds the platforms still while the game is paused - an inventory,
 // the fold wheel, the forge, the pause menu. Ambience keeps drifting, because
 // nothing rides on it.
-export function updateWorld(dt, frozen = false) {
-  // drifting platforms: record dx so riders can be carried with them
-  for (const p of PLATFORMS) {
-    if (!p.drift) continue;
-    if (frozen) { p.dx = 0; continue; }
-    const d = p.drift;
-    const before = p.x;
-    p.x += d.speed * d.dir * dt;
-    if (p.x <= d.min) { p.x = d.min; d.dir = 1; }
-    if (p.x >= d.max) { p.x = d.max; d.dir = -1; }
-    p.dx = p.x - before;
-  }
+export function updateWorld(dt, frozen = false, t = 0) {
+  updatePlatforms(dt, t, frozen);
   for (const m of motes) {
     m.x += m.vx * dt * m.depth;
     m.y += m.vy * dt * m.depth;
@@ -85,109 +33,23 @@ export function updateWorld(dt, frozen = false) {
     if (m.x < -4) m.x = VIEW_W + 4;
     if (m.x > VIEW_W + 4) m.x = -4;
   }
-  for (const f of fog) {
-    f.x += f.vx * dt;
-    if (f.x < -f.r) f.x = VIEW_W + f.r;
-    if (f.x > VIEW_W + f.r) f.x = -f.r;
-  }
 }
 
 export function drawBackground(ctx, t, roomIndex) {
-  // --- sky
-  ctx.fillStyle = linGrad(ctx, 'sky', 0, 0, 0, VIEW_H, [
-    [0, Theme.bgFar], [0.45, Theme.bgMid], [0.82, Theme.bgNear], [1, Theme.fog],
-  ]);
-  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  // the whole backdrop of this chapter, painted once and blitted after that
+  ctx.drawImage(bakedLayer('sky', `${roomIndex}:${ThemeRev.n}`, (c) => bakeSky(c, roomIndex)), 0, 0);
+  drawChapterAmbience(ctx, t, roomIndex);
 
-  // horizon bloom behind the skyline
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  const hg = ctx.createRadialGradient(VIEW_W / 2, GROUND_Y - 10, 0, VIEW_W / 2, GROUND_Y - 10, 260);
-  hg.addColorStop(0, rgba(Theme.platformGlow, 0.08));
-  hg.addColorStop(1, rgba(Theme.platformGlow, 0));
-  ctx.fillStyle = hg;
-  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
-  ctx.restore();
-
-  // --- stars
-  for (const s of stars) {
-    const a = 0.3 + 0.5 * Math.sin(t * s.sp + s.p);
-    pxRect(ctx, s.x, s.y, s.s, s.s, rgba(s.warm ? Theme.uiAccent : Theme.star, a));
-  }
-
-  // --- light shafts falling from above
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  for (let i = 0; i < 3; i++) {
-    const x = ((i * 173 + roomIndex * 61) % VIEW_W);
-    const sway = Math.sin(t * 0.35 + i * 2) * 12;
-    const w = 26 + i * 10;
-    const sg = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
-    sg.addColorStop(0, rgba(Theme.platformGlow, 0.05));
-    sg.addColorStop(1, rgba(Theme.platformGlow, 0));
-    ctx.fillStyle = sg;
-    ctx.beginPath();
-    ctx.moveTo(x - w / 3 + sway, 0);
-    ctx.lineTo(x + w / 3 + sway, 0);
-    ctx.lineTo(x + w + sway * 1.6, GROUND_Y);
-    ctx.lineTo(x - w + sway * 1.6, GROUND_Y);
-    ctx.closePath();
-    ctx.fill();
-  }
-  ctx.restore();
-
-  // --- parallax skyline
-  if (towerRoom !== roomIndex) buildTowers(roomIndex);
-  for (let l = 0; l < TOWER_LAYERS.length; l++) {
-    const L = TOWER_LAYERS[l];
-    ctx.save();
-    ctx.globalAlpha = L.alpha;
-    for (const tw of towers) {
-      if (tw.layer !== l) continue;
-      const x = Math.round(tw.x + Math.sin(t * 0.05 + tw.seed) * 2 * L.par);
-      const top = Math.round(GROUND_Y - tw.h);
-      const body = mixHex(mixHex(Theme.fog, Theme.bgFar, 0.45), Theme.bgNear, 1 - L.tint);
-      pxRect(ctx, x, top, tw.w, tw.h, body);
-      // lit cap and a rim on the light side
-      pxRect(ctx, x, top, tw.w, 2, rgba(Theme.platformGlow, 0.10 + L.lit * 0.20));
-      pxRect(ctx, x, top, 1, tw.h, rgba(Theme.platformGlow, 0.06 + L.lit * 0.10));
-      // windows
-      for (let k = 0; k < tw.windows; k++) {
-        const wy = top + 14 + k * 26;
-        if (wy > GROUND_Y - 14) break;
-        const flick = 0.10 + L.lit * 0.35 * (0.6 + 0.4 * Math.sin(t * (1 + k * 0.4) + tw.seed * 3));
-        pxRect(ctx, x + 4, wy, 3, 6, rgba(Theme.platformGlow, flick));
-        if (tw.w > 30) pxRect(ctx, x + tw.w - 8, wy + 6, 3, 6, rgba(Theme.uiAccent, flick * 0.6));
-      }
-    }
-    ctx.restore();
-  }
-
-  // --- fog banks
-  ctx.save();
-  for (const f of fog) {
-    const fg = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.r);
-    fg.addColorStop(0, rgba(Theme.fog, f.a));
-    fg.addColorStop(1, rgba(Theme.fog, 0));
-    ctx.fillStyle = fg;
-    ctx.beginPath();
-    ctx.arc(f.x, f.y, f.r, 0, TAU);
-    ctx.fill();
-  }
-  ctx.restore();
-
-  // near haze band just above the floor
-  ctx.fillStyle = linGrad(ctx, 'haze', 0, GROUND_Y - 52, 0, GROUND_Y, [
-    [0, rgba(Theme.bgNear, 0)], [1, rgba(Theme.bgNear, 0.5)],
-  ]);
-  ctx.fillRect(0, GROUND_Y - 52, VIEW_W, 52);
-
-  // --- ambient motes, brighter the closer they are
+  // dust, which every chapter has some of
+  const ch = chapterFor(roomIndex);
+  const tint = ch.id === 'field' ? PAL.field.grassLit
+    : ch.id === 'castle' ? PAL.castle.torch
+    : ch.id === 'hell' ? PAL.hell.lavaHot : PAL.aether.glow;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   for (const m of motes) {
-    const a = (0.16 + 0.34 * Math.sin(t * 2 + m.p)) * m.depth;
-    pxRect(ctx, m.x, m.y, m.s, m.s, rgba(m.warm ? Theme.uiAccent : Theme.platformGlow, a));
+    const a = (0.14 + 0.3 * Math.sin(t * 2 + m.p)) * m.depth * (ch.id === 'aether' ? 0.6 : 1);
+    pxRect(ctx, m.x, m.y, m.s, m.s, rgba(m.warm ? tint : Theme.platformGlow, a));
   }
   ctx.restore();
 }
@@ -206,9 +68,15 @@ for (let i = 0; i < 5; i++) {
   });
 }
 
-export function drawLightShafts(ctx, t) {
+export function drawLightShafts(ctx, t, roomIndex = 1) {
   const amt = Options.shafts ?? 1;
   if (amt <= 0.001) return;
+  const ch = chapterFor(roomIndex);
+  // sunlight through leaves, torchlight through dust, firelight, or whatever
+  // it is that falls in the Aether
+  const col = ch.id === 'field' ? PAL.field.sunGlow
+    : ch.id === 'castle' ? PAL.castle.torch
+    : ch.id === 'hell' ? PAL.hell.lava : '#ffffff';
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   for (const sh of SHAFTS) {
@@ -216,9 +84,9 @@ export function drawLightShafts(ctx, t) {
     const x = sh.x + drift;
     const breathe = 0.65 + 0.35 * Math.sin(t * 0.31 + sh.phase);
     const g = ctx.createLinearGradient(0, 0, 0, GROUND_Y);
-    g.addColorStop(0, rgba(Theme.platformGlow, sh.a * breathe * amt));
-    g.addColorStop(0.65, rgba(Theme.platformGlow, sh.a * breathe * 0.35 * amt));
-    g.addColorStop(1, rgba(Theme.platformGlow, 0));
+    g.addColorStop(0, rgba(col, sh.a * breathe * amt * 1.6));
+    g.addColorStop(0.65, rgba(col, sh.a * breathe * 0.5 * amt));
+    g.addColorStop(1, rgba(col, 0));
     ctx.fillStyle = g;
     const spread = sh.w * 1.9;
     ctx.beginPath();
@@ -240,86 +108,9 @@ export function drawLightShafts(ctx, t) {
   ctx.restore();
 }
 
-export function drawArena(ctx, t) {
-  // --- floor
-  ctx.fillStyle = linGrad(ctx, 'floor', 0, GROUND_Y, 0, VIEW_H, [
-    [0, Theme.ground], [1, mixHex(Theme.ground, '#000000', 0.45)],
-  ]);
-  ctx.fillRect(0, GROUND_Y, VIEW_W, VIEW_H - GROUND_Y);
-  pxRect(ctx, 0, GROUND_Y, VIEW_W, 1, Theme.groundTop);
-  pxRect(ctx, 0, GROUND_Y + 1, VIEW_W, 2, mixHex(Theme.groundTop, Theme.ground, 0.5));
-
-  // wet sheen: a soft reflection of the light above the floor line
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  ctx.fillStyle = linGrad(ctx, 'sheen', 0, GROUND_Y, 0, GROUND_Y + 16, [
-    [0, rgba(Theme.groundEdge, 0.16)], [1, rgba(Theme.groundEdge, 0)],
-  ]);
-  ctx.fillRect(0, GROUND_Y, VIEW_W, 16);
-  ctx.restore();
-
-  // glow line and travelling runes along the floor
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  ctx.fillStyle = rgba(Theme.groundEdge, 0.14);
-  ctx.fillRect(0, GROUND_Y - 5, VIEW_W, 5);
-  ctx.restore();
-  for (let x = 6; x < VIEW_W; x += BLOCK) {
-    const a = 0.2 + 0.4 * Math.sin(t * 2 + x * 0.07);
-    pxRect(ctx, x, GROUND_Y + 5, 4, 1, rgba(Theme.groundEdge, a));
-  }
-  // brick seams, offset per row
-  for (let row = 0; row < 3; row++) {
-    const y = GROUND_Y + 3 + row * 11;
-    if (y > VIEW_H) break;
-    pxRect(ctx, 0, y, VIEW_W, 1, rgba('#000000', 0.22));
-    for (let x = row % 2 ? 0 : 8; x < VIEW_W; x += 16) {
-      pxRect(ctx, x, y, 1, 11, rgba('#000000', 0.26));
-      pxRect(ctx, x + 1, y + 1, 1, 9, rgba(Theme.groundTop, 0.05));
-    }
-  }
-
-  // --- platforms
-  for (const p of PLATFORMS) {
-    // light pooling on the ground beneath each platform
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    const pool = ctx.createRadialGradient(p.x + p.w / 2, p.y + p.h + 6, 0, p.x + p.w / 2, p.y + p.h + 6, p.w * 0.6);
-    pool.addColorStop(0, rgba(Theme.platformGlow, 0.10));
-    pool.addColorStop(1, rgba(Theme.platformGlow, 0));
-    ctx.fillStyle = pool;
-    ctx.fillRect(p.x - 20, p.y, p.w + 40, 40);
-    ctx.restore();
-
-    ctx.fillStyle = linGrad(ctx, 'plat' + p.y, 0, p.y, 0, p.y + p.h, [
-      [0, Theme.platformTop], [0.3, Theme.platform], [1, mixHex(Theme.platform, '#000000', 0.4)],
-    ]);
-    ctx.fillRect(Math.round(p.x), Math.round(p.y), Math.round(p.w), Math.round(p.h));
-    pxRect(ctx, p.x, p.y, p.w, 1, mixHex(Theme.platformTop, Theme.platformGlow, 0.45));   // rim light
-    const a = 0.35 + 0.3 * Math.sin(t * 2.4 + p.x * 0.05);
-    pxRect(ctx, p.x, p.y + p.h, p.w, 1, rgba(Theme.platformGlow, a));
-
-    if (p.drift) {
-      const pulse = 0.35 + 0.25 * Math.sin(t * 8 + p.x * 0.1);
-      for (const ox of [10, p.w / 2, p.w - 10]) {
-        pxRect(ctx, p.x + ox - 1, p.y + p.h, 2, 3, rgba(Theme.platformGlow, pulse));
-        glowDot(ctx, p.x + ox, p.y + p.h + 3, 8, Theme.platformGlow, pulse * 0.55);
-      }
-      const dir = p.drift.dir;
-      for (let i = 0; i < 3; i++) {
-        const cx2 = p.x + p.w / 2 + (i - 1) * 8 + Math.sin(t * 3 + i) * 1;
-        pxRect(ctx, cx2, p.y + 3, 2, 2, rgba(Theme.groundEdge, 0.5));
-        pxRect(ctx, cx2 + dir * 2, p.y + 4, 2, 2, rgba(Theme.groundEdge, 0.3));
-      }
-    } else {
-      pxRect(ctx, p.x + 4, p.y + p.h, 2, 5, rgba(Theme.platform, 0.7));
-      pxRect(ctx, p.x + p.w - 6, p.y + p.h, 2, 5, rgba(Theme.platform, 0.7));
-    }
-    for (let x = p.x + BLOCK; x < p.x + p.w; x += BLOCK) {
-      pxRect(ctx, x, p.y, 1, p.h, rgba('#000000', 0.28));
-      pxRect(ctx, x + 1, p.y + 1, 1, p.h - 2, rgba(Theme.platformTop, 0.12));
-    }
-  }
+export function drawArena(ctx, t, roomIndex = 1) {
+  ctx.drawImage(bakedLayer('floor', `${roomIndex}:${ThemeRev.n}`, (c) => bakeFloor(c, roomIndex)), 0, 0);
+  for (const p of PLATFORMS) drawPlatform(ctx, p, t, roomIndex);
 }
 
 // Spawn pads glow while a wave is inbound.
@@ -371,6 +162,7 @@ export class Pickup {
     this.vx *= Math.pow(0.25, dt);
     let floor = GROUND_Y;
     for (const pl of PLATFORMS) {
+      if (pl.off) continue;
       if (this.x < pl.x - 2 || this.x > pl.x + pl.w + 2) continue;
       const top = pl.y;
       if (py <= top + 1 && this.y >= top && this.vy > 0) floor = Math.min(floor, top);
@@ -567,83 +359,23 @@ export class Anvil {
 }
 
 export class Portal {
-  constructor(x, y) {
+  constructor(x, y, kind = 'stair') {
     this.x = x; this.y = y; this.t = 0; this.open = 0;
+    this.kind = kind;              // what the way out looks like here
   }
   update(dt) {
     this.t += dt;
     this.open = Math.min(1, this.open + dt * 1.6);
-    if (Math.random() < dt * 20) {
+    if (Math.random() < dt * 14) {
       const a = rand(0, TAU);
       spawnParticle({
         x: this.x + Math.cos(a) * 12, y: this.y - 16 + Math.sin(a) * 16,
         vx: -Math.cos(a) * 22, vy: -Math.sin(a) * 22,
-        life: rand(0.3, 0.6), size: 1, color: Theme.platformGlow, gravity: 0, kind: 'shrink',
+        life: rand(0.3, 0.6), size: 1, color: exitTint(this.kind), gravity: 0, kind: 'shrink',
       });
     }
   }
-  draw(ctx) {
-    const k = this.open;
-    const h = 34 * k, w = 20 * k;
-    const cy = this.y - 18;
-    const breathe = 1 + Math.sin(this.t * 2.2) * 0.05;
-
-    // a pool of its light on the floor
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    const pool = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, 40 * k);
-    pool.addColorStop(0, rgba(Theme.platformGlow, 0.28 * k));
-    pool.addColorStop(1, rgba(Theme.platformGlow, 0));
-    ctx.fillStyle = pool;
-    ctx.fillRect(this.x - 44, this.y - 22, 88, 30);
-
-    // nested haloes
-    for (let i = 5; i >= 0; i--) {
-      const a = 0.09 + 0.05 * Math.sin(this.t * 3 + i);
-      ctx.fillStyle = rgba(i % 2 ? Theme.platformGlow : Theme.uiAccent, a);
-      ctx.beginPath();
-      ctx.ellipse(this.x, cy, (w / 2) * (1 + i * 0.13) * breathe, (h / 2) * (1 + i * 0.13) * breathe, 0, 0, TAU);
-      ctx.fill();
-    }
-    ctx.restore();
-
-    // the mouth: dark, with a swirl turning inside it
-    ctx.save();
-    ctx.beginPath();
-    ctx.ellipse(this.x, cy, (w / 2) * breathe, (h / 2) * breathe, 0, 0, TAU);
-    ctx.clip();
-    ctx.fillStyle = rgba(Theme.bgFar, 0.92);
-    ctx.fillRect(this.x - w, cy - h, w * 2, h * 2);
-    ctx.globalCompositeOperation = 'lighter';
-    for (let arm = 0; arm < 3; arm++) {
-      ctx.strokeStyle = rgba(arm % 2 ? Theme.uiAccent : Theme.platformGlow, 0.30);
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let i = 0; i <= 22; i++) {
-        const u = i / 22;
-        const ang = this.t * 1.5 + arm * (TAU / 3) + u * 5.2;
-        const rr = u * (w / 2);
-        const px = this.x + Math.cos(ang) * rr;
-        const py = cy + Math.sin(ang) * rr * (h / w);
-        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-      }
-      ctx.stroke();
-    }
-    ctx.restore();
-
-    // rim, with a bright travelling highlight
-    ctx.strokeStyle = rgba(Theme.platformGlow, 0.9);
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.ellipse(this.x, cy, (w / 2) * breathe, (h / 2) * breathe, 0, 0, TAU);
-    ctx.stroke();
-    for (let i = 0; i < 10; i++) {
-      const a = this.t * 1.6 + (i / 10) * TAU;
-      const bright = 0.35 + 0.65 * Math.pow(Math.max(0, Math.sin(a - this.t * 3)), 6);
-      pxRect(ctx, this.x + Math.cos(a) * (w / 2 - 1) * breathe,
-             cy + Math.sin(a) * (h / 2 - 1) * breathe, 1, 1, rgba('#ffffff', bright));
-    }
-  }
+  draw(ctx) { drawExit(ctx, this); }
 }
 
 // --- wave composition ----------------------------------------------------

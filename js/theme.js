@@ -67,11 +67,17 @@ export const DEFAULT_THEME = {
 
 export const Theme = { ...DEFAULT_THEME };
 
+// Bumped every time the palette changes. Anything that bakes a picture of the
+// room keeps this number beside it, so a shader pack repaints the world
+// instead of leaving a cached copy of the old colours on screen.
+export const ThemeRev = { n: 0 };
+
 export function applyTheme(overrides = {}) {
   Object.assign(Theme, DEFAULT_THEME);
   for (const k of Object.keys(overrides)) {
     if (k in Theme) Theme[k] = overrides[k];
   }
+  ThemeRev.n++;
 }
 
 export function resetTheme() { applyTheme({}); }
