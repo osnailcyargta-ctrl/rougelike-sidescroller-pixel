@@ -126,8 +126,11 @@ jobs:
           KEYCERT=$(keytool -list -v -keystore android/keys/ascent.jks \
                       -storepass ascent-to-the-aether -alias ascent)
           norm() { tr -d ' :' | tr 'A-F' 'a-f'; }
-          FP=$(grep -m1 -i 'SHA-256 digest' <<<"$CERTS" | awk -F': ' '{print $2}' | norm)
-          WANT=$(grep -m1 'SHA256:' <<<"$KEYCERT" | awk -F'SHA256:' '{print $2}' | norm)
+          # apksigner prints "V2 Signer: certificate SHA-256 digest: <hex>",
+          # which has two ": " in it - splitting on the first one hands back
+          # the label instead of the digest. The hex is the last field.
+          FP=$(grep -m1 -i 'SHA-256 digest' <<<"$CERTS" | awk '{print $NF}' | norm)
+          WANT=$(grep -m1 'SHA256:' <<<"$KEYCERT" | awk '{print $NF}' | norm)
           echo "apk  $FP"
           echo "key  $WANT"
           [ -n "$FP" ] || { echo "could not read the APK certificate"; exit 1; }
