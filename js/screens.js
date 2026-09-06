@@ -371,7 +371,30 @@ function drawVisualTab(ctx, game, t) {
     drawText(ctx, readout, x + colW - 4, y + 2, Theme.uiDim, 1, 'right');
   }
 
-  const py = 50 + rows * 13 + 4;
+  // --- which tier to run at. AUTO watches the frame time and picks; the
+  // other three pin it there and leave it alone.
+  const gy = 50 + rows * 13 + 2;
+  pxRect(ctx, 32, gy, VIEW_W - 64, 1, rgba(Theme.uiDim, 0.4));
+  drawText(ctx, 'GRAPHICS', 32, gy + 6, Theme.platformGlow, 1);
+  const modes = [['auto', 'AUTO'], ['low', 'LOW'], ['mid', 'MID'], ['high', 'HIGH']];
+  const cur = Options.lowPower ? 'low' : (Options.gfxTier ?? 'auto');
+  for (let i = 0; i < modes.length; i++) {
+    const [id, label] = modes[i];
+    const bx = 96 + i * 52;
+    if (button(ctx, 'gfx' + id, bx, gy + 3, 48, 14, label, { selected: cur === id })) {
+      Options.gfxTier = id;
+      // the touch tab's own switch is the same decision said twice; keep them
+      // from arguing by letting this one win
+      if (id !== 'low') Options.lowPower = false;
+      saveOptions();
+      if (syncPerfOptions()) game.resize();
+      Sfx.ui();
+    }
+  }
+  drawText(ctx, cur === 'auto' ? `NOW: ${Perf.name}` : 'FORCED',
+           VIEW_W - 32, gy + 6, Theme.uiDim, 1, 'right');
+
+  const py = gy + 22;
   pxRect(ctx, 32, py, VIEW_W - 64, 1, rgba(Theme.uiDim, 0.4));
   drawText(ctx, 'SHADER PACK (.SHDR)', 32, py + 5, Theme.platformGlow, 1);
   if (button(ctx, 'load', 32, py + 15, 70, 14, 'LOAD')) game.requestShaderUpload();

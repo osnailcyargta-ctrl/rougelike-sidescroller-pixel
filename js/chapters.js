@@ -248,9 +248,7 @@ function bakeField(ctx, room) {
   ctx.fillStyle = grad(ctx, [[0, rgba(P.haze, 0)], [1, rgba(P.haze, 0.35)]], GROUND_Y - 40, GROUND_Y);
   ctx.fillRect(0, GROUND_Y - 40, VIEW_W, 40);
 
-  // The last room of the field ends against the castle, and the castle is
-  // standing there from the first wave - shut, which is the point of it.
-  if (room === CHAPTERS[0].to) drawFortress(ctx, VIEW_W - 34, GROUND_Y, 0);
+
 }
 
 function cloud(ctx, x, y, s, col) {
@@ -888,20 +886,57 @@ function exitFortress(ctx, e, k) { drawFortress(ctx, e.x, e.y, k); }
 // The fortress at the end of the field: a plain wall of grey stone with a gate
 // in it. `k` is how far open the gate is - 0 while the field is still yours to
 // win, 1 once it is.
-export function drawFortress(ctx, ex, ey, k) {
+export function drawFortress(ctx, ex, ey, k, part = 'all') {
   const C = PAL.castle;
   const x = Math.round(ex), base = Math.round(ey);
   const wallX = x - 66, wallW = VIEW_W - wallX;
   const wallTop = 26;
-  // the wall, running off the right of the frame
-  pxSolid(ctx, wallX, wallTop, wallW, base - wallTop, C.stone,
-          { ink: C.ink, light: C.stoneLit, dark: null });
-  for (let yy = wallTop + 6; yy < base; yy += 11) {
-    pxRect(ctx, wallX, yy, wallW, 1, rgba(C.ink, 0.5));
-    for (let xx = wallX + ((yy / 11) % 2 ? 0 : 13); xx < VIEW_W; xx += 26) {
-      pxRect(ctx, xx, yy, 1, 11, rgba(C.ink, 0.45));
+  const gw = 44, gh = 62, gx = x - gw / 2, gy = base - gh;
+
+  // --- what is behind you as you walk in: the gateway, its light, the doors
+  if (part === 'all' || part === 'back') {
+    pxRect(ctx, gx - 3, gy - 4, gw + 6, gh + 4, C.stoneDark);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createLinearGradient(0, gy, 0, base);
+    g.addColorStop(0, rgba(C.torch, 0.55 * k));
+    g.addColorStop(1, rgba(C.torch, 0.12 * k));
+    ctx.fillStyle = g;
+    ctx.fillRect(gx, gy, gw, gh);
+    ctx.restore();
+    // the two leaves, drawn back into the walls as it opens
+    for (const side of [-1, 1]) {
+      const lw = Math.round((gw / 2) * (1 - k));
+      if (lw <= 0) continue;
+      const lx = side < 0 ? gx : gx + gw - lw;
+      pxSolid(ctx, lx, gy, lw, gh, '#4a3524', { ink: C.ink, light: '#6a4d33', dark: null });
+      for (let i = 0; i < 4; i++) pxRect(ctx, lx, gy + 8 + i * 15, lw, 2, C.chain);
     }
+    // the portcullis, hauled up above the arch
+    const pcY = gy + Math.round((1 - k) * 26);
+    for (let i = 0; i <= gw; i += 7) pxRect(ctx, gx + i, gy - 10, 2, pcY - gy + 10, C.chain);
+    pxRect(ctx, gx - 2, pcY, gw + 4, 2, C.chainLit);
   }
+  if (part === 'back') return;
+
+  // --- and the stone itself, which stands in front of everything. The gateway
+  // is left as a hole in it, so walking in reads as walking in rather than as
+  // disappearing behind a wall.
+  const holeL = gx - 3, holeR = gx + gw + 3, holeTop = gy - 4;
+  const band = (bx, bw2, by, bh2) => {
+    if (bw2 <= 0 || bh2 <= 0) return;
+    pxSolid(ctx, bx, by, bw2, bh2, C.stone, { ink: C.ink, light: C.stoneLit, dark: null });
+    for (let yy = by + 6; yy < by + bh2; yy += 11) {
+      pxRect(ctx, bx, yy, bw2, 1, rgba(C.ink, 0.5));
+      for (let xx = bx + ((yy / 11) % 2 ? 0 : 13); xx < bx + bw2; xx += 26) {
+        pxRect(ctx, xx, yy, 1, Math.min(11, by + bh2 - yy), rgba(C.ink, 0.45));
+      }
+    }
+  };
+  band(wallX, holeL - wallX, wallTop, base - wallTop);          // left of the gate
+  band(holeR, VIEW_W - holeR, wallTop, base - wallTop);         // right of it
+  band(holeL, holeR - holeL, wallTop, holeTop - wallTop);       // over the arch
+
   // battlements along the top
   for (let xx = wallX; xx < VIEW_W; xx += 18) {
     pxSolid(ctx, xx, wallTop - 10, 11, 11, C.stone, { ink: C.ink, light: C.stoneLit, dark: null });
@@ -912,29 +947,6 @@ export function drawFortress(ctx, ex, ey, k) {
   for (let xx = 0; xx < 18; xx += 6) {
     pxSolid(ctx, wallX - 16 + xx, wallTop - 34, 4, 9, C.stoneDark, { ink: C.ink, light: null, dark: null });
   }
-  // the gateway: an arch, and the hall behind it lit by torches
-  const gw = 44, gh = 62, gx = x - gw / 2, gy = base - gh;
-  pxRect(ctx, gx - 3, gy - 4, gw + 6, gh + 4, C.stoneDark);
-  ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
-  const g = ctx.createLinearGradient(0, gy, 0, base);
-  g.addColorStop(0, rgba(C.torch, 0.55 * k));
-  g.addColorStop(1, rgba(C.torch, 0.12 * k));
-  ctx.fillStyle = g;
-  ctx.fillRect(gx, gy, gw, gh);
-  ctx.restore();
-  // the two leaves, drawn back into the walls as it opens
-  for (const side of [-1, 1]) {
-    const lw = Math.round((gw / 2) * (1 - k));
-    if (lw <= 0) continue;
-    const lx = side < 0 ? gx : gx + gw - lw;
-    pxSolid(ctx, lx, gy, lw, gh, '#4a3524', { ink: C.ink, light: '#6a4d33', dark: null });
-    for (let i = 0; i < 4; i++) pxRect(ctx, lx, gy + 8 + i * 15, lw, 2, C.chain);
-  }
-  // the portcullis, hauled up above the arch
-  const pcY = gy + Math.round((1 - k) * 26);
-  for (let i = 0; i <= gw; i += 7) pxRect(ctx, gx + i, gy - 10, 2, pcY - gy + 10, C.chain);
-  pxRect(ctx, gx - 2, pcY, gw + 4, 2, C.chainLit);
 }
 
 // Out in the field there is no door. A post pushes up out of the turf with an
@@ -1020,4 +1032,18 @@ function exitPortal(ctx, e, k) {
   ctx.beginPath();
   ctx.ellipse(e.x, cy, (w / 2) * breathe, (h / 2) * breathe, 0, 0, TAU);
   ctx.stroke();
+}
+
+// Painted over the room rather than behind it. The castle at the end of the
+// field is the nearest thing on the screen - the hills run behind it, and you
+// walk in under it - so it goes on last, after everything else in the world.
+export function drawChapterForeground(ctx, t, room, open = 0) {
+  if (room !== CHAPTERS[0].to || chapterFor(room).id !== 'field') return;
+  drawFortress(ctx, VIEW_W - 34, GROUND_Y, open, 'front');
+}
+
+/** The part of the castle that stands behind you: the gateway and its doors. */
+export function drawChapterBackdrop(ctx, t, room, open = 0) {
+  if (room !== CHAPTERS[0].to || chapterFor(room).id !== 'field') return;
+  drawFortress(ctx, VIEW_W - 34, GROUND_Y, open, 'back');
 }

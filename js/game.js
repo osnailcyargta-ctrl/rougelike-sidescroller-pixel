@@ -25,7 +25,8 @@ import {
   loadUnlocks, checkBossRushUnlock, Defeated,
 } from './codex.js';
 import { drawBackground, drawArena, drawLightShafts, drawSpawnPads, updateWorld, buildWave, activeSpawnPads, Pickup, Portal, Anvil } from './world.js';
-import { layoutRoom, reflectAmount, bloomFor, chromaFor, floorTint, exitTint, PAL } from './chapters.js';
+import { layoutRoom, reflectAmount, bloomFor, chromaFor, floorTint, exitTint,
+  drawChapterForeground, drawChapterBackdrop, PAL } from './chapters.js';
 import { ITEMS, RARITY, HOTBAR_SIZE, DROP_POOL, UNIQUE_ONCE, rollDrop, rollPerkPair, drawItemIcon } from './items.js';
 import { UI, uiBeginFrame, drawHUD, drawInventory, drawTooltip, drawDebugMenu, drawFoldWheel, drawForge, drawCodex, panel, button } from './ui.js';
 import { updateTouchPad, drawTouchPad, drawAimLeash, Pad } from './touch.js';
@@ -196,7 +197,10 @@ export class Game {
 
   // Either composite through the shader chain, or just show the pixel canvas.
   present(dt) {
-    const raw = !Perf.postfx;
+    // The lowest tier skips the whole post chain - it is the single most
+    // expensive step - but a shader pack IS the post chain, so a player who
+    // loaded one gets it back. They asked for it; the bloom stays trimmed.
+    const raw = (!Perf.postfx && !this.shaderName) || !this.postfx.ok;
     if (raw !== this.rawPresent) {
       this.rawPresent = raw;
       // the GL canvas is left in place and still visible underneath: it owns
@@ -2266,10 +2270,12 @@ export class Game {
       ctx.restore();
     }
 
+    drawChapterBackdrop(ctx, this.time, this.envRoom,
+                        this.portal && this.portal.kind === 'gate' ? this.portal.open : 0);
     this.drawFloorReflections(ctx);
     for (const pk of this.pickups) pk.draw(ctx);
     if (this.anvil) this.anvil.draw(ctx);
-    if (this.portal) this.portal.draw(ctx);
+    if (this.portal && this.portal.kind !== 'gate') this.portal.draw(ctx);
     for (const e of this.enemies) e.draw(ctx);
     if (this.boss && this.boss.draw) this.boss.draw(ctx);
     for (const pr of this.projectiles) pr.draw(ctx);
@@ -2283,6 +2289,10 @@ export class Game {
       strokeBolt(ctx, b.pts, '#ffffff', 3 * k + 1, k * 0.9);
       strokeBolt(ctx, b.pts, Theme.lightning, 6 * k + 1, k * 0.45);
     }
+
+    // the castle stands in front of everything in the room, including you
+    drawChapterForeground(ctx, this.time, this.envRoom,
+                          this.portal && this.portal.kind === 'gate' ? this.portal.open : 0);
 
     drawParticles(ctx);
     drawRings(ctx);

@@ -16,6 +16,9 @@ export const OPTION_DEFS = [
   { id: 'touchOpacity', label: 'PAD OPACITY', group: 'touch', type: 'range', def: 0.6, max: 1 },
   { id: 'lowPower', label: 'LOW POWER MODE', group: 'touch', type: 'bool', def: false },
   { id: 'autoGraphics', label: 'AUTO GRAPHICS', group: 'touch', type: 'bool', def: true },
+  // Not a slider and not a switch: which tier to run at, or AUTO to let the
+  // watchdog choose. Drawn by hand in the Visuals tab.
+  { id: 'gfxTier', label: 'GRAPHICS', group: 'none', type: 'enum', def: 'auto' },
 
   // --- indicators
   { id: 'showFps', label: 'SHOW FPS', group: 'indicator', type: 'bool', def: false },

@@ -67,13 +67,23 @@ function apply(i) {
   Object.assign(Perf, TIERS[i]);
 }
 
+export const TIER_INDEX = { low: 0, mid: 1, high: 2 };
+
+/** Which tier the player has pinned, or null when they have left it on AUTO. */
+export function forcedTier() {
+  if (Options.lowPower) return 0;
+  const want = Options.gfxTier ?? 'auto';
+  return want in TIER_INDEX ? TIER_INDEX[want] : null;
+}
+
 // Called when the player flips the manual switch, and once at boot.
 export function syncPerfOptions() {
-  if (Options.lowPower) {
+  const pinned = forcedTier();
+  if (pinned !== null) {
     Perf.auto = false;
     Perf.lowered = false;
     climbFails = 0;
-    if (Perf.tier !== 0) { apply(0); return true; }
+    if (Perf.tier !== pinned) { apply(pinned); return true; }
     return false;
   }
   if (!Perf.auto) {
