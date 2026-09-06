@@ -114,12 +114,18 @@ jobs:
         run: |
           set -euo pipefail
           APK="out/ascent-to-the-aether-$VERSION_NAME.apk"
-          FP=$(keytool -printcert -jarfile "$APK" | grep -m1 'SHA256:' | tr -d ' ')
-          WANT=$(keytool -list -v -keystore android/keys/ascent.jks \
-                   -storepass ascent-to-the-aether -alias ascent \
-                   | grep -m1 'SHA256:' | tr -d ' ')
+          # Read each tool's whole output first. Piping straight into grep -m1
+          # under `set -o pipefail` fails the step on the SIGPIPE grep causes
+          # when it stops reading, which is what broke this check the first
+          # time - it reported a mismatch it had never actually looked at.
+          APKCERT=$(keytool -printcert -jarfile "$APK")
+          KEYCERT=$(keytool -list -v -keystore android/keys/ascent.jks \
+                      -storepass ascent-to-the-aether -alias ascent)
+          FP=$(grep -m1 'SHA256:' <<<"$APKCERT" | tr -d ' ')
+          WANT=$(grep -m1 'SHA256:' <<<"$KEYCERT" | tr -d ' ')
           echo "apk  $FP"
           echo "key  $WANT"
+          [ -n "$FP" ] || { echo "could not read the APK certificate"; exit 1; }
           [ "$FP" = "$WANT" ] || { echo "signed with the wrong key"; exit 1; }
 
       - uses: actions/upload-artifact@v4
