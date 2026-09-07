@@ -116,12 +116,22 @@ export function drawPvpLobbies(ctx, game, t) {
   // until the server opens, and nothing on this screen pretends otherwise.
   if (!serverOpen()) {
     const d = Net.door;
+    // Two ways to be shut: the hour, or the server having run out of room and
+    // taken itself off for half an hour. They read differently because one is
+    // a schedule you can plan around and the other is not.
+    const resting = !!d?.resting;
     panel(ctx, px, py, pw, 118, { accent: Theme.hp });
     glowDot(ctx, VIEW_W / 2, py + 34, 40, Theme.hp, 0.14 + Math.sin(t * 1.6) * 0.05);
-    drawTextShadow(ctx, 'THE SERVER IS ASLEEP', VIEW_W / 2, py + 22, Theme.hp, 2, 'center');
-    drawText(ctx, `SHUTS ${d?.closesAt ?? '21:00'}   -   OPENS ${d?.opensAt ?? '04:00'}`,
+    drawTextShadow(ctx, resting ? 'THE SERVER IS RESTING' : 'THE SERVER IS ASLEEP',
+                   VIEW_W / 2, py + 22, Theme.hp, 2, 'center');
+    drawText(ctx, resting
+      ? `BACK AT ${d?.opensAt ?? '--:--'}`
+      : `SHUTS ${d?.closesAt ?? '21:00'}   -   OPENS ${d?.opensAt ?? '04:00'}`,
              VIEW_W / 2, py + 46, Theme.ui, 1, 'center');
-    drawText(ctx, 'ON THE SERVER\'S CLOCK, NOT YOURS', VIEW_W / 2, py + 58, Theme.uiDim, 1, 'center');
+    drawTextFit(ctx, resting
+      ? (d?.why ?? 'IT PUT ITSELF TO BED')
+      : 'ON THE SERVER\'S CLOCK, NOT YOURS',
+             VIEW_W / 2, py + 58, Theme.uiDim, pw - 20, 1, 'center');
     const until = untilText(d);
     if (until) drawTextShadow(ctx, until, VIEW_W / 2, py + 74, Theme.uiAccent, 2, 'center');
     drawText(ctx, 'NO LOBBIES CAN BE OPENED OR JOINED UNTIL THEN.',

@@ -24,7 +24,11 @@ services:
     container_name: aether-pvp
     restart: unless-stopped
     working_dir: /app
-    command: ["node", "server/pvp.js"]
+    # --expose-gc lets the memory watchdog check a reading over the line
+    # against an actual collection, instead of trusting a number V8 may only
+    # be holding out of habit. Without it the server still works; it just has
+    # to believe the raw figure.
+    command: ["node", "--expose-gc", "server/pvp.js"]
     ports:
       # host:container - the game and the watch page both live behind this one
       - "8897:8897"
@@ -40,6 +44,12 @@ services:
       QUIET_FROM: "21"
       QUIET_TO: "4"
       PASS_FILE: "/run/secrets/watch-password"
+      # If it ever passes this, it shuts itself the same way nine o'clock
+      # shuts it and rests. Ten lobbies fighting at once with somebody
+      # watching all of them costs about 72 MB, so this is roughly twice the
+      # worst honest load: reaching it means something is wrong.
+      MEM_LIMIT_MB: "150"
+      REST_MINUTES: "30"
     volumes:
       # the server, read-only: this container never writes to the repo
       - ./server:/app/server:ro

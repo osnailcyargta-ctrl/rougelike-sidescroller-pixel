@@ -78,8 +78,9 @@ by itself the moment the server answers.
 
 **Opening hours.** The server has them, in its own clock, and between them
 there is no lobby system at all — nothing to fetch and nothing to create. The
-menu says which hour it shuts and which hour it comes back. See
-`server/README.md`.
+menu says which hour it shuts and which hour it comes back. It also watches its
+own memory: past 150 MB it puts itself to bed the same way, for half an hour,
+and says so. See `server/README.md`.
 
 **Watching.** `http://<server>:8897/watch`, behind a password kept in a file of
 its own, shows every live lobby as a moving picture of what both players are

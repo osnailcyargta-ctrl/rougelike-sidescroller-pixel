@@ -38,6 +38,28 @@ The process stays up while it is shut, and that is on purpose: it still answers
 server", and it is what lets the menu name the hour. Shut, it holds about 56 MB
 and uses no measurable CPU.
 
+## The memory line
+
+If it ever passes `MEM_LIMIT_MB` (150 by default) it shuts itself exactly the
+way nine o'clock shuts it - every lobby closed, both players told why and when
+it comes back, the lobby system refused at the socket - and rests for
+`REST_MINUTES` (30). Then it opens again on its own.
+
+A reading over the line is not proof on its own: V8 holds memory it is not
+using. The container runs node with `--expose-gc`, so the watchdog asks for a
+full collection and only rests if the number is *still* over. Without that flag
+it has to believe the raw figure, and the limit should be set higher.
+
+The rest also drops every open socket, on purpose: a rest that kept them would
+be a rest that never got its memory back. The game notices, reconnects by
+itself, and is told the same thing again by the door - it shows **THE SERVER IS
+RESTING**, the reason, and the minute it returns.
+
+Ten lobbies fighting at once with somebody watching all of them peaks at 77 MB,
+so 150 is roughly twice the worst honest load. Measured against that load for a
+full minute, it does not trip. If it ever does, something is wrong rather than
+busy - the log line says the figure it saw and what a collection left behind.
+
 ## What it costs
 
 Measured, on this machine, against the real protocol:
@@ -47,7 +69,7 @@ Measured, on this machine, against the real protocol:
 | idle, nobody connected | 55 MB | ~0 |
 | quiet hours | 56 MB | 0.07s total |
 | 10 lobbies, 20 players, all fighting | 70 MB | under 1% of one core |
-| the same, plus the watch page at 30 fps | 72 MB | ~11% of one core |
+| the same, plus the watch page at 30 fps | 77 MB | ~13% of one core |
 
 Bandwidth is the number that matters more than either. Each player sends 30
 snapshots a second at about 450 bytes, so a lobby is roughly 55 KB/s through

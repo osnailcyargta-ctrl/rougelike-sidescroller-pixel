@@ -68,6 +68,22 @@ function parseClock(v, fallback) {
 const QUIET_FROM = parseClock(process.env.QUIET_FROM, 21 * 60);   // 21:00, inclusive
 const QUIET_TO = parseClock(process.env.QUIET_TO, 4 * 60);        // 04:00, exclusive
 
+// --- and when it puts itself to bed ---------------------------------------
+// A NAS runs other things. If this ever grows past what it is allowed, it
+// stops being a lobby server and starts being a problem, so at the line it
+// shuts itself exactly the way nine o'clock shuts it - everybody out, nothing
+// to fetch, and a time it comes back - and rests for half an hour.
+//
+// Measured, ten lobbies fighting at once with somebody watching all of them
+// costs about 72 MB, so 150 is roughly twice the worst honest load: hitting it
+// means something is wrong, not that the server is busy.
+const MEM_LIMIT_MB = Number(process.env.MEM_LIMIT_MB || 150);
+const REST_MINUTES = Number(process.env.REST_MINUTES || 30);
+
+let restUntil = 0;               // 0 when awake
+
+const rssMB = () => process.memoryUsage.rss() / (1024 * 1024);
+
 // --- the watch page -------------------------------------------------------
 // The password lives in a file, never in this one and never in compose.yaml,
 // so the thing that has to be secret is the one thing you do not commit.
@@ -111,6 +127,12 @@ function minuteIsQuiet(mins) {
 
 function isQuiet(at = new Date()) { return minuteIsQuiet(at.getHours() * 60 + at.getMinutes()); }
 
+/** Resting off the back of the memory line, rather than off the clock. */
+function isResting(at = Date.now()) { return restUntil > at; }
+
+/** Shut is shut, whichever of the two put it that way. */
+function isShut(at = new Date()) { return isQuiet(at) || isResting(at.getTime()); }
+
 /** The next time the door changes state, as a timestamp in ms. */
 function nextEdge(mins, at = new Date()) {
   const d = new Date(at);
@@ -125,14 +147,35 @@ function hhmm(mins) {
 }
 
 /** Everything the game needs to say when the door is shut - or open. */
+function clockOf(ms) {
+  const d = new Date(ms);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 function doorState(at = new Date()) {
   const quiet = isQuiet(at);
+  const resting = isResting(at.getTime());
+  const now = clockOf(at.getTime());
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'server time';
+
+  // A rest wins the wording even if the clock would also have shut it: it is
+  // the one that ends sooner, and it is the one that needs explaining.
+  if (resting) {
+    return {
+      open: false, quiet: true, resting: true, now, tz,
+      closesAt: hhmm(QUIET_FROM),
+      opensAt: clockOf(restUntil),
+      changesAt: restUntil,
+      message: `PVP IS RESTING UNTIL ${clockOf(restUntil)} SERVER TIME`,
+      why: 'THE SERVER RAN OUT OF ROOM AND PUT ITSELF TO BED',
+    };
+  }
   return {
     open: !quiet,
     quiet,
+    resting: false,
     // in the server's clock, and said so, because that is the clock that counts
-    now: `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`,
-    tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'server time',
+    now, tz,
     closesAt: hhmm(QUIET_FROM),
     opensAt: hhmm(QUIET_TO),
     // and when that next actually happens, so a countdown needs no arithmetic
@@ -470,7 +513,7 @@ function handle(c, msg) {
   // the lobby system does not exist. Not "there are no lobbies" - there is
   // nothing to fetch and nothing to make, and the answer says when that
   // changes.
-  if (isQuiet()) {
+  if (isShut()) {
     const door = doorState();
     c.sock.send({ t: 'closed', door, why: door.message });
     return;
@@ -635,29 +678,92 @@ server.on('upgrade', (req, socket) => {
 // is told why and when it opens again. Checked every ten seconds rather than
 // scheduled, so a NAS that suspends and wakes lands on the right side of it.
 
-let wasQuiet = isQuiet();
-setInterval(() => {
-  const quiet = isQuiet();
-  if (quiet === wasQuiet) return;
-  wasQuiet = quiet;
-  const door = doorState();
-  if (quiet) {
-    for (const l of [...lobbies.values()]) {
-      for (const seat of [l.host, l.guest]) {
-        if (!seat) continue;
-        seat.sock.send({ t: 'lobbyClosed', why: door.message, door });
-        seat.lobby = null;
-      }
-      clearTimeout(l.timer);
-      lobbies.delete(l.id);
+/** Empty every lobby and say why. Used by the clock and by the watchdog alike. */
+function closeEverything(door) {
+  for (const l of [...lobbies.values()]) {
+    for (const seat of [l.host, l.guest]) {
+      if (!seat) continue;
+      seat.sock.send({ t: 'lobbyClosed', why: door.message, door });
+      seat.lobby = null;
     }
-    console.log(`shut for the night - open again at ${door.opensAt}`);
-  } else {
-    console.log(`open - shut again at ${door.closesAt}`);
+    clearTimeout(l.timer);
+    lobbies.delete(l.id);
   }
-  // everybody hears about it either way, in a lobby or not
   for (const c of clients) c.sock.send({ t: 'door', door });
   pushWatchList();
+}
+
+/**
+ * Past the line. Shut the way nine o'clock shuts it, and then actually let go
+ * of what was being held: a rest that keeps every socket open would be a rest
+ * that never gets its memory back.
+ */
+function goToRest(mb) {
+  restUntil = Date.now() + REST_MINUTES * 60 * 1000;
+  const door = doorState();
+  console.log(`over the line at ${mb.toFixed(1)} MB (limit ${MEM_LIMIT_MB}) - resting until ${door.opensAt}`);
+  closeEverything(door);
+  // Everyone is told before they are dropped, so the game shows the reason
+  // rather than a bare disconnection. It reconnects on its own and is told the
+  // same thing again by the door.
+  for (const c of [...clients]) {
+    c.sock.send({ t: 'closed', door, why: door.message });
+    c.lobby = null;
+    c.sock.close();
+    clients.delete(c);
+  }
+  if (global.gc) global.gc();
+  console.log(`  after letting go: ${rssMB().toFixed(1)} MB`);
+}
+
+function wakeFromRest() {
+  restUntil = 0;
+  const door = doorState();
+  console.log(`rested - ${rssMB().toFixed(1)} MB, ${door.open ? 'open again' : door.message.toLowerCase()}`);
+  for (const c of clients) c.sock.send({ t: 'door', door });
+  pushWatchList();
+}
+
+/**
+ * The watchdog. V8 holds on to memory it is not using, so a reading over the
+ * line is not proof of anything until a full collection has been asked for and
+ * the number is still over it - which is why the container runs node with
+ * --expose-gc. Without that flag this can only trust the raw number, and the
+ * limit should be set higher.
+ */
+function memoryCheck() {
+  if (restUntil) return;
+  let mb = rssMB();
+  if (mb < MEM_LIMIT_MB) return;
+  if (global.gc) {
+    global.gc();
+    mb = rssMB();
+    if (mb < MEM_LIMIT_MB) return;      // it was only holding, not using
+  }
+  goToRest(mb);
+}
+
+let wasShut = isShut();
+setInterval(() => {
+  if (restUntil && Date.now() >= restUntil) wakeFromRest();
+  else memoryCheck();
+
+  const shut = isShut();
+  if (shut === wasShut) return;
+  wasShut = shut;
+  const door = doorState();
+  if (shut) {
+    // A rest has already emptied the building and said so; this is only for
+    // the clock reaching the quiet hour.
+    if (!door.resting) {
+      closeEverything(door);
+      console.log(`shut for the night - open again at ${door.opensAt}`);
+    }
+  } else {
+    console.log(`open - shut again at ${door.closesAt}`);
+    for (const c of clients) c.sock.send({ t: 'door', door });
+    pushWatchList();
+  }
 }, 5000);
 
 // lobbies nobody is using do not sit there holding a slot
@@ -684,6 +790,8 @@ server.listen(PORT, () => {
   const door = doorState();
   console.log(`pvp server on :${PORT}  (max ${MAX_LOBBIES} lobbies)`);
   console.log(`clock: ${door.now} ${door.tz} - ${door.message}`);
+  console.log(`memory: rests ${REST_MINUTES} min if it passes ${MEM_LIMIT_MB} MB` +
+              (global.gc ? '' : '  (no --expose-gc: the reading cannot be checked against a collection)'));
   console.log(`watch: http://<this-box>:${PORT}/watch  (password from ${PASS_FILE})`);
   if (!watchPassword()) console.log('WARNING: no password file, so the watch page cannot be opened at all');
 });
