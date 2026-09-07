@@ -62,19 +62,28 @@ Two people, one room, five rounds. `PVP` sits beside Normal and Boss Rush on the
 mode screen.
 
 It needs a server for the two games to talk through. There is nothing to
-install — one file, no dependencies, WebSocket over node's own `http` module —
-and `compose.yaml` at the root puts it on a NAS:
+install — one file, no dependencies, WebSocket over node's own `http` module.
+It is deployed from the `claude/pvp-nas-server` branch, which is that server
+and nothing else:
 
 ```sh
-docker compose up -d          # port 8897; see server/README.md
+docker compose up -d          # port 8897; see that branch's README
 node server/pvp.js            # or just run it, PORT=… to move it
 ```
 
-The game ships pointed at whatever address is in `js/pvpserver.js`; a player
-can override it with `?pvp=host:port` in the URL or by typing one on the
-connect screen. That screen tries for ten seconds and then offers **BACK TO
-MENU** or **KEEP TRYING** — the attempt underneath never stops, so it moves on
-by itself the moment the server answers.
+The game ships pointed at **`aether.argya.me`**, set in `js/pvpserver.js` — one
+line, nothing else in the file. A player can override it with `?pvp=host:port`
+in the URL or by typing one on the connect screen.
+
+No port in that address, on purpose: the game is served over https, and a page
+loaded over https may only talk to https and wss. So the duel server answers on
+443 behind something that terminates TLS and **forwards the WebSocket
+upgrade** — Cloudflare, a Synology reverse proxy, nginx — which is what points
+`aether.argya.me` at the NAS on 8897.
+
+The connect screen tries for ten seconds and then offers **BACK TO MENU** or
+**KEEP TRYING** — the attempt underneath never stops, so it moves on by itself
+the moment the server answers.
 
 **Opening hours.** The server has them, in its own clock, and between them
 there is no lobby system at all — nothing to fetch and nothing to create. The
@@ -82,10 +91,10 @@ menu says which hour it shuts and which hour it comes back. It also watches its
 own memory: past 150 MB it puts itself to bed the same way, for half an hour,
 and says so. See `server/README.md`.
 
-**Watching.** `http://<server>:8897/watch`, behind a password kept in a file of
-its own, shows every live lobby as a moving picture of what both players are
-looking at. Nobody's game sends a single frame unless somebody has that page
-open.
+**Watching.** Open the server's own address in a browser. Behind a password
+kept in a file of its own, it shows every live lobby as a moving picture of what
+both players are looking at, and a log of everything people did. Nobody's game
+sends a single frame unless somebody has that page open.
 
 - **Lobbies.** Up to ten open at once. The owner may kick the challenger, which
   keeps them out for two seconds. Both seats filled starts the duel after a
