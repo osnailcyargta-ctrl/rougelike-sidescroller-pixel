@@ -865,6 +865,6 @@ server.listen(PORT, () => {
   console.log(`clock: ${door.now} ${door.tz} - ${door.message}`);
   console.log(`memory: rests ${REST_MINUTES} min if it passes ${MEM_LIMIT_MB} MB` +
               (global.gc ? '' : '  (no --expose-gc: the reading cannot be checked against a collection)'));
-  console.log(`watch: http://<this-box>:${PORT}/watch  (password from ${PASS_FILE})`);
+  console.log(`page:  http://<this-box>:${PORT}/  (password from ${PASS_FILE})`);
   if (!watchPassword()) console.log('WARNING: no password file, so the watch page cannot be opened at all');
 });
