@@ -56,6 +56,50 @@ with god mode, infinite health, a spawner for every item in the game, a spawner
 for every enemy and both bosses, full heal and kill-wave. It is
 deliberately absent from the in-game Controls screen.
 
+## PvP
+
+Two people, one room, five rounds. `PVP` sits beside Normal and Boss Rush on the
+mode screen.
+
+It needs a server for the two games to talk through, and the game does not ship
+one running anywhere — start it yourself on any machine both players can reach:
+
+```sh
+node server/pvp.js            # listens on :8787; PORT=… to change it
+```
+
+There is nothing to install: it speaks WebSocket over node's own `http`
+module. Point the game at it from the Visuals-side address field on the PvP
+connect screen, or with `?pvp=host:port` in the URL. The connect screen tries
+for ten seconds and then offers **BACK TO MENU** or **KEEP TRYING** — the
+attempt underneath never stops, so it moves on by itself the moment the server
+answers.
+
+- **Lobbies.** Up to ten open at once. The owner may kick the challenger, which
+  keeps them out for two seconds. Both seats filled starts the duel after a
+  three-second count. After a match there is a three-second wait before you may
+  open another lobby.
+- **What you fight with.** Two weapons out of your class's list, one taken —
+  the same shape of choice a rush opens with, and the melee list carries the
+  Stident. Then one perk off a reel, with one respin. Both sit on one
+  thirty-second clock, and running it out picks for you. Everyone also carries
+  **3 Bloodstone, 5 Life Crystal and a Damage Booster**, so a win is the fight
+  and not the drops.
+- **Where.** One room out of every chapter plus the city this game started in,
+  rolled on the server. Neither player picks it and neither can arrange it:
+  **nothing in a duel is seeded** — not the map, not the weapon pair, not the
+  perk reel. There is no string anybody can type that decides any of them.
+- **The fight.** Host on the left, challenger on the right, first to three of
+  five rounds — most wins if nobody gets there. A kill scores a point, both of
+  you are put back in your corners at full health, and the next round counts in
+  from three.
+
+Each side simulates itself and nobody else: thirty times a second it says where
+it is, and damage is decided by whoever swung and applied by whoever was hit.
+Nothing is predicted and nothing is rolled back, so neither player can be hit by
+a version of the other that only one screen ever saw. Walking out mid-match
+hands the win to the player still standing.
+
 ## Run structure
 
 The arena has three static one-way platforms (left, right, and the raised

@@ -26,6 +26,8 @@ export const UI = {
   dbgScroll: { items: 0, mobs: 0 },
   dbgRoom: 1,              // the room the debug menu's teleport is pointed at
   shaderScroll: 0,         // first visible row of the saved-shader list
+  lobbyScroll: 0,          // and of the list of open duels
+  lobbyDrag: null,
   shaderDrag: null,        // an in-progress drag of that list
   pressedId: null,         // which button the pointer went down on
   fps: 0,
@@ -308,11 +310,17 @@ export function drawHUD(ctx, game) {
   // --- the right block: where you are and what is still coming
   const rw = 78;
   const rx = VIEW_W - rw - 5;
-  const rows = Options.showWaveCounter && !game.roomCleared ? 3 : 2;
+  // A duel has no waves and no room number worth reading: what matters there
+  // is who you are fighting and which round it is.
+  const duel = game.mode === 'pvp' && game.pvpDuelInfo ? game.pvpDuelInfo() : null;
+  const rows = duel ? 2 : (Options.showWaveCounter && !game.roomCleared ? 3 : 2);
   panel(ctx, rx, 5, rw, 10 + rows * 9, { alpha: 0.62, accent: ch.accent });
-  drawTextFit(ctx, ch.name, rx + rw - 5, 9, rgba(ch.accent, 0.95), rw - 10, 1, 'right');
-  drawTextShadow(ctx, `ROOM ${game.roomIndex}`, rx + rw - 5, 18, Theme.ui, 1, 'right');
-  if (Options.showWaveCounter) {
+  drawTextFit(ctx, duel ? duel.map : ch.name, rx + rw - 5, 9, rgba(ch.accent, 0.95), rw - 10, 1, 'right');
+  drawTextShadow(ctx, duel ? `ROUND ${duel.round}` : `ROOM ${game.roomIndex}`,
+                 rx + rw - 5, 18, Theme.ui, 1, 'right');
+  if (duel) {
+    drawTextFit(ctx, duel.foe, rx + rw - 5, 27, Theme.uiDim, rw - 10, 1, 'right');
+  } else if (Options.showWaveCounter) {
     const label = game.roomCleared ? 'CLEARED' : `WAVE ${game.waveIndex}/${game.wavesInRoom()}`;
     drawTextShadow(ctx, label, rx + rw - 5, 27, game.roomCleared ? Theme.uiAccent : Theme.uiDim, 1, 'right');
     if (!game.roomCleared) {

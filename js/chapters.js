@@ -56,6 +56,14 @@ export const PAL = {
   },
 };
 
+// The city keeps using the live theme rather than fixed colours: it is the
+// map a shader pack was written against, so it should still answer to one.
+PAL.cyber = {
+  get sky() { return Theme.bgFar; },
+  get glow() { return Theme.platformGlow; },
+  get accent() { return Theme.uiAccent; },
+};
+
 export function palFor(room) { return PAL[chapterFor(room).id]; }
 
 // How hard the bloom is allowed to hit here. A near-white chapter blows out
@@ -125,6 +133,10 @@ export function layoutRoom(room) {
     centre.motion = 'drift';
     top.motion = 'drift';
     top.phase = 0.6;
+  } else if (ch.id === 'cyber') {
+    // The city as it was: one platform drifting across the middle, the rest
+    // bolted where they are.
+    top.motion = 'swing';
   } else {
     // The Aether: nothing crosses the room. Everything simply breathes.
     for (const p of PLATFORMS) p.motion = 'breathe';
@@ -166,6 +178,7 @@ export function updatePlatforms(dt, t, frozen) {
 
 export function bakeSky(ctx, room) {
   const ch = chapterFor(room);
+  if (ch.id === 'cyber') return bakeCyber(ctx, room);
   if (ch.id === 'field') return bakeField(ctx, room);
   if (ch.id === 'castle') return bakeCastle(ctx, room);
   if (ch.id === 'hell') return bakeHell(ctx, room);
@@ -434,6 +447,7 @@ function bakeAether(ctx, room) {
 
 export function bakeFloor(ctx, room) {
   const ch = chapterFor(room);
+  if (ch.id === 'cyber') return floorCyber(ctx, room);
   if (ch.id === 'field') return floorField(ctx, room);
   if (ch.id === 'castle') return floorCastle(ctx, room);
   if (ch.id === 'hell') return floorHell(ctx, room);
@@ -599,6 +613,7 @@ export function drawChapterAmbience(ctx, t, room) {
 export function drawPlatform(ctx, p, t, room) {
   if (p.off) return;
   const ch = chapterFor(room);
+  if (ch.id === 'cyber') return platformNeon(ctx, p, t);
   if (ch.id === 'field') return platformHill(ctx, p, t);
   if (ch.id === 'castle') return platformChain(ctx, p, t);
   if (ch.id === 'hell') return platformSlab(ctx, p, t);
@@ -1046,4 +1061,127 @@ export function drawChapterForeground(ctx, t, room, open = 0) {
 export function drawChapterBackdrop(ctx, t, room, open = 0) {
   if (room !== CHAPTERS[0].to || chapterFor(room).id !== 'field') return;
   drawFortress(ctx, VIEW_W - 34, GROUND_Y, open, 'back');
+}
+
+// --- the city this game used to be set in --------------------------------
+// Kept whole for PvP, which rolls it as one of its maps. It is the only place
+// that still reads its colours out of the theme, because it is the map every
+// shader pack was written against.
+
+const CITY_LAYERS = [
+  { count: 9, minH: 70, maxH: 130, minW: 18, maxW: 30, alpha: 0.34, tint: 0.0, lit: 0.10 },
+  { count: 7, minH: 100, maxH: 175, minW: 26, maxW: 44, alpha: 0.52, tint: 0.30, lit: 0.26 },
+  { count: 5, minH: 130, maxH: 215, minW: 34, maxW: 58, alpha: 0.72, tint: 0.6, lit: 0.45 },
+];
+
+function bakeCyber(ctx, room) {
+  const r = rng(room + 313);
+  ctx.fillStyle = grad(ctx, [[0, Theme.bgFar], [0.45, Theme.bgMid], [0.82, Theme.bgNear], [1, Theme.fog]], 0, VIEW_H);
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+
+  // the glow sitting on the horizon behind the towers
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const hg = ctx.createRadialGradient(VIEW_W / 2, GROUND_Y - 10, 0, VIEW_W / 2, GROUND_Y - 10, 260);
+  hg.addColorStop(0, rgba(Theme.platformGlow, 0.08));
+  hg.addColorStop(1, rgba(Theme.platformGlow, 0));
+  ctx.fillStyle = hg;
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.restore();
+
+  // stars, baked at the middle of their twinkle
+  for (let i = 0; i < 90; i++) {
+    const x = r() * VIEW_W, y = r() * (GROUND_Y - 30);
+    const s2 = r() < 0.2 ? 2 : 1;
+    pxRect(ctx, x, y, s2, s2, rgba(r() < 0.25 ? Theme.uiAccent : Theme.star, 0.45));
+  }
+
+  // three depths of skyline
+  for (let l = 0; l < CITY_LAYERS.length; l++) {
+    const L = CITY_LAYERS[l];
+    ctx.save();
+    ctx.globalAlpha = L.alpha;
+    for (let i = 0; i < L.count; i++) {
+      const w = L.minW + r() * (L.maxW - L.minW);
+      const x = Math.round((i + r() * 0.7) * (VIEW_W / L.count) - 20);
+      const h = L.minH + r() * (L.maxH - L.minH);
+      const top = Math.round(GROUND_Y - h);
+      const body = mixHex(mixHex(Theme.fog, Theme.bgFar, 0.45), Theme.bgNear, 1 - L.tint);
+      pxRect(ctx, x, top, w, h, body);
+      pxRect(ctx, x, top, w, 2, rgba(Theme.platformGlow, 0.10 + L.lit * 0.20));
+      pxRect(ctx, x, top, 1, h, rgba(Theme.platformGlow, 0.06 + L.lit * 0.10));
+      const windows = Math.floor(2 + r() * 4);
+      for (let k = 0; k < windows; k++) {
+        const wy = top + 14 + k * 26;
+        if (wy > GROUND_Y - 14) break;
+        pxRect(ctx, x + 4, wy, 3, 6, rgba(Theme.platformGlow, 0.10 + L.lit * 0.3));
+        if (w > 30) pxRect(ctx, x + w - 8, wy + 6, 3, 6, rgba(Theme.uiAccent, 0.18));
+      }
+    }
+    ctx.restore();
+  }
+
+  // fog banks and the haze over the floor
+  for (let i = 0; i < 7; i++) {
+    const x = r() * VIEW_W, y = GROUND_Y - 90 + r() * 100, rr = 60 + r() * 70;
+    const fg = ctx.createRadialGradient(x, y, 0, x, y, rr);
+    fg.addColorStop(0, rgba(Theme.fog, 0.05 + r() * 0.07));
+    fg.addColorStop(1, rgba(Theme.fog, 0));
+    ctx.fillStyle = fg;
+    ctx.fillRect(x - rr, y - rr, rr * 2, rr * 2);
+  }
+  ctx.fillStyle = grad(ctx, [[0, rgba(Theme.bgNear, 0)], [1, rgba(Theme.bgNear, 0.5)]], GROUND_Y - 52, GROUND_Y);
+  ctx.fillRect(0, GROUND_Y - 52, VIEW_W, 52);
+}
+
+function floorCyber(ctx, room) {
+  ctx.fillStyle = grad(ctx, [[0, Theme.ground], [1, mixHex(Theme.ground, '#000000', 0.45)]], GROUND_Y, VIEW_H);
+  ctx.fillRect(0, GROUND_Y, VIEW_W, VIEW_H - GROUND_Y);
+  pxRect(ctx, 0, GROUND_Y, VIEW_W, 1, Theme.groundTop);
+  pxRect(ctx, 0, GROUND_Y + 1, VIEW_W, 2, mixHex(Theme.groundTop, Theme.ground, 0.5));
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.fillStyle = grad(ctx, [[0, rgba(Theme.groundEdge, 0.16)], [1, rgba(Theme.groundEdge, 0)]], GROUND_Y, GROUND_Y + 16);
+  ctx.fillRect(0, GROUND_Y, VIEW_W, 16);
+  ctx.fillStyle = rgba(Theme.groundEdge, 0.14);
+  ctx.fillRect(0, GROUND_Y - 5, VIEW_W, 5);
+  ctx.restore();
+  for (let row = 0; row < 3; row++) {
+    const y = GROUND_Y + 3 + row * 11;
+    if (y > VIEW_H) break;
+    pxRect(ctx, 0, y, VIEW_W, 1, rgba('#000000', 0.22));
+    for (let x = row % 2 ? 0 : 8; x < VIEW_W; x += 16) {
+      pxRect(ctx, x, y, 1, 11, rgba('#000000', 0.26));
+      pxRect(ctx, x + 1, y + 1, 1, 9, rgba(Theme.groundTop, 0.05));
+    }
+  }
+}
+
+function platformNeon(ctx, p, t) {
+  const x = Math.round(p.x), y = Math.round(p.y), w = Math.round(p.w), h = Math.round(p.h);
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const pool = ctx.createRadialGradient(x + w / 2, y + h + 6, 0, x + w / 2, y + h + 6, w * 0.6);
+  pool.addColorStop(0, rgba(Theme.platformGlow, 0.10));
+  pool.addColorStop(1, rgba(Theme.platformGlow, 0));
+  ctx.fillStyle = pool;
+  ctx.fillRect(x - 20, y, w + 40, 40);
+  ctx.restore();
+
+  ctx.fillStyle = grad(ctx, [[0, Theme.platformTop], [0.3, Theme.platform],
+                             [1, mixHex(Theme.platform, '#000000', 0.4)]], y, y + h);
+  ctx.fillRect(x, y, w, h);
+  pxRect(ctx, x, y, w, 1, mixHex(Theme.platformTop, Theme.platformGlow, 0.45));
+  pxRect(ctx, x, y + h, w, 1, rgba(Theme.platformGlow, 0.35 + 0.3 * Math.sin(t * 2.4 + x * 0.05)));
+  for (let i = BLOCK; i < w; i += BLOCK) {
+    pxRect(ctx, x + i, y, 1, h, rgba('#000000', 0.28));
+    pxRect(ctx, x + i + 1, y + 1, 1, h - 2, rgba(Theme.platformTop, 0.12));
+  }
+  if (p.motion !== 'none') {
+    const pulse = 0.35 + 0.25 * Math.sin(t * 8 + x * 0.1);
+    for (const ox of [10, w / 2, w - 10]) {
+      pxRect(ctx, x + ox - 1, y + h, 2, 3, rgba(Theme.platformGlow, pulse));
+      glowDot(ctx, x + ox, y + h + 3, 8, Theme.platformGlow, pulse * 0.55);
+    }
+  }
 }

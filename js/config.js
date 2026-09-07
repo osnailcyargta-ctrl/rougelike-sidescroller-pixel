@@ -15,6 +15,13 @@ export const GROUND_Y = 236;              // top surface of the floor
 // platforms behave, whether there is an anvil, and how you leave.
 export const CHAPTERS = [
   {
+    // Room 0 is not on the way anywhere: it is the city this game was set in
+    // before it had chapters, kept for PvP to roll onto.
+    id: 'cyber', name: 'NEON CITY', sub: 'WHERE IT STARTED', from: 0, to: 0,
+    platforms: 'neon', reflect: 0.3, anvil: false, drift: true,
+    exit: 'portal', accent: '#7be0ff',
+  },
+  {
     id: 'field', name: 'GRASSY FIELD', sub: 'THE WAY IN', from: 1, to: 4,
     platforms: 'hill',        // little rises out of the ground, not floating
     reflect: 0,               // grass does not shine
@@ -62,6 +69,8 @@ export function isChapterEnd(room) { return chapterFor(room).to === room; }
 
 // Room 10 is the one room of the castle with earth under it: a dry patch in
 // the middle of the flagstones, which is the only place the worm can surface.
+export const CYBER_ROOM = 0;
+
 export const DIRT_ROOM = 10;
 const DIRT_ROOM_ENV = 10;
 export const DIRT_PATCH = { x: 104, w: 272 };
@@ -339,7 +348,56 @@ export const BOSS_RUSH = {
   },
 };
 
+// --- PvP -------------------------------------------------------------------
+// Two people, one room, five rounds. Nothing here is seeded: every roll in a
+// duel comes off Math.random on the server or the host, so there is no string
+// anybody could type to know a map or a reel in advance.
+
+export const PVP = {
+  rounds: 5,               // at most this many
+  winsNeeded: 3,           // first to this takes it outright
+  countdown: 3,            // before each round, and before the match
+  pickSeconds: 30,         // to choose a weapon and spin a perk
+  deathPause: 1.4,         // how long the room holds on a kill before resetting
+  snapshotHz: 30,          // how often each side tells the other where it is
+  ghostCap: 24,            // opponent shots drawn at once
+  // Where a duel can be fought. One room out of every chapter, plus the city
+  // this game started in. The server rolls it - neither player picks.
+  maps: [
+    { room: 0,  name: 'NEON CITY',   sub: 'WHERE IT STARTED' },
+    { room: 2,  name: 'GRASSY FIELD', sub: 'OPEN GROUND' },
+    { room: 7,  name: 'THE CASTLE',  sub: 'STONE AND CHAIN' },
+    { room: 15, name: 'THE INFERNO', sub: 'UNDER THE FLOOR' },
+    { room: 18, name: 'THE AETHER',  sub: 'NOTHING UNDERNEATH' },
+  ],
+  // Everyone starts a duel with the same three things, so a win is the fight
+  // and not the drops.
+  loadout: [
+    { id: 'bloodstone', count: 3 },
+    { id: 'lifecrystal', count: 5 },
+    { id: 'damagebooster', count: 1 },
+  ],
+  // The weapon each class chooses from. The melee list carries the Stident,
+  // which a normal run only ever gets off Poitnus.
+  weapons: {
+    melee: ['sword', 'twindagger', 'nukerang', 'stident'],
+    ranger: ['bow', 'shardgun', 'stingergun'],
+    origamist: ['bookairplane', 'bookmissile'],
+  },
+  weaponPicks: 2,          // two on the table, one taken, as in a rush
+  slotSpin: 2.1,           // the perk reel, same feel as the rush
+  spawnX: [72, 408],       // left corner, right corner
+};
+
 export const ENEMY_TYPES = {
+  // The other player, wearing an enemy's clothes. It has no AI and no drops:
+  // it exists so that every sword swing, arrow and bolt in the game already
+  // knows how to find them, without a second targeting path to keep in step.
+  duelist: {
+    id: 'duelist', name: 'Duelist', hp: 100, speed: 0, damage: 0, w: 10, h: 18,
+    attackCooldown: 99, attackRange: 0, knockback: 0, windUp: 0,
+    noScale: true, noContact: true, noCodex: true,
+  },
   grunt: {
     id: 'grunt', name: 'Ghoul', hp: 80, speed: 52, damage: 12, w: 12, h: 17,
     attackCooldown: 0.9, attackRange: 16, knockback: 120, windUp: 0.22,

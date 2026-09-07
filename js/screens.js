@@ -4,7 +4,7 @@ import { clamp, rand, rgba, TAU } from './util.js';
 import { Theme } from './theme.js';
 import { drawText, drawTextShadow, drawTextFit, textWidth } from './font.js';
 import { pxRect, glowDot, spawnParticle } from './gfx.js';
-import { VIEW_W, VIEW_H, FINAL_ROOM, BOSS_RUSH, SCHEDULED_BOSSES } from './config.js';
+import { VIEW_W, VIEW_H, FINAL_ROOM, BOSS_RUSH, SCHEDULED_BOSSES, PVP } from './config.js';
 import { Unlocks, BOSS_RUSH_ROOM } from './codex.js';
 import { panel, button, slider, textField, drawTooltip, inside, UI } from './ui.js';
 import { Options, optionsIn, saveOptions, resetOptions, applyVisualOptions } from './settings.js';
@@ -685,8 +685,13 @@ export function drawModeSelect(ctx, game, t) {
         ? ['LOCKED.', 'FELL THE UNDEAD CEILING', `AND REACH ROOM ${BOSS_RUSH_ROOM}`, 'IN A NORMAL RUN.']
         : [`${BOSS_RUSH.order.length} BOSSES, BACK TO BACK,`, 'NOTHING IN BETWEEN.', 'ONE WEAPON, ONE PERK,', 'AND SPOILS AS YOU GO.'],
     },
+    {
+      id: 'pvp', name: 'PVP', color: '#ff7a6a', ok: true,
+      lines: ['ONE OTHER PERSON.', `BEST OF ${PVP.rounds}, FIRST TO ${PVP.winsNeeded}.`,
+              'THE MAP IS ROLLED FOR YOU.', 'NEEDS A SERVER TO TALK THROUGH.'],
+    },
   ];
-  const cw = 170, ch = 118, gap = 14;
+  const cw = 124, ch = 118, gap = 10;
   const totalW = cards.length * cw + (cards.length - 1) * gap;
   for (let i = 0; i < cards.length; i++) {
     const c = cards[i];
@@ -703,6 +708,7 @@ export function drawModeSelect(ctx, game, t) {
     const label = c.ok ? 'START' : 'LOCKED';
     if (button(ctx, 'mode' + c.id, x + 22, y + ch - 26, cw - 44, 18, label, { disabled: !c.ok })) {
       if (c.id === 'normal') game.beginNormal();
+      else if (c.id === 'pvp') game.goPvp();
       else game.beginBossRush();
     }
   }

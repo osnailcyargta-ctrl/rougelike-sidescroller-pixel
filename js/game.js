@@ -40,6 +40,19 @@ import {
   drawMainMenu, drawSettings, drawClassSelect, drawModeSelect, drawWeaponSelect,
   drawPerkSlot, drawRushReward, drawPause, drawGameOver, drawControls, drawVictory,
 } from './screens.js';
+import { PVP } from './config.js';
+import { Net, probeServer, connect as netConnect, disconnect as netDisconnect,
+  createLobby, joinLobby, leaveLobby as netLeaveLobby, kickGuest, refreshLobbies,
+  pingServer } from './net.js';
+import {
+  Duel, Duelist, beginDuel, bothPicked, lockPick, startDuelRound, updateDuel,
+  duelFrozen, onDuelMessage, onDuelDeath, endDuel, duelPerkPool, randomOf, onOpponentGone,
+  drawGhosts, banner as duelBanner,
+} from './pvp.js';
+import {
+  drawPvpConnect, drawPvpLobbies, drawPvpRoom, drawPvpPick, drawPvpMap,
+  drawPvpOver, drawDuelHud,
+} from './pvpscreens.js';
 
 // Health restored to the player after every cleared wave; clearing a room and
 // stepping through the gate restores the rest.
@@ -98,7 +111,16 @@ export class Game {
     this.anvil = null;
     this.forge = null;       // the crafting popup, open only while paused
     this.codex = null;       // the bestiary, readable from anywhere
-    this.mode = 'normal';    // or 'bossrush'
+    this.mode = 'normal';    // 'bossrush', or 'pvp'
+    // --- a duel's own paperwork, none of which exists in a solo run
+    this.pvpConnect = null;      // the attempt to reach the server
+    this.pvpPick = null;         // the weapon/perk step, on one shared clock
+    this.pvpWeapon = null;
+    this.pvpPerk = null;
+    this.pvpServerText = '';
+    this.pvpLobbyName = '';
+    this.pvpCooldownUntil = 0;   // after a match, before another lobby
+    this.pvpPingT = 0;
     this.pendingClass = null;   // chosen on one screen, started on another
     this.weaponPick = null;     // the two-weapon offer Boss Rush opens with
     this.rushWeapon = null;     // and what was taken from it
@@ -624,6 +646,270 @@ export class Game {
     this.startRun(this.weaponPick?.classId ?? 'melee', 'bossrush', this.rushWeapon, id);
   }
 
+  // --- PvP ----------------------------------------------------------------
+  // Everything from "I picked PVP" to "the room is on the floor". The rules of
+  // the fight itself live in pvp.js; this is the paperwork around it.
+
+  /** What the HUD needs to know about a duel, or null when there is no duel. */
+  pvpDuelInfo() {
+    if (this.mode !== 'pvp' || !Duel.active || !Duel.map) return null;
+    return { map: Duel.map.name, round: Duel.round, foe: Duel.oppName };
+  }
+
+  /** The name the other player sees. Short, because it sits over their head. */
+  pvpName() {
+    return (Net.you && Net.you !== 'PLAYER' ? Net.you
+      : `${(this.pendingClass ?? 'melee').slice(0, 4)}${Math.floor(Math.random() * 900 + 100)}`)
+      .toUpperCase().slice(0, 12);
+  }
+
+  goPvp() {
+    resumeAudio();
+    this.mode = 'pvp';
+    this.screen = 'pvpConnect';
+    this.pvpConnect = { state: 'trying', t: 0, gen: (this.pvpConnect?.gen ?? 0) + 1, nextTry: 0 };
+    // The wire hands everything back through these three.
+    Net.onstart = (msg) => beginDuel(this, msg);
+    Net.onmatch = (msg) => onDuelMessage(this, msg);
+    Net.ongone = () => { if (this.mode === 'pvp') onOpponentGone(this); };
+    Net.onclosed = () => {
+      if (this.mode !== 'pvp') return;
+      endDuel(this, false);
+      if (this.screen !== 'pvpConnect' && this.screen !== 'menu') {
+        this.screen = 'pvpConnect';
+        this.pvpConnect = { state: 'trying', t: 10.1, gen: (this.pvpConnect?.gen ?? 0) + 1, nextTry: 0 };
+        Net.error = 'THE CONNECTION DROPPED';
+      }
+    };
+    this.tryPvpConnect();
+  }
+
+  /**
+   * One attempt. A server that is simply not there refuses in milliseconds
+   * rather than taking the whole ten seconds, so the clock on the screen is
+   * run by the frame loop and this is retried underneath it - which is also
+   * what KEEP TRYING goes on doing.
+   */
+  tryPvpConnect() {
+    const c = this.pvpConnect;
+    if (!c) return;
+    const gen = c.gen;
+    c.busy = true;
+    probeServer(10000)
+      .then((ok) => {
+        if (!this.pvpConnect || this.pvpConnect.gen !== gen) return null;
+        if (!ok) return null;
+        return netConnect(this.pvpName());
+      })
+      .then((up) => {
+        if (!this.pvpConnect || this.pvpConnect.gen !== gen) return;
+        this.pvpConnect.busy = false;
+        if (!up) { this.pvpConnect.nextTry = 0.8; return; }
+        this.pvpConnect.state = 'online';
+        this.screen = 'pvpLobbies';
+        UI.lobbyScroll = 0;
+        Sfx.ui();
+      })
+      .catch(() => { if (this.pvpConnect && this.pvpConnect.gen === gen) { this.pvpConnect.busy = false; this.pvpConnect.nextTry = 0.8; } });
+  }
+
+  retryPvpConnect() {
+    this.pvpConnect = { state: 'trying', t: 0, gen: (this.pvpConnect?.gen ?? 0) + 1, nextTry: 0 };
+    Net.error = '';
+    this.tryPvpConnect();
+    Sfx.ui();
+  }
+
+  updatePvpConnect(dt) {
+    const c = this.pvpConnect;
+    if (!c || c.state !== 'trying') return;
+    c.t += dt;
+    if (c.busy) return;
+    c.nextTry -= dt;
+    if (c.nextTry <= 0) this.tryPvpConnect();
+  }
+
+  leavePvp() {
+    endDuel(this, true);
+    netDisconnect();
+    Net.onstart = null;
+    Net.onmatch = null;
+    Net.onclosed = null;
+    Net.ongone = null;
+    this.pvpConnect = null;
+    this.pvpPick = null;
+    this.mode = 'normal';
+    this.quitToMenu();
+  }
+
+  createPvpLobby() {
+    if (performance.now() < this.pvpCooldownUntil) return;
+    createLobby(this.pvpLobbyName?.trim() || undefined);
+    this.screen = 'pvpRoom';
+    Sfx.ui();
+  }
+
+  joinPvpLobby(id) { joinLobby(id); this.screen = 'pvpRoom'; Sfx.ui(); }
+  leavePvpLobby() { netLeaveLobby(); this.screen = 'pvpLobbies'; Sfx.ui(); }
+  kickPvpGuest() { kickGuest(); Sfx.ui(); }
+  refreshPvpLobbies() { refreshLobbies(); Sfx.ui(); }
+  backToPvpLobbies() {
+    endDuel(this, false);
+    netLeaveLobby();
+    refreshLobbies();
+    this.screen = 'pvpLobbies';
+    Sfx.ui();
+  }
+
+  /** Keeps the lobby screens honest about a lobby that closed under them. */
+  updatePvpLobbies(dt) {
+    this.pvpPingT -= dt;
+    if (this.pvpPingT <= 0) { this.pvpPingT = 2; pingServer(); }
+    if (this.screen === 'pvpRoom' && !Net.lobby) this.screen = 'pvpLobbies';
+  }
+
+  // --- the thirty seconds before a duel ------------------------------------
+
+  openPvpPick() {
+    const cls = this.pendingClass ?? 'melee';
+    // Two out of your class's list, the same shape of choice a rush opens
+    // with - but drawn off Math.random rather than the run seed, so the pair
+    // is nobody's to arrange, yours or theirs.
+    const pool = [...(PVP.weapons[cls] ?? PVP.weapons.melee)];
+    const want = Math.min(PVP.weaponPicks, pool.length);
+    const offer = [];
+    while (offer.length < want) offer.push(pool.splice(Math.floor(Math.random() * pool.length), 1)[0]);
+    this.pvpPick = { stage: 'weapon', offer, slot: null };
+    this.screen = 'pvpPick';
+    Sfx.ui();
+  }
+
+  takePvpWeapon(id) {
+    const pick = this.pvpPick;
+    if (!pick || pick.stage !== 'weapon') return;
+    this.pvpWeapon = id;
+    pick.stage = 'perk';
+    pick.slot = {
+      pool: duelPerkPool(null), reel: 0, spin: 0, landed: null,
+      rerolls: 1, t: 0, result: null,
+    };
+    this.spinPvpSlot(true);
+  }
+
+  /**
+   * The reel. Unlike the rush's, this draws off Math.random and never touches
+   * the run's seed - there is no string a player could enter that decides what
+   * a duel hands them.
+   */
+  spinPvpSlot(first = false) {
+    const sl = this.pvpPick?.slot;
+    if (!sl) return;
+    if (!first) {
+      if (sl.rerolls <= 0 || sl.spin > 0) return;
+      sl.rerolls--;
+    }
+    const draw = first ? sl.pool : sl.pool.filter((id) => id !== sl.landed);
+    sl.landed = null;
+    sl.result = randomOf(draw) ?? sl.pool[0];
+    sl.spin = PVP.slotSpin;
+    sl.spinTotal = PVP.slotSpin;
+    sl.reelFrom = sl.reel;
+    const idx = sl.pool.indexOf(sl.result);
+    sl.reelTo = Math.ceil(sl.reel / sl.pool.length) * sl.pool.length + 4 * sl.pool.length + idx;
+    Sfx.ui();
+  }
+
+  takePvpPerk() {
+    const sl = this.pvpPick?.slot;
+    if (!sl || !sl.landed) return;
+    lockPick(this, this.pvpWeapon, sl.landed);
+    Sfx.pickup();
+  }
+
+  updatePvpPick(dt) {
+    const pick = this.pvpPick;
+    if (!pick) { this.screen = 'pvpLobbies'; return; }
+    if (!Duel.ready) {
+      Duel.pickLeft -= dt;
+      const sl = pick.slot;
+      if (sl && sl.spin > 0) {
+        sl.spin = Math.max(0, sl.spin - dt);
+        const k = 1 - sl.spin / sl.spinTotal;
+        const e = 1 - Math.pow(1 - k, 4);
+        const prev = Math.floor(sl.reel);
+        sl.reel = sl.reelFrom + (sl.reelTo - sl.reelFrom) * e;
+        if (Math.floor(sl.reel) !== prev && sl.spin > 0.35) Sfx.ui();
+        if (sl.spin <= 0) { sl.reel = sl.reelTo; sl.landed = sl.result; Camera.punch(0.8); Sfx.pickup(); }
+      }
+      // Run the clock out and the game picks for you: the other player is
+      // sitting there, and a duel that never starts is worse than one you did
+      // not choose your sword for.
+      if (Duel.pickLeft <= 0) {
+        const weapon = this.pvpWeapon ?? randomOf(pick.offer);
+        const perk = (sl && sl.landed) ? sl.landed : randomOf(duelPerkPool(null));
+        lockPick(this, weapon, perk);
+        this.toast('TIME - PICKED FOR YOU');
+      }
+    }
+    if (bothPicked()) this.startPvpMap();
+  }
+
+  startPvpMap() {
+    Duel.reelT = 0;
+    Duel.reelDone = false;
+    this.screen = 'pvpMap';
+    Sfx.ui();
+  }
+
+  updatePvpMap(dt) {
+    Duel.reelT += dt;
+    if (!Duel.reelDone && Duel.reelT >= 2.4) {
+      Duel.reelDone = true;
+      Camera.punch(1.2);
+      Sfx.pickup();
+    }
+    if (Duel.reelT >= 3.8) this.startPvpMatch();
+  }
+
+  /** The room goes down, both of you in it, and the first round counts in. */
+  startPvpMatch() {
+    resumeAudio();
+    this.mode = 'pvp';
+    resetCodex();
+    this.runTime = 0;
+    this.runStats = null;
+    clearFx();
+    this.player = new Player(this, this.pendingClass ?? 'melee');
+    this.enemies.length = 0;
+    this.projectiles.length = 0;
+    this.pickups.length = 0;
+    this.shockwaves.length = 0;
+    this.bolts.length = 0;
+    this.shields.length = 0;
+    this.kills = 0;
+    this.deathT = 0;
+    this.invOpen = false;
+    this.boss = null;
+    this.rushGrab = null;
+    this.rushReward = null;
+    const inv = this.player.inventory;
+    if (this.pvpWeapon) {
+      for (const id of ['sword', 'bow', 'bookairplane']) inv.remove(id, 1);
+      inv.add(this.pvpWeapon, 1);
+      const i = inv.slots.findIndex((sl) => sl && sl.id === this.pvpWeapon);
+      if (i >= 0 && i < HOTBAR_SIZE) inv.selected = i;
+    }
+    if (this.pvpPerk) inv.add(this.pvpPerk, 1);
+    // The same three things for both of you, so a duel is the fight and not
+    // whatever the run happened to drop.
+    for (const l of PVP.loadout) inv.add(l.id, l.count);
+    this.player.recomputeStats();
+    this.player.hp = this.player.maxHp;
+    this.screen = 'playing';
+    this.pvpPick = null;
+    startDuelRound(this, 1);
+  }
+
   quitToMenu() {
     this.closeCodex();
     resetCodex();
@@ -644,6 +930,7 @@ export class Game {
   // borrows the place each of those fights belongs to, so everything that
   // paints or lays out a room asks for this rather than for the room number.
   get envRoom() {
+    if (this.mode === 'pvp') return Duel.map ? Duel.map.room : this.roomIndex;
     return this.mode === 'bossrush' ? (BOSS_RUSH.env[this.roomIndex] ?? 5) : this.roomIndex;
   }
 
@@ -745,6 +1032,9 @@ export class Game {
   }
 
   onPlayerDeath() {
+    // A duel does not end when you go down: it is one round of five, and the
+    // room puts you back on your feet in a moment.
+    if (this.mode === 'pvp' && Duel.active) { onDuelDeath(this); return; }
     // the bestiary goes with the run; the next one starts with a blank book
     resetCodex();
     this.screen = 'gameover';
@@ -1797,6 +2087,18 @@ export class Game {
       } else if (this.screen === 'rushReward') {
         this.updateRushReward(dt);
         updateWorld(dt, true, this.time);
+      } else if (this.screen === 'pvpConnect') {
+        this.updatePvpConnect(dt);
+        updateWorld(dt, true, this.time);
+      } else if (this.screen === 'pvpLobbies' || this.screen === 'pvpRoom') {
+        this.updatePvpLobbies(dt);
+        updateWorld(dt, true, this.time);
+      } else if (this.screen === 'pvpPick') {
+        this.updatePvpPick(dt);
+        updateWorld(dt, true, this.time);
+      } else if (this.screen === 'pvpMap') {
+        this.updatePvpMap(dt);
+        updateWorld(dt, true, this.time);
       } else if (this.debugOpen) {
         updateWorld(dt, true, this.time);
       } else if (this.screen === 'playing' || this.screen === 'gameover') {
@@ -1846,6 +2148,10 @@ export class Game {
       else this.screen = 'paused';
     } else if (this.screen === 'paused') {
       this.screen = 'playing';
+    } else if (this.screen === 'pvpConnect' || this.screen === 'pvpLobbies') {
+      this.leavePvp();
+    } else if (this.screen === 'pvpRoom') {
+      this.leavePvpLobby();
     } else if (this.screen === 'modeSelect') {
       this.screen = 'classSelect';
     } else if (this.screen === 'weaponSelect') {
@@ -1862,7 +2168,7 @@ export class Game {
   // Anything that stops the world: a menu, a popup, the god's held breath.
   get worldFrozen() {
     return this.screen !== 'playing' || this.invOpen || !!this.fold || !!this.forge || !!this.codex
-      || this.debugOpen || this.timeStopT > 0;
+      || this.debugOpen || this.timeStopT > 0 || duelFrozen();
   }
 
   update(dt) {
@@ -1916,8 +2222,11 @@ export class Game {
         if (Input.pressed.has(String(i))) { p.inventory.selected = i - 1; Sfx.ui(); }
       }
     }
-    const frozen = this.timeStopT > 0;
-    if (frozen) {
+    if (this.mode === 'pvp' && Duel.active) updateDuel(this, dt);
+    // A countdown or the pause after a kill stops the fight without stopping
+    // the feed: you still see them, they still see you, neither can act.
+    const frozen = this.timeStopT > 0 || duelFrozen();
+    if (this.timeStopT > 0) {
       this.timeStopT -= dt;
       if (this.timeStopT <= 0) this.timeStopT = 0;
     }
@@ -1936,7 +2245,7 @@ export class Game {
     }
 
     // --- waves
-    if (!this.roomCleared && !frozen) this.updateWaves(dt);
+    if (!this.roomCleared && !frozen && this.mode !== 'pvp') this.updateWaves(dt);
 
     if (this.boss) this.boss.update(dt);
     // Frozen: nothing acts. Anything still materialising keeps doing that, so
@@ -2294,13 +2603,18 @@ export class Game {
     if (this.screen === 'modeSelect') { drawModeSelect(ctx, this, this.time); if (this.debugOpen) drawDebugMenu(ctx, this); this.drawToast(ctx); return; }
     if (this.screen === 'weaponSelect') { drawWeaponSelect(ctx, this, this.time); if (this.debugOpen) drawDebugMenu(ctx, this); this.drawToast(ctx); return; }
     if (this.screen === 'perkSlot') { drawPerkSlot(ctx, this, this.time); if (this.debugOpen) drawDebugMenu(ctx, this); this.drawToast(ctx); return; }
+    if (this.screen === 'pvpConnect') { drawPvpConnect(ctx, this, this.time); this.drawToast(ctx); return; }
+    if (this.screen === 'pvpLobbies') { drawPvpLobbies(ctx, this, this.time); this.drawToast(ctx); return; }
+    if (this.screen === 'pvpRoom') { drawPvpRoom(ctx, this, this.time); this.drawToast(ctx); return; }
+    if (this.screen === 'pvpPick') { drawPvpPick(ctx, this, this.time); this.drawToast(ctx); return; }
+    if (this.screen === 'pvpMap') { drawPvpMap(ctx, this, this.time); this.drawToast(ctx); return; }
 
     ctx.save();
     Camera.apply(ctx);
     drawBackground(ctx, this.time, this.envRoom);
     drawLightShafts(ctx, this.time, this.envRoom);
     drawArena(ctx, this.time, this.envRoom);
-    if (!this.roomCleared) drawSpawnPads(ctx, this.time, activeSpawnPads(this.waveIndex));
+    if (!this.roomCleared && this.mode !== 'pvp') drawSpawnPads(ctx, this.time, activeSpawnPads(this.waveIndex));
 
     // slam shockwaves
     for (const s of this.shockwaves) {
@@ -2325,6 +2639,7 @@ export class Game {
     for (const e of this.enemies) e.draw(ctx);
     if (this.boss && this.boss.draw) this.boss.draw(ctx);
     for (const pr of this.projectiles) pr.draw(ctx);
+    if (this.mode === 'pvp' && Duel.active) drawGhosts(ctx);
     if (this.player) this.player.draw(ctx);
     this.drawPaperShields(ctx);
 
@@ -2354,7 +2669,7 @@ export class Game {
     ctx.restore();
 
     drawFlash(ctx, VIEW_W, VIEW_H);
-    if (!this.cutscene.active && this.screen !== 'victory') drawHUD(ctx, this);
+    if (!this.cutscene.active && this.screen !== 'victory' && this.screen !== 'pvpOver') drawHUD(ctx, this);
     drawTouchPad(ctx, this);
     this.cutscene.draw(ctx);
     if (this.fold) drawFoldWheel(ctx, this);
@@ -2366,6 +2681,8 @@ export class Game {
     if (this.screen === 'gameover') drawGameOver(ctx, this, this.time);
     if (this.screen === 'victory') drawVictory(ctx, this, this.time);
     if (this.screen === 'rushReward') drawRushReward(ctx, this, this.time);
+    if (this.mode === 'pvp' && Duel.active && !this.cutscene.active) drawDuelHud(ctx, this, this.time);
+    if (this.screen === 'pvpOver') drawPvpOver(ctx, this, this.time);
     // over the pause menu, since that is where a phone reaches it from
     if (this.codex) drawCodex(ctx, this);
     if (this.debugOpen) drawDebugMenu(ctx, this);

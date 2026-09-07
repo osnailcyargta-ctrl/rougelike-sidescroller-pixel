@@ -23,10 +23,15 @@
   <script type="module">
     import { Game } from './js/game.js';
     import { resumeAudio } from './js/audio.js';
+    import { Net } from './js/net.js';
+    import { Duel } from './js/pvp.js';
     const root = document.getElementById('root');
     const boot = document.getElementById('boot');
     const game = new Game(root);
     window.__game = game;
+    // Handles for the console: which duel is on, and what the wire is doing.
+    window.__net = Net;
+    window.__duel = Duel;
     const start = () => { resumeAudio(); boot.classList.add('gone'); };
     boot.addEventListener('click', start);
     addEventListener('keydown', start, { once: true });
