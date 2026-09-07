@@ -30,7 +30,11 @@ services:
     # to believe the raw figure.
     command: ["node", "--expose-gc", "server/pvp.js"]
     ports:
-      # host:container - the game and the watch page both live behind this one
+      # host:container - the page, the game's status check and the duel
+      # sockets all live behind this one. Put a TLS reverse proxy in front of
+      # it as aether.argya.me: the game is served over https and cannot talk to
+      # a plain port. See the README for the WebSocket upgrade headers that
+      # proxy has to forward.
       - "8897:8897"
     environment:
       PORT: "8897"

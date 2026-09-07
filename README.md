@@ -38,12 +38,40 @@ docker compose up -d
 docker compose logs -f
 ```
 
-It listens on **8897**. Point the game at it once, in `js/pvpserver.js` on the
-game branch — or a player can override it with `?pvp=host:8897` in the URL or
-by typing the address on the PvP connect screen.
+It listens on **8897**. There is nothing to install: it speaks WebSocket over
+node's own `http` module, so `compose.yaml` just runs stock `node:22-alpine`
+over this directory.
 
-There is nothing to install. It speaks WebSocket over node's own `http` module,
-so `compose.yaml` just runs stock `node:22-alpine` over this directory.
+## Putting it behind aether.argya.me
+
+The game is served over https, and a page loaded over https may only talk to
+https and wss. So `http://<nas>:8897` is unreachable from it: the server has to
+answer on 443 as **aether.argya.me**, behind whatever terminates TLS for you —
+Cloudflare Tunnel, a Synology reverse proxy, nginx, Caddy.
+
+Point that at `<nas>:8897` and make sure it **forwards the WebSocket upgrade**.
+This is the one thing that is easy to get wrong: `/status` will answer, the
+game will say the server is there, and then every duel will connect to nothing.
+Most proxies need telling. In nginx:
+
+```nginx
+location / {
+    proxy_pass http://<nas>:8897;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade    $http_upgrade;      # these two are the point
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host       $host;
+    proxy_read_timeout 1h;                          # a duel is a long-lived socket
+}
+```
+
+Cloudflare Tunnel and Synology's reverse proxy do it for you — Synology has a
+"WebSocket" checkbox on the rule, and it is off by default.
+
+`js/pvpserver.js` on the game branch already carries `aether.argya.me`, so once
+that name reaches this box there is nothing else to set. A player can still
+override it with `?pvp=host:port` in the URL or by typing an address on the
+connect screen, which is how you test against the LAN address directly.
 
 ## The password
 
