@@ -182,6 +182,7 @@ export const ENEMY_TINT = {
   get shardling() { return '#a98cff'; },
   get aetherShardling() { return '#a98cff'; },
   get wisp() { return '#7bf0d8'; },
+  get meteorhead() { return '#ff8a3c'; },
   get spitter() { return '#a8e04a'; },
   get mutantstinger() { return '#7ad7a0'; },
   get stingeregg() { return '#bffff0'; },
@@ -561,6 +562,7 @@ export class Enemy {
   updateFlyer(dt, p, slow) {
     if (this.ai === 'shardling') return this.updateShardling(dt, p, slow);
     if (this.ai === 'wisp') return this.updateWisp(dt, p, slow);
+    if (this.ai === 'meteorhead') return this.updateMeteorHead(dt, p, slow);
     this.hover += dt * 3;
     // a thing with wings would simply fly out of a knockback, so while it is
     // being thrown it falls like everything else
@@ -736,6 +738,132 @@ export class Enemy {
   // Wisp: never attacks. It hangs off the far side of the pack from you and
   // pours speed into the allies nearest to you, so the room gets faster the
   // longer you leave it alive.
+  /**
+   * Never lands on purpose. It climbs to a spot above your head, holds there
+   * long enough for you to see it, and then drops faster than anything else in
+   * the game. Getting out from under it is the whole fight; standing still is
+   * how it wins.
+   */
+  updateMeteorHead(dt, p, slow) {
+    const def = this.def;
+    this.slamState = this.slamState ?? 'chase';
+    this.slamT = (this.slamT ?? 0) + dt;
+    const target = p && !p.dead ? p : null;
+
+    // Thrown, it stops being a flyer until it lands, like every other winged
+    // thing here.
+    if (this.launchT > 0) {
+      this.vy += GRAVITY * dt;
+      moveAndCollide(this, dt, { ignorePlatforms: true });
+      this.y = clamp(this.y, 24, GROUND_Y - 6);
+      this.slamState = 'rise';
+      this.slamT = 0;
+      return;
+    }
+
+    if (this.slamState === 'chase') {
+      if (!target) { this.vx *= 0.9; this.vy *= 0.9; this.x += this.vx * dt; this.y += this.vy * dt; return; }
+      // straight for the air above them, not for them
+      const wantX = target.x;
+      const wantY = clamp(target.y - def.hover, 26, GROUND_Y - 30);
+      const sp = def.speed * slow;
+      this.vx = clamp((wantX - this.x) * 3.4, -sp, sp);
+      this.vy = clamp((wantY - this.y) * 3.4, -sp, sp);
+      this.x = clamp(this.x + this.vx * dt, this.w / 2, VIEW_W - this.w / 2);
+      this.y += this.vy * dt;
+      this.facing = target.x < this.x ? -1 : 1;
+      // close enough overhead, and it commits
+      if (Math.abs(this.x - wantX) < 9 && Math.abs(this.y - wantY) < 12) {
+        this.slamState = 'aim';
+        this.slamT = 0;
+        this.telegraph = def.aimTime;
+      }
+      return;
+    }
+
+    if (this.slamState === 'aim') {
+      // Held still, winding up. It does NOT track you here - the wind-up is
+      // the window, and a slam that followed you through it would have none.
+      this.vx = 0;
+      this.vy = 0;
+      this.telegraph = Math.max(0, def.aimTime - this.slamT);
+      // shivering harder as it goes
+      const k = this.slamT / def.aimTime;
+      if (Math.random() < dt * (20 + k * 40)) {
+        spawnParticle({
+          x: this.x + rand(-7, 7), y: this.cy + rand(-6, 6), vx: rand(-16, 16), vy: rand(-40, -10),
+          life: rand(0.15, 0.4), size: 1, color: Theme.fireHot, color2: Theme.fire,
+          gravity: -40, kind: 'shrink',
+        });
+      }
+      if (this.slamT >= def.aimTime) {
+        this.slamState = 'slam';
+        this.slamT = 0;
+        this.telegraph = 0;
+        this.vy = def.slamSpeed;
+        this.slamFrom = this.y;
+        this.slamHit = false;
+        Sfx.swing();
+      }
+      return;
+    }
+
+    if (this.slamState === 'slam') {
+      const prevY = this.y;
+      this.y += this.vy * dt;
+      this.x = clamp(this.x, this.w / 2, VIEW_W - this.w / 2);
+      // Coming down this fast it can pass a body inside one frame, so the hit
+      // is tested against the span it crossed and not against where it ended.
+      if (target && !target.dead && target.dashT <= 0 && !this.slamHit &&
+          Math.abs(target.x - this.x) < (this.w + target.w) / 2 &&
+          target.cy >= Math.min(prevY, this.y) - this.h && target.cy <= Math.max(prevY, this.y)) {
+        // Caught on the way down. The landing shake below does not also get
+        // to hit them: one slam is one hit, not two.
+        this.slamHit = true;
+        target.hurt(this.dmg, this.x);
+      }
+      const floor = surfaceBelow(this.x, this.y - this.h);
+      if (this.y >= floor) {
+        this.y = floor;
+        this.meteorLanded(p);
+      }
+      return;
+    }
+
+    // rise: back up out of reach for another one
+    this.vy = -def.riseSpeed;
+    this.y += this.vy * dt;
+    if (target) this.x += clamp((target.x - this.x) * 1.6, -def.speed, def.speed) * dt;
+    if (this.slamT >= (def.attackCooldown ?? 1.2) || this.y <= 34) {
+      this.slamState = 'chase';
+      this.slamT = 0;
+    }
+  }
+
+  /** The landing: a small ring, and everything close to it takes a knock. */
+  meteorLanded(p) {
+    const def = this.def;
+    this.slamState = 'rise';
+    this.slamT = 0;
+    this.squash = 1;
+    Camera.add(6);
+    Camera.punch(1.1);
+    Sfx.hit();
+    impactRing(this.x, this.y, { color: Theme.fire, r0: 3, r1: def.slamRadius, life: 0.32, width: 2.5 });
+    burst(this.x, this.y, 16, {
+      color: Theme.fire, color2: Theme.fireHot, speedMin: 50, speedMax: 210,
+      lifeMin: 0.2, lifeMax: 0.55, gravity: 300, sizeMax: 2,
+    });
+    burst(this.x, this.y, 8, {
+      color: Theme.groundEdge, kind: 'smoke', speedMin: 14, speedMax: 70,
+      lifeMin: 0.3, lifeMax: 0.7, sizeMin: 1, sizeMax: 3, gravity: -20, glow: false,
+    });
+    if (p && !p.dead && p.dashT <= 0 && !this.slamHit &&
+        dist(p.x, p.cy, this.x, this.y) <= def.slamRadius) {
+      p.hurt(Math.round(def.slamDamage * this.dmgScale), this.x);
+    }
+  }
+
   updateWisp(dt, p, slow) {
     const d = this.def;
     this.hover += dt * 3.4;
@@ -1141,6 +1269,7 @@ export class Enemy {
     else if (this.type === 'spitter') this.drawSpitter(ctx, t, flash);
     else if (this.ai === 'shardling') this.drawShardling(ctx, t, flash);
     else if (this.ai === 'wisp') this.drawWisp(ctx, t, flash);
+    else if (this.ai === 'meteorhead') this.drawMeteorHead(ctx, t, flash);
     else if (this.ai === 'giantegg') this.drawGiantEgg(ctx, t, flash);
     else if (this.ai === 'egg') this.drawEgg(ctx, t, flash);
     else if (this.type === 'mutantstinger') this.drawMutantStinger(ctx, t, flash);
@@ -1535,6 +1664,78 @@ export class Enemy {
 
   // A lantern of cold light with a slow rotating shell and a tether to every
   // ally it is feeding.
+  /**
+   * A burning skull with nothing under it. Coming down it stretches into the
+   * line it is travelling on; hanging still it shudders, so the moment before
+   * a slam reads as a wind-up and not as a pause.
+   */
+  drawMeteorHead(ctx, t, flash) {
+    const tint = ENEMY_TINT.meteorhead;
+    const hot = Theme.fireHot;
+    const aiming = this.slamState === 'aim';
+    const slamming = this.slamState === 'slam';
+    const w = this.w, h = this.h;
+    const cy = this.y - h / 2;
+
+    ctx.save();
+    // the trail it drags down behind it
+    if (slamming) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const g = ctx.createLinearGradient(0, cy - 54, 0, cy);
+      g.addColorStop(0, rgba(tint, 0));
+      g.addColorStop(1, rgba(tint, 0.5));
+      ctx.fillStyle = g;
+      ctx.fillRect(this.x - w * 0.3, cy - 54, w * 0.6, 54);
+      ctx.restore();
+    }
+
+    // the shudder before it comes down
+    const shake = aiming ? Math.sin(t * 60) * 1.2 : 0;
+    ctx.translate(Math.round(this.x + shake), Math.round(cy));
+    // stretched along the fall, squashed across it
+    if (slamming) ctx.scale(0.82, 1.35);
+    else if (aiming) ctx.scale(1.1, 0.92);
+
+    ctx.globalCompositeOperation = 'lighter';
+    glowDot(ctx, 0, 0, 26, tint, aiming ? 0.5 : 0.3);
+    ctx.globalCompositeOperation = 'source-over';
+
+    const body = flash ? '#ffffff' : '#241a18';
+    // the skull
+    pxSolid(ctx, -w / 2, -h / 2, w, h - 3, body);
+    pxSolid(ctx, -w / 2 + 2, h / 2 - 3, w - 4, 3, body);
+    // jaw
+    pxSolid(ctx, -w / 2 + 3, h / 2 - 2, 2, 2, flash ? '#ffffff' : '#150f0e');
+    pxSolid(ctx, w / 2 - 5, h / 2 - 2, 2, 2, flash ? '#ffffff' : '#150f0e');
+    // eyes, hotter the closer it is to letting go
+    const eye = aiming ? hot : tint;
+    const er = aiming ? 3 : 2;
+    glowEye(ctx, -3, -1, er, eye);
+    glowEye(ctx, 3, -1, er, eye);
+    // the fire coming off the top of it
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = -1; i <= 1; i++) {
+      const fh = 4 + Math.sin(t * 9 + i * 2) * 2 + (aiming ? 2 : 0);
+      pxRect(ctx, i * 4 - 1, -h / 2 - fh, 2, fh, rgba(i === 0 ? hot : tint, 0.75));
+    }
+    ctx.restore();
+
+    // where it is going to land, while it is still deciding
+    if (aiming) {
+      const floor = surfaceBelow(this.x, this.y);
+      const k = 1 - (this.telegraph ?? 0) / (this.def.aimTime || 1);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = rgba(tint, 0.3 + k * 0.5);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.ellipse(this.x, floor - 1, this.def.slamRadius * (0.35 + k * 0.5), 4, 0, 0, TAU);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
   drawWisp(ctx, t, flash) {
     const tint = ENEMY_TINT.wisp;
     const c = flash ? '#ffffff' : tint;
@@ -1741,6 +1942,7 @@ export class Projectile {
       life: 2, t: 0, dead: false, traveled: 0, maxDist: Infinity, gravity: 0,
       mark: false, slow: false, homing: 0, target: null, trail: [],
       poisonPlayer: 0,       // seconds of poison this leaves on the player
+      burnPlayer: false,     // and whether it sets them on fire
       poison: false,         // and whether it poisons an enemy at all
       spent: false, stuck: false, stuckT: 0, stuckTo: null, spin: 0,
       phase: 'out', owner: null, hitLog: null, wobble: 0,
@@ -2182,6 +2384,13 @@ export class Projectile {
       }
     } else {
       target.hurt(this.damage, this.x);
+      if (this.burnPlayer && target.applyBurn) {
+        target.applyBurn();
+        burst(this.x, this.y, 7, {
+          color: Theme.fire, color2: Theme.fireHot, speedMin: 20, speedMax: 110,
+          lifeMin: 0.15, lifeMax: 0.45, gravity: -40,
+        });
+      }
       // some things that hit you leave more than a bruise
       if (this.poisonPlayer > 0 && target.applyPoison) {
         target.applyPoison(this.poisonPlayer);
@@ -2404,6 +2613,8 @@ export class Player {
     this.mags = {};        // gun id -> rounds left in it
     this.poisonT = 0;      // seconds of poison left on you
     this.poisonTick = 0;
+    this.burnT = 0;        // and seconds of fire, from a floor or a laser
+    this.burnTick = 0;
     this.daggerHits = 0;
     this.emberDash = 0;
     this.slimeT = PERK.slimeInterval;
@@ -2632,6 +2843,7 @@ export class Player {
     }
     this.updateReload(dt);
     this.updatePoison(dt);
+    this.updateBurn(dt);
     this.updatePerks(dt);
 
     const c = this.controls ? input : null;
@@ -3163,6 +3375,43 @@ export class Player {
     if (this.dead) return;
     if (this.poisonT <= 0) this.poisonTick = 0;
     this.poisonT = Math.max(this.poisonT, duration);
+  }
+
+  /**
+   * Set alight. Refreshes rather than stacks, exactly like the burn that
+   * enemies carry, so standing in fire is one burn and not forty.
+   */
+  applyBurn(duration = PERK.burnDuration) {
+    if (this.dead) return;
+    if (this.burnT <= 0) this.burnTick = 0;
+    this.burnT = Math.max(this.burnT, duration);
+  }
+
+  /**
+   * Fire ticks like poison does, and like poison it cannot be the thing that
+   * kills you outright - the last point of health is safe from it. A floor you
+   * cannot get off should hurry you, not execute you.
+   */
+  updateBurn(dt) {
+    if (this.burnT <= 0) return;
+    this.burnT -= dt;
+    this.burnTick += dt;
+    while (this.burnTick >= PERK.burnTick) {
+      this.burnTick -= PERK.burnTick;
+      if (this.hp > 1) {
+        this.hp = Math.max(1, this.hp - PERK.burnTickDamage);
+        if (Math.random() < 0.25) {
+          floatText(this.cx + rand(-4, 4), this.cy - 14, PERK.burnTickDamage, Theme.fire, { life: 0.5 });
+        }
+      }
+    }
+    if (Math.random() < dt * 34) {
+      spawnParticle({
+        x: this.x + rand(-5, 5), y: this.cy + rand(-8, 8), vx: rand(-14, 14), vy: rand(-46, -16),
+        life: rand(0.2, 0.55), size: 1, color: Theme.fireHot, color2: Theme.fire,
+        gravity: -50, kind: 'shrink',
+      });
+    }
   }
 
   updatePoison(dt) {

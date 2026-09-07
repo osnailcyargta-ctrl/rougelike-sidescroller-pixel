@@ -71,9 +71,13 @@ docker compose up -d          # port 8897; see that branch's README
 node server/pvp.js            # or just run it, PORT=… to move it
 ```
 
-The game ships pointed at **`aether.argya.me`**, set in `js/pvpserver.js` — one
-line, nothing else in the file. A player can override it with `?pvp=host:port`
-in the URL or by typing one on the connect screen.
+The game is pointed at **`aether.argya.me`** and nothing can move it. There is
+no setting, no saved address, and no `?pvp=` — every copy talks to the one
+server, which is the point: a lobby list is only a lobby list if everybody is
+looking at the same one. The address is one line in `js/pvpserver.js`, read at
+build time. (A page served from `localhost` may still be pointed elsewhere,
+which is how the two halves are tested on one machine; nothing published is
+localhost.)
 
 No port in that address, on purpose: the game is served over https, and a page
 loaded over https may only talk to https and wss. So the duel server answers on

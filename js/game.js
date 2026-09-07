@@ -18,6 +18,7 @@ import {
 } from './config.js';
 import { Player, Enemy, Projectile, SHARD_TINT, INK, doodleShape, doodleLine,
   openRightWall, closeRightWall } from './entities.js';
+import { PaperMeteor } from './meteor.js';
 import { makeBoss, makeBossPreview } from './boss.js';
 import { Cutscene } from './cutscene.js';
 import {
@@ -106,6 +107,7 @@ export class Game {
     this.shockwaves = [];
     this.shields = [];        // orbiting paper plates, if the set is worn
     this.bolts = [];
+    this.meteors = [];       // paper meteors, burning where they landed
     this.pendingSpawns = [];
     this.portal = null;
     this.anvil = null;
@@ -117,7 +119,6 @@ export class Game {
     this.pvpPick = null;         // the weapon/perk step, on one shared clock
     this.pvpWeapon = null;
     this.pvpPerk = null;
-    this.pvpServerText = '';
     this.pvpLobbyName = '';
     this.pvpCooldownUntil = 0;   // after a match, before another lobby
     this.pvpPingT = 0;
@@ -451,6 +452,7 @@ export class Game {
     this.shockwaves.length = 0;
     this.bolts.length = 0;
     this.shields.length = 0;
+    this.clearMeteors();
     this.kills = 0;
     this.roomIndex = 1;
     this.deathT = 0;
@@ -665,6 +667,9 @@ export class Game {
     this.frameT = 0;
     sendFrame(this.scene);
   }
+
+  /** In a duel right now - not merely in the PvP menus. */
+  inDuel() { return this.mode === 'pvp' && Duel.active && !!this.player; }
 
   /** What the HUD needs to know about a duel, or null when there is no duel. */
   pvpDuelInfo() {
@@ -933,6 +938,7 @@ export class Game {
   }
 
   quitToMenu() {
+    this.clearMeteors();
     this.closeCodex();
     resetCodex();
     this.screen = 'menu';
@@ -984,6 +990,7 @@ export class Game {
     this.enemies.length = 0;
     this.projectiles.length = 0;
     this.shields.length = 0;
+    this.clearMeteors();
     // the chapter decides what this room is made of, and what moves in it
     const wasChapter = this.chapter;
     const env = this.mode === 'bossrush' ? (BOSS_RUSH.env[index] ?? 5) : index;
@@ -1012,6 +1019,16 @@ export class Game {
       if (got > 0) floatText(this.player.x, this.player.cy - 20, `+${got} PAPER`, '#efeade', { life: 1.2 });
     }
     this.startWave(1);
+  }
+
+  /**
+   * Take every paper meteor out of the world, blocks and all. A landed meteor
+   * has put itself into PLATFORMS, and leaving one there across a room change
+   * would leave a piece of invisible floor hanging in the next room.
+   */
+  clearMeteors() {
+    for (const m of this.meteors) m.release();
+    this.meteors.length = 0;
   }
 
   startWave(n) {
@@ -1588,10 +1605,14 @@ export class Game {
     if (p.attackCd > 0) return;              // folds have their own cadence
     const known = this.foldsKnown();
     if (!known.length) return;
-    // Nothing to choose between, or the player has asked to carry a style
-    // instead of picking one every throw: fold it and go.
+    // Where the cursor was when you swung. The Meteor lands on it, and a
+    // wheel you have to move the mouse across would drag the landing spot
+    // with it, so it is taken now and not when the fold is chosen.
+    this.foldCursorX = Input.mouse.x;
+    // Nothing to choose between, the wheel switched off, or a style carried
+    // instead of picked every throw: fold it and go.
     if (known.length === 1) { this.chooseFold(known[0]); return; }
-    if (Options.foldSwitch) {
+    if (!Options.foldWheel || Options.foldSwitch) {
       const i = clamp(p.foldStyle ?? 0, 0, known.length - 1);
       p.foldStyle = i;
       this.chooseFold(known[i]);
@@ -1603,7 +1624,8 @@ export class Game {
     });
     // rot is where the ring is; targetRot is where it is heading. Scrolling
     // adds a full slice to the target, so it always spins the way you scrolled.
-    this.fold = { options, sel: 0, t: 0, aim: p.aim, rot: 0, targetRot: 0, spin: 0,
+    this.fold = { options, sel: 0, t: 0, aim: p.aim, cursorX: this.foldCursorX,
+                  rot: 0, targetRot: 0, spin: 0,
                   hold: null, holdK: 0, close: null, closeHot: false, touchHint: false };
     Sfx.ui();
   }
@@ -1691,6 +1713,10 @@ export class Game {
     const p = this.player;
     const cfg = ORIGAMI.forms[id];
     const aim = this.fold ? this.fold.aim : p.aim;
+    // Both taken before the wheel is thrown away, for the same reason: they
+    // are where you were pointing when you swung, not where the mouse ended
+    // up after picking a fold off a ring.
+    const cursorX = this.fold ? this.fold.cursorX : (this.foldCursorX ?? Input.mouse.x);
     this.fold = null;
     if (!cfg || !p) return;
     if (id === 'shield' && this.shields.length) {
@@ -1707,6 +1733,14 @@ export class Game {
     p.attackCd = (cfg.cooldown ?? ORIGAMI.cooldown) * (1 + (p.armorBuff?.foldCooldown ?? 0));
     p.swing = { t: 0, angle: aim, kind: 'throw' };
     if (id === 'shield') { this.raisePaperShields(); return; }
+    // The Meteor is not thrown - it is called down. Where the cursor is, not
+    // where you are aiming from, because what you are picking is a spot.
+    if (id === 'meteor') {
+      this.meteors.push(new PaperMeteor(this, cursorX, p));
+      Sfx.swing();
+      Camera.add(3);
+      return;
+    }
     const ox = p.x + Math.cos(aim) * 9, oy = p.cy + Math.sin(aim) * 9;
     // paper leggings push the plane along faster
     const speed = cfg.speed * (id === 'airplane' ? 1 + (p.armorBuff?.planeSpeed ?? 0) : 1);
@@ -2152,7 +2186,11 @@ export class Game {
   handleGlobalKeys() {
     // a focused text field or a pending rebind owns the keyboard
     if (Input.captureText) return;
-    if (Input.pressed.has('ctrl+m')) {
+    // Not in a duel. The debug menu can heal you, hand you items and walk you
+    // to any room, and the other player has no way of knowing you did - and
+    // opening it stops the world on your screen only, which is its own kind of
+    // cheating. There is nothing to debug in a fight against a person.
+    if (Input.pressed.has('ctrl+m') && !this.inDuel()) {
       this.debugOpen = !this.debugOpen;
       Sfx.ui();
     }
@@ -2167,7 +2205,11 @@ export class Game {
     if (this.debugOpen) { this.debugOpen = false; return; }
     if (this.codex) { this.closeCodex(); return; }
     if (this.screen === 'playing') {
+      // A duel cannot be paused: the other player keeps moving whatever this
+      // screen does, so a pause menu would only be a way to stand still while
+      // being shot. Escape closes the bag and that is all.
       if (this.invOpen) this.invOpen = false;
+      else if (this.inDuel()) this.toast('NO PAUSING IN A DUEL');
       else this.screen = 'paused';
     } else if (this.screen === 'paused') {
       this.screen = 'playing';
@@ -2312,6 +2354,12 @@ export class Game {
       if (this.projectiles[i].dead) this.projectiles.splice(i, 1);
     }
 
+    if (!frozen) this.burnTheFloor(dt);
+    // Paper meteors: they fall, they land, they sit there burning, they go.
+    if (!frozen) for (const m of this.meteors) m.update(dt);
+    for (let i = this.meteors.length - 1; i >= 0; i--) {
+      if (this.meteors[i].dead) this.meteors.splice(i, 1);
+    }
     if (!frozen) this.updatePaperShields(dt);
     for (const pk of this.pickups) pk.update(dt);
     if (this.anvil) this.anvil.update(dt, this.player);
@@ -2342,6 +2390,34 @@ export class Game {
     for (let i = this.bolts.length - 1; i >= 0; i--) {
       this.bolts[i].t += dt;
       if (this.bolts[i].t > this.bolts[i].life) this.bolts.splice(i, 1);
+    }
+  }
+
+  /**
+   * Hell is not scenery. The floor of the Inferno is hot enough to light
+   * anything standing on it - you and everything you are fighting alike - so
+   * the slabs overhead stop being decoration and become the only place in the
+   * room worth being.
+   *
+   * Standing on a platform is safe. Standing on the ground is not.
+   */
+  burnTheFloor(dt) {
+    if (chapterFor(this.envRoom).id !== 'hell') return;
+    const p = this.player;
+    if (p && !p.dead && p.onGround && !p.platform) p.applyBurn();
+    for (const e of this.enemies) {
+      if (e.dead || e.spawnT > 0 || e.def.flying) continue;
+      if (e.onGround && !e.platform) e.applyBurn();
+    }
+    // the floor itself showing what it does
+    if (Math.random() < dt * 26) {
+      const x = rand(8, VIEW_W - 8);
+      spawnParticle({
+        x, y: GROUND_Y - rand(0, 3), vx: rand(-10, 10), vy: rand(-46, -14),
+        life: rand(0.3, 0.8), size: 1,
+        color: Math.random() < 0.5 ? Theme.fire : Theme.fireHot,
+        gravity: -34, drag: 0.95, kind: 'shrink',
+      });
     }
   }
 
@@ -2657,6 +2733,7 @@ export class Game {
                         this.portal && this.portal.kind === 'gate' ? this.portal.open : 0);
     this.drawFloorReflections(ctx);
     for (const pk of this.pickups) pk.draw(ctx);
+    for (const m of this.meteors) m.draw(ctx);
     if (this.anvil) this.anvil.draw(ctx);
     if (this.portal && this.portal.kind !== 'gate') this.portal.draw(ctx);
     for (const e of this.enemies) e.draw(ctx);

@@ -16,10 +16,10 @@
 //   '192.168.1.20:8897'               the box's address on the LAN
 //   'wss://duels.example.com'         spelled out, when the scheme is not obvious
 //
-// A player can still override it: ?pvp=host:port in the URL wins over
-// everything, and an address typed on the connect screen is remembered in that
-// browser and wins over this. Empty falls back to the page's own host on the
-// port below, which is what you want while developing on one machine.
+// Nothing at runtime can move it. There is no setting for it, no saved
+// address, and the ?pvp= that used to override it is now only read when the
+// page itself is served from localhost - which is how both halves get tested
+// on one machine, and which nothing published ever is.
 export const PVP_SERVER = 'aether.argya.me';
 
 // The port compose.yaml publishes, for the fallback above and for the address

@@ -19,6 +19,9 @@ export const OPTION_DEFS = [
   // Origamist only: swap the fold wheel for a style you carry and change with
   // a key. With this on, attacking throws immediately.
   { id: 'foldSwitch', label: 'ORIGAMIST STYLE BUTTONS', group: 'touch', type: 'bool', def: false },
+  // And the wheel itself. Off, attacking throws the style you are carrying -
+  // the same thing the buttons above do, for anyone who wants it without them.
+  { id: 'foldWheel', label: 'ORIGAMIST FOLD WHEEL', group: 'touch', type: 'bool', def: true },
   // Not a slider and not a switch: which tier to run at, or AUTO to let the
   // watchdog choose. Drawn by hand in the Visuals tab.
   { id: 'gfxTier', label: 'GRAPHICS', group: 'none', type: 'enum', def: 'auto' },

@@ -2,35 +2,36 @@
 // in here knows the rules of the game - it moves messages and tracks who is
 // in which lobby.
 //
-// Where the server is: whatever is saved in settings, else the page's own host
-// on the default port. A ?pvp= in the URL overrides both, which is how two
-// browsers on one machine are pointed at one server for testing.
+// Where the server is: aether.argya.me, and nowhere else. There is no setting,
+// no saved address and no query string that moves it - see serverUrl below for
+// why the one exception is not one.
 
 import { PVP_SERVER, PVP_PORT } from './pvpserver.js';
 
-const STORE = 'aether.pvp.server';
 export const DEFAULT_PORT = PVP_PORT;
 
 /**
- * Where to talk to, most specific first: what this page was opened with, then
- * what this browser was told to remember, then the address the game ships
- * pointed at, and only then the page's own host - which is the right answer
- * when you are running both halves on one machine.
+ * The address, fixed at build time. A player cannot change it: nothing reads
+ * a query string, nothing reads storage, and there is no field to type one
+ * into. Every game talks to the same server, which is the point - a lobby list
+ * everyone can see is only a lobby list if everyone is looking at the same one.
+ *
+ * The single exception is a page served from localhost, which is how the two
+ * halves get tested on one machine. It is not a way in: a player running the
+ * published game is on aether.argya.me or on GitHub Pages, and neither is
+ * localhost. (Anyone running their own copy off their own disk can of course
+ * point their own copy anywhere - that is what running your own copy means,
+ * and it changes nothing for anybody else.)
  */
 export function serverUrl() {
-  const q = new URLSearchParams(location.search).get('pvp');
-  if (q) return q;
-  try {
-    const saved = localStorage.getItem(STORE);
-    if (saved) return saved;
-  } catch { /* storage off: fall through to the default */ }
-  if (PVP_SERVER) return PVP_SERVER;
-  const host = location.hostname || 'localhost';
-  return `${host}:${DEFAULT_PORT}`;
-}
-
-export function setServerUrl(v) {
-  try { localStorage.setItem(STORE, String(v || '').trim()); } catch { /* ignore */ }
+  const host = location.hostname || '';
+  const local = host === 'localhost' || host === '127.0.0.1' || host === '';
+  if (local) {
+    const q = new URLSearchParams(location.search).get('pvp');
+    if (q) return q;
+    return `${host || 'localhost'}:${DEFAULT_PORT}`;
+  }
+  return PVP_SERVER || `${host}:${DEFAULT_PORT}`;
 }
 
 // "host:port" is what a person types; these turn it into what fetch and

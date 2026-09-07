@@ -88,6 +88,13 @@ for (const p of PLATFORMS) { p.motion = 'none'; p.off = false; p.homeX = p.x; p.
 
 export function layoutRoom(room) {
   const ch = chapterFor(room);
+  // A paper meteor puts a block of its own into this list while it burns.
+  // Anything still there when a room is laid out has outlived its room, and
+  // the loop below indexes HOME by position - so they go first, and the list
+  // is the fixed set again.
+  for (let i = PLATFORMS.length - 1; i >= 0; i--) {
+    if (PLATFORMS[i].meteor) PLATFORMS.splice(i, 1);
+  }
   for (let i = 0; i < PLATFORMS.length; i++) {
     const p = PLATFORMS[i];
     p.homeX = HOME[i].x;

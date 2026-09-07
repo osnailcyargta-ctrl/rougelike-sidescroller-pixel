@@ -286,6 +286,7 @@ export class GolemBoss {
     this.game.projectiles.push(new Projectile({
       x: o.x, y: o.y, vx: Math.cos(a) * cfg.speed, vy: Math.sin(a) * cfg.speed,
       damage: Math.round(cfg.damage * this.dmgScale), team: 'enemy', kind: 'laser',
+      burnPlayer: true,
       life: 3, game: this.game,
     }));
     Sfx.bow();
@@ -350,6 +351,9 @@ export class GolemBoss {
       }
       if (!p.dead && distToSegment(p.x, p.y - p.h / 2, o.x, o.y, ex, ey) < b.width / 2 + 5) {
         p.hurt(b.damage, o.x);
+        // It is a beam of light hot enough to cut stone. Stepping out of it is
+        // no longer the end of it.
+        p.applyBurn?.();
       }
     }
   }

@@ -205,6 +205,21 @@ export const ORIGAMI = {
       damage: 40, speed: 70, maxSpeed: 520, accel: 620,
       blastRadius: 5 * BLOCK, blastDamage: 40,
     },
+    // Twenty sheets for one, which is most of a room's paper: the Meteor is
+    // not a shot, it is a decision. It falls where the cursor is, lands hard,
+    // and then stays there - a burning block in the middle of the fight that
+    // is as much in your way as in theirs.
+    meteor: {
+      id: 'meteor', name: 'PAPER METEOR', book: 'bookmeteor', cost: 20,
+      cooldown: 1.6,
+      damage: 40,                     // to whatever it lands on
+      blastRadius: 5 * BLOCK,         // and to everything standing near that
+      blastDamage: 10,
+      fallFrom: -70,                  // it comes in from above the screen
+      fallSpeed: 620,
+      linger: 3.0,                    // seconds it sits there as solid ground
+      w: 22, h: 18,
+    },
     // unlocked by wearing the whole Paper set, not by a tutor book
     shield: {
       id: 'shield', name: 'PAPER SHIELD', set: 'paper', cost: PAPER_SHIELD.cost,
@@ -433,6 +448,20 @@ export const ENEMY_TYPES = {
     noContact: true,
     auraRange: 84, auraSpeed: 0.20, auraMax: 3,   // +20% speed to up to 3 allies
     orbit: 96,                                    // how far behind the pack it hangs
+  },
+  // What comes down out of the roof after the roof itself is dead. It never
+  // lands of its own accord: it climbs to a spot above your head, hangs there
+  // for a breath, and then falls faster than anything else in the game.
+  meteorhead: {
+    id: 'meteorhead', name: 'Meteor Head', hp: 70, speed: 150, damage: 22, w: 15, h: 15,
+    attackCooldown: 0.8, attackRange: 0, flying: true, ai: 'meteorhead',
+    hover: 46,               // how far above you it tries to sit
+    aimTime: 0.4,            // and how long it holds there before it comes down
+    slamSpeed: 900,          // the drop itself
+    slamRadius: 3 * BLOCK,   // what the landing shakes
+    slamDamage: 14,
+    riseSpeed: 260,          // climbing back up for another one
+    dropId: 'bookmeteor', dropChance: 0.03,
   },
   // Golem wreckage that reassembled itself. Its front plate turns most of a
   // frontal hit, so it has to be opened up from behind or above.

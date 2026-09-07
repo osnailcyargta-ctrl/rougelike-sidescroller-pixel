@@ -12,7 +12,7 @@ import { panel, button, textField, inside, UI } from './ui.js';
 import { drawItemIcon, ITEMS, RARITY } from './items.js';
 import { Sfx } from './audio.js';
 import { Input } from './input.js';
-import { Net, serverUrl, setServerUrl, serverOpen } from './net.js';
+import { Net, serverUrl, serverOpen } from './net.js';
 import { Duel } from './pvp.js';
 import { drawMenuBackdrop } from './screens.js';
 
@@ -75,12 +75,16 @@ export function drawPvpConnect(ctx, game, t) {
   const bar = 180, bx = VIEW_W / 2 - bar / 2;
   pxRect(ctx, bx, py + 40, bar, 2, rgba(Theme.uiDim, 0.4));
   pxRect(ctx, bx, py + 40, Math.round(bar * clamp(waited / 10, 0, 1)), 2, Theme.hp);
+  // The address is the address. It is shown because it is worth knowing which
+  // machine is not answering, not because anything here can point somewhere
+  // else - there is no field, and there never is.
+  drawText(ctx, serverUrl().toUpperCase(), VIEW_W / 2, py + 50, Theme.uiAccent, 1, 'center');
+
   if (!late) {
-    drawText(ctx, serverUrl().toUpperCase(), VIEW_W / 2, py + 50, Theme.uiDim, 1, 'center');
-    drawText(ctx, `${Math.max(0, 10 - Math.floor(waited))}S`, VIEW_W / 2, py + 62, Theme.uiDim, 1, 'center');
-    wrapText(ctx, ['A DUEL NEEDS A SERVER TO TALK THROUGH.',
-                   'RUN  NODE SERVER/PVP.JS  ON ONE MACHINE',
-                   'AND POINT BOTH GAMES AT IT.'], 0, py + 78, Theme.uiDim);
+    drawText(ctx, `${Math.max(0, 10 - Math.floor(waited))}S`, VIEW_W / 2, py + 64, Theme.uiDim, 1, 'center');
+    wrapText(ctx, ['EVERY DUEL IN THE GAME GOES THROUGH',
+                   'THIS ONE SERVER, SO EVERYBODY IS',
+                   'LOOKING AT THE SAME LOBBIES.'], 0, py + 82, Theme.uiDim);
     return;
   }
 
@@ -88,16 +92,11 @@ export function drawPvpConnect(ctx, game, t) {
   // attempt underneath goes on either way, so if the server does come up while
   // this is on screen, the game moves on by itself.
   drawText(ctx, Net.error || 'NO ANSWER YET. IT MAY STILL BE COMING UP.',
-           VIEW_W / 2, py + 50, Net.error ? Theme.hp : Theme.uiDim, 1, 'center');
-  drawText(ctx, 'SERVER', px + 16, py + 68, Theme.uiDim, 1);
-  game.pvpServerText = textField(ctx, 'pvpsrv', px + 56, py + 64, pw - 72, 14,
-                                 game.pvpServerText ?? '',
-                                 { max: 40, placeholder: serverUrl().toUpperCase() });
-  drawText(ctx, 'HOST:PORT, OR A FULL WS:// ADDRESS', VIEW_W / 2, py + 84, rgba(Theme.uiDim, 0.8), 1, 'center');
+           VIEW_W / 2, py + 66, Net.error ? Theme.hp : Theme.uiDim, 1, 'center');
+  wrapText(ctx, ['IT MAY BE SHUT FOR THE NIGHT, OR',
+                 'RESTING, OR SIMPLY DOWN.'], 0, py + 80, rgba(Theme.uiDim, 0.85));
   if (button(ctx, 'pvpback', px + 16, py + 102, 96, 18, 'BACK TO MENU')) game.leavePvp();
   if (button(ctx, 'pvpkeep', px + pw - 112, py + 102, 96, 18, 'KEEP TRYING', { accent: Theme.hp })) {
-    const typed = (game.pvpServerText ?? '').trim();
-    if (typed) setServerUrl(typed.toLowerCase());
     game.retryPvpConnect();
   }
 }

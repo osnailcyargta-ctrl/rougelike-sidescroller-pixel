@@ -2,7 +2,7 @@
 import { clamp, lerp, rand, randInt, choice, streamFor, rgba, mixHex, TAU, dist } from './util.js';
 import { Theme, ThemeRev } from './theme.js';
 import { pxRect, glowDot, spawnParticle, burst, linGrad, bakedLayer } from './gfx.js';
-import { VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER, BLOCK, WAVES, ANVIL, SEEDED_THROUGH_ROOM, chapterFor } from './config.js';
+import { VIEW_W, VIEW_H, GROUND_Y, PLATFORMS, SPAWN_LEFT, SPAWN_RIGHT, SPAWN_CENTER, BLOCK, WAVES, ANVIL, SEEDED_THROUGH_ROOM, CEILING_ROOM, chapterFor } from './config.js';
 import { bakeSky, bakeFloor, drawPlatform, drawChapterAmbience, updatePlatforms, drawExit, exitTint, PAL } from './chapters.js';
 import { ITEMS, RARITY, drawItemIcon } from './items.js';
 import { Sfx } from './audio.js';
@@ -399,6 +399,9 @@ export function buildWave(roomIndex, waveIndex) {
   if (roomIndex >= 4) pool.push('spitter');
   if (roomIndex >= 6) pool.push('shardling');   // golem wreckage, post room 5
   if (roomIndex >= 6) pool.push('wisp');        // and its lamplighter
+  // What is left of the roof after the roof comes down: it falls on you now
+  // one piece at a time.
+  if (roomIndex > CEILING_ROOM) pool.push('meteorhead');
   // Past room 12 the enemies stop getting stronger, so the rooms get fuller
   // instead. A wave never sends more than the cap, however deep you are.
   const base = 3 + Math.floor((roomIndex - 1) / 2) + Math.max(0, roomIndex - 12);

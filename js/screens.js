@@ -275,23 +275,26 @@ function drawTouchTab(ctx, game, t) {
   drawText(ctx, lp ? 'FORCED' : Perf.name, read, y + 2, Theme.uiDim, 1, 'right');
   y += 20;
 
-  const gy = y + 10;
-  drawText(ctx, 'GESTURES', x, gy, Theme.platformGlow, 1);
-  const gest = [
-    'FLICK THE MOVE STICK LEFT',
-    'OR RIGHT TWICE TO DASH.',
-    '',
-    'FLICK IT DOWN TWICE IN',
-    'THE AIR TO GROUND SLAM.',
-    '',
-    'THE STICKS ONLY ANSWER TO',
-    'A DRAG, NOT A TAP.',
-  ];
-  let ggy = gy + 13;
-  for (const line of gest) {
-    if (line) drawText(ctx, line, x, ggy, on ? Theme.uiDim : rgba(Theme.uiDim, 0.55), 1);
-    ggy += 10;
+  // The two Origamist switches. They live here rather than in Visuals because
+  // they change what a control does, not what the game looks like.
+  pxRect(ctx, x, y, ctl + 44 - x, 1, rgba(Theme.uiDim, 0.35));
+  y += 6;
+  drawText(ctx, 'ORIGAMIST', x, y, Theme.platformGlow, 1);
+  y += 12;
+  for (const d of optionsIn('touch')) {
+    if (d.type !== 'bool' || !d.id.startsWith('fold')) continue;
+    const v = !!Options[d.id];
+    drawTextFit(ctx, d.label, x, y + 4, v ? Theme.ui : Theme.uiDim, ctl - x - 6, 1);
+    if (button(ctx, 'opt-' + d.id, ctl, y, 44, 14, v ? 'ON' : 'OFF', { selected: v })) {
+      Options[d.id] = !v;
+      saveOptions();
+      Sfx.ui();
+    }
+    y += 17;
   }
+  drawText(ctx, 'WHEEL OFF: ATTACKING THROWS', x, y, rgba(Theme.uiDim, 0.85), 1);
+  drawText(ctx, 'THE STYLE YOU ARE CARRYING.', x, y + 9, rgba(Theme.uiDim, 0.85), 1);
+  y += 22;
 
   // right column: what each control does, since none of them carry a key name
   const lx = 250, vx = lx + 72;
@@ -312,6 +315,20 @@ function drawTouchTab(ctx, game, t) {
     drawText(ctx, v, vx, ly, Theme.uiDim, 1);
     ly += 11;
   }
+  // The gestures live over here rather than under the switches: the left
+  // column runs out of panel before it runs out of things to say.
+  drawText(ctx, 'GESTURES', lx, ly + 8, Theme.platformGlow, 1);
+  const gest = [
+    'FLICK THE STICK SIDEWAYS TWICE',
+    'TO DASH, DOWN TWICE IN THE AIR',
+    'TO SLAM. A DRAG, NOT A TAP.',
+  ];
+  let ggy = ly + 20;
+  for (const line of gest) {
+    drawText(ctx, line, lx, ggy, on ? Theme.uiDim : rgba(Theme.uiDim, 0.55), 1);
+    ggy += 10;
+  }
+  ly = ggy - 4;
   drawText(ctx, 'PERFORMANCE', lx, ly + 8, Theme.platformGlow, 1);
   drawText(ctx, 'QUALITY DROPS BY ITSELF', lx, ly + 21, Theme.uiDim, 1);
   drawText(ctx, 'IF FRAMES GET TIGHT.', lx, ly + 31, Theme.uiDim, 1);

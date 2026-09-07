@@ -15,6 +15,8 @@ export const RARITY = {
   common: { name: 'Common', color: '#8ce88c' },
   uncommon: { name: 'Uncommon', color: '#6fc6ff' },
   rare: { name: 'Rare', color: '#c98cff' },
+  // One tier above rare, for the one thing in the game that drops at 3%.
+  epic: { name: 'Epic', color: '#ff9d3c' },
 };
 
 export const ITEMS = {
@@ -54,6 +56,12 @@ export const ITEMS = {
     id: 'bookmissile', name: 'Paper Missile Tutor', rarity: 'rare', stack: 1, book: 'missile',
     desc: ['Teaches the PAPER MISSILE fold.', '2 sheets. Starts slow, builds',
            'speed, detonates on contact for', '40 over 5 blocks.'],
+  },
+  bookmeteor: {
+    id: 'bookmeteor', name: 'Paper Meteor Tutor', rarity: 'epic', stack: 1, book: 'meteor',
+    desc: ['Teaches the PAPER METEOR fold.', '20 sheets. Falls on the cursor for',
+           '40, and 10 over 5 blocks where it', 'lands. Then it stays three seconds',
+           'as solid ground, burning whatever', 'touches it - you included.'],
   },
   // --- the ancient stinger -----------------------------------------------
   stingereggshell: {
@@ -176,7 +184,7 @@ export const DROP_POOL = [
 ];
 // Things you only ever need one of.
 export const UNIQUE_ONCE = new Set(['graplinghook', 'nukerang', 'shardgun', 'twindagger',
-  'bookairplane', 'bookmissile', 'damagebooster', 'stingergun', 'stident']);
+  'bookairplane', 'bookmissile', 'bookmeteor', 'damagebooster', 'stingergun', 'stident']);
 const PERK_WEIGHTS = {
   lifecrystal: 3, fireyblade: 3, bloodstone: 3,
   lightningarrow: 2, wetslime: 2, aegis: 2,
@@ -443,7 +451,8 @@ export function drawItemIcon(ctx, id, x, y, s = 12, t = 0) {
       break;
     }
     case 'bookairplane':
-    case 'bookmissile': {
+    case 'bookmissile':
+    case 'bookmeteor': {
       // a manual: inked cover, paper page, the fold sketched on it in ink
       P(1, 2, 9, 9, '#141018');
       P(2, 3, 7, 7, '#f4f0e6');
@@ -454,10 +463,17 @@ export function drawItemIcon(ctx, id, x, y, s = 12, t = 0) {
         P(3, 5 + fl, 5, 1, '#141018');
         P(4, 6 + fl, 3, 1, '#141018');
         P(5, 4 + fl, 1, 3, '#3a3340');
-      } else {
+      } else if (id === 'bookmissile') {
         P(4, 4 + fl, 2, 5, '#141018');
         P(3, 8 + fl, 4, 1, '#3a3340');
         P(4, 3 + fl, 2, 1, '#3a3340');
+      } else {
+        // a burning lump with a tail drawn behind it
+        P(4, 5 + fl, 4, 4, '#141018');
+        P(5, 6 + fl, 2, 2, '#ff8a3c');
+        P(3, 4 + fl, 1, 1, '#3a3340');
+        P(2, 3 + fl, 1, 1, '#3a3340');
+        P(8, 8 + fl, 1, 1, '#ff8a3c');
       }
       break;
     }
