@@ -21,7 +21,7 @@ import {
 } from './config.js';
 import { Enemy, Player, Projectile, closeRightWall } from './entities.js';
 import { layoutRoom } from './chapters.js';
-import { Net, sendMatch, matchOver } from './net.js';
+import { Net, sendMatch, matchOver, reportScore } from './net.js';
 import { ITEMS, DROP_POOL, UNIQUE_ONCE } from './items.js';
 
 // --- the duel's own state -------------------------------------------------
@@ -332,6 +332,17 @@ function score(game, iWon) {
   else Duel.foeScore++;
   banner(iWon ? 'ROUND WON' : 'ROUND LOST', PVP.deathPause);
   Camera.add(6);
+  tellTheServer('round');
+}
+
+/**
+ * The host keeps the scoreline the server's page shows. One of the two has to
+ * do it or the same round would be logged twice, and the host is the one whose
+ * numbers are already the right way round for the lobby.
+ */
+function tellTheServer(kind) {
+  if (Duel.role !== 'host') return;
+  reportScore(kind, Duel.myScore, Duel.foeScore, Duel.round);
 }
 
 function matchDecided() {
@@ -343,6 +354,7 @@ function finishDuel(game) {
   Duel.phase = 'over';
   Duel.result = Duel.myScore > Duel.foeScore ? 'win'
     : Duel.foeScore > Duel.myScore ? 'lose' : 'draw';
+  tellTheServer('over');
   matchOver();
   // The wait before you may open another lobby starts when the fight ends,
   // not when it began - the server counts it from here too.

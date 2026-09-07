@@ -367,6 +367,7 @@ function armStart(l) {
     // handed to both. There is no seed to set: crypto.randomInt is not a
     // sequence anybody can reproduce.
     const map = MAPS[crypto.randomInt(MAPS.length)];
+    logEvent('start', `"${l.name}" started - ${l.host.name} vs ${l.guest.name} on ${map.name}`);
     l.host.sock.send({ t: 'start', role: 'host', opponent: l.guest.name, map });
     l.guest.sock.send({ t: 'start', role: 'guest', opponent: l.host.name, map });
     pushLobby(l);
@@ -378,6 +379,9 @@ function leaveLobby(c, why = 'left') {
   const l = c.lobby;
   if (!l) return;
   c.lobby = null;
+  logEvent('leave', l.host === c
+    ? `${c.name} closed "${l.name}"`
+    : `${c.name} left "${l.name}"`);
   if (l.host === c) {
     // the owner going means the lobby goes
     if (l.guest) {
@@ -407,6 +411,24 @@ function other(l, c) {
 // A watcher sees the shape of every lobby, and a moving picture of what each
 // player in it is looking at. The pictures are not free, so nobody sends any
 // until somebody is watching, and they stop the moment the last watcher goes.
+
+// --- the log ---------------------------------------------------------------
+// Everything people do, in order, so the page shows what happened and not only
+// what is happening. Kept short: this is a window, not a record.
+
+const EVENTS = [];
+const EVENT_KEEP = 200;
+
+/**
+ * Note something and tell whoever is watching. The text is written here, never
+ * by a client - a player cannot put words on the operator's screen.
+ */
+function logEvent(kind, text) {
+  const e = { at: Date.now(), kind, text };
+  EVENTS.push(e);
+  if (EVENTS.length > EVENT_KEEP) EVENTS.shift();
+  for (const w of watchers) if (w.ok) w.sock.send({ t: 'wevent', event: e });
+}
 
 /** The rate the players should be sending at: the fastest anybody asked for. */
 function wantedFps() {
@@ -471,7 +493,11 @@ function handleWatcher(w, msg) {
     }
     w.ok = true;
     w.fps = clampFps(msg.fps);
-    w.sock.send({ t: 'watching', fpsMin: FPS_MIN, fpsMax: FPS_MAX, fps: w.fps });
+    w.sock.send({
+      t: 'watching', fpsMin: FPS_MIN, fpsMax: FPS_MAX, fps: w.fps,
+      events: EVENTS.slice(-80),       // what happened before you looked
+      door: doorState(),
+    });
     pushWatchList();
     syncCapture();
     return;
@@ -501,6 +527,7 @@ function handle(c, msg) {
 
   if (t === 'hello') {
     c.name = String(msg.name || 'PLAYER').slice(0, 12).toUpperCase();
+    if (!c.said) { c.said = true; logEvent('here', `${c.name} arrived`); }
     c.sock.send({
       t: 'welcome', you: c.name, list: lobbyList(), maxLobbies: MAX_LOBBIES,
       door: doorState(),
@@ -541,6 +568,7 @@ function handle(c, msg) {
     };
     lobbies.set(l.id, l);
     c.lobby = l;
+    logEvent('open', `${c.name} opened "${l.name}"`);
     pushLobby(l);
     broadcastLobbies();
     return;
@@ -559,6 +587,7 @@ function handle(c, msg) {
     l.guest = c;
     c.lobby = l;
     l.touched = now();
+    logEvent('join', `${c.name} joined "${l.name}" against ${l.host ? l.host.name : '?'}`);
     armStart(l);
     broadcastLobbies();
     return;
@@ -571,6 +600,7 @@ function handle(c, msg) {
     if (!l || l.host !== c || !l.guest) return;
     const g = l.guest;
     l.banned.set(g.name, now() + KICK_BAN);
+    logEvent('kick', `${c.name} kicked ${g.name} out of "${l.name}"`);
     g.sock.send({ t: 'kicked', seconds: KICK_BAN / 1000 });
     g.lobby = null;
     l.guest = null;
@@ -592,6 +622,19 @@ function handle(c, msg) {
     return;
   }
 
+  // What the host says about the fight itself. The numbers are read, the
+  // wording is ours: nothing a player types ever reaches the watch page.
+  if (t === 'note') {
+    const l = c.lobby;
+    if (!l || l.host !== c || !l.guest) return;
+    const h = Math.max(0, Math.min(9, Number(msg.h) || 0));
+    const g = Math.max(0, Math.min(9, Number(msg.g) || 0));
+    const n = Math.max(0, Math.min(9, Number(msg.n) || 0));
+    if (msg.k === 'round') logEvent('round', `"${l.name}" round ${n} - ${l.host.name} ${h} : ${g} ${l.guest.name}`);
+    else if (msg.k === 'over') logEvent('won', `"${l.name}" finished - ${l.host.name} ${h} : ${g} ${l.guest.name}`);
+    return;
+  }
+
   if (t === 'over') {
     const l = c.lobby;
     if (!l) return;
@@ -605,39 +648,61 @@ function handle(c, msg) {
 
 // --- wiring ---------------------------------------------------------------
 
-const WATCH_PAGE = path.join(__dirname, 'watch.html');
+// The page lives beside the server when the whole game repo is checked out,
+// and at the root of the tree that is only the server. Look in both, so one
+// file serves both layouts and neither has to know about the other.
+// Its own directory first, then the directory above it. In the game's repo the
+// root index.html is the game, so looking there first would serve the wrong
+// page entirely; in a tree that is only the server, the page is at the root
+// and this falls through to it.
+const PAGE_PATHS = [
+  path.join(__dirname, 'index.html'),
+  path.join(__dirname, '..', 'index.html'),
+];
+
+function pageFile() {
+  for (const p of PAGE_PATHS) { if (fs.existsSync(p)) return p; }
+  return null;
+}
 
 const server = http.createServer((req, res) => {
   const url = (req.url || '/').split('?')[0];
 
-  // The watch page. Served to anybody who asks - it is a password box and
-  // nothing else. What it shows arrives over the socket, after the password.
-  if (url === '/watch' || url === '/watch/') {
-    fs.readFile(WATCH_PAGE, (err, body) => {
-      if (err) { res.writeHead(500, { 'content-type': 'text/plain' }); res.end('watch.html is missing'); return; }
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
-      res.end(body);
+  // What the game fetches: is the server there, and is the door open. Its own
+  // address, so that opening the server in a browser gives a person the page
+  // rather than a wall of JSON. It answers during quiet hours too - it has to,
+  // or the game could not tell "shut until four" from "no server at all".
+  if (url === '/status' || url === '/status/') {
+    const door = doorState();
+    res.writeHead(200, {
+      'content-type': 'application/json',
+      'access-control-allow-origin': '*',
+      'cache-control': 'no-store',
     });
+    res.end(JSON.stringify({
+      ok: true,
+      game: 'ascent-to-the-aether',
+      lobbies: door.open ? lobbies.size : 0,
+      max: MAX_LOBBIES,
+      door,
+    }));
     return;
   }
 
-  // A plain GET is how the game checks the server is there before it shows
-  // the menu, so answer it cheaply and allow it from the game's own origin.
-  // During quiet hours it still answers - it has to, or the game could not
-  // tell "shut until four" apart from "no server at all".
-  const door = doorState();
-  res.writeHead(200, {
-    'content-type': 'application/json',
-    'access-control-allow-origin': '*',
-    'cache-control': 'no-store',
+  // Everything else is the page: open the server in a browser and you are
+  // looking at the lobbies. It is a password box until you have typed one;
+  // what it shows after that arrives over the socket.
+  const file = pageFile();
+  if (!file) {
+    res.writeHead(500, { 'content-type': 'text/plain' });
+    res.end('index.html is missing next to the server');
+    return;
+  }
+  fs.readFile(file, (err, body) => {
+    if (err) { res.writeHead(500, { 'content-type': 'text/plain' }); res.end('cannot read index.html'); return; }
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+    res.end(body);
   });
-  res.end(JSON.stringify({
-    ok: true,
-    game: 'ascent-to-the-aether',
-    lobbies: door.open ? lobbies.size : 0,
-    max: MAX_LOBBIES,
-    door,
-  }));
 });
 
 server.on('upgrade', (req, socket) => {
@@ -666,7 +731,11 @@ server.on('upgrade', (req, socket) => {
   const c = { sock, name: 'PLAYER', lobby: null, cooldownUntil: 0, captureFps: 0 };
   clients.add(c);
   sock.onmessage = (msg) => { try { handle(c, msg); } catch { /* one bad message is not fatal */ } };
-  sock.onclose = () => { leaveLobby(c); clients.delete(c); };
+  sock.onclose = () => {
+    if (c.said) logEvent('gone', `${c.name} disconnected`);
+    leaveLobby(c);
+    clients.delete(c);
+  };
   sock.send({ t: 'hi', door: doorState() });
   // if somebody is already watching, this player starts sending pictures too
   const fps = wantedFps();
@@ -701,6 +770,7 @@ function closeEverything(door) {
 function goToRest(mb) {
   restUntil = Date.now() + REST_MINUTES * 60 * 1000;
   const door = doorState();
+  logEvent('rest', `over ${MEM_LIMIT_MB} MB at ${mb.toFixed(1)} - resting until ${door.opensAt}`);
   console.log(`over the line at ${mb.toFixed(1)} MB (limit ${MEM_LIMIT_MB}) - resting until ${door.opensAt}`);
   closeEverything(door);
   // Everyone is told before they are dropped, so the game shows the reason
@@ -719,6 +789,7 @@ function goToRest(mb) {
 function wakeFromRest() {
   restUntil = 0;
   const door = doorState();
+  logEvent('wake', `rested - ${rssMB().toFixed(1)} MB, ${door.open ? 'open again' : 'still shut by the clock'}`);
   console.log(`rested - ${rssMB().toFixed(1)} MB, ${door.open ? 'open again' : door.message.toLowerCase()}`);
   for (const c of clients) c.sock.send({ t: 'door', door });
   pushWatchList();
@@ -757,9 +828,11 @@ setInterval(() => {
     // the clock reaching the quiet hour.
     if (!door.resting) {
       closeEverything(door);
+      logEvent('shut', `shut for the night - open again at ${door.opensAt}`);
       console.log(`shut for the night - open again at ${door.opensAt}`);
     }
   } else {
+    logEvent('open', `open - shut again at ${door.closesAt}`);
     console.log(`open - shut again at ${door.closesAt}`);
     for (const c of clients) c.sock.send({ t: 'door', door });
     pushWatchList();

@@ -11,8 +11,10 @@ docker compose logs -f
 
 ## The password
 
-The watch page at `http://<nas>:8897/watch` is behind a password that lives in
-a file of its own, never in the code and never in `compose.yaml`:
+Opening `http://<nas>:8897/` in a browser gives you the page - live screens of
+every lobby on the left, and a log of everything people did on the right. It is
+behind a password that lives in a file of its own, never in the code and never
+in `compose.yaml`:
 
 ```
 server/secret/watch-password.txt
@@ -86,7 +88,8 @@ Watch from the same network, or drop the rate to 10 fps.
 
 | | |
 |---|---|
-| `GET /` | status, and the opening hours. What the game fetches. |
-| `GET /watch` | the watch page: a password box, then every live lobby. |
+| `GET /` | the page: a password box, then every live lobby and everything people did. |
+| `GET /watch` | the same page, for anyone who bookmarked it there. |
+| `GET /status` | status and opening hours. What the game fetches. |
 | `ws://…/` | players |
 | `ws://…/watch` | watchers, after the password |

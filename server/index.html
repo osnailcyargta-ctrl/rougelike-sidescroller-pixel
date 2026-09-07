@@ -44,8 +44,11 @@
   #gate input { flex: 1; }
   #err { color: var(--hot); min-height: 1.5em; margin-top: 10px; }
 
-  main { padding: 16px; display: grid; gap: 16px;
-         grid-template-columns: repeat(auto-fill, minmax(430px, 1fr)); }
+  main { padding: 16px; display: grid; gap: 16px; align-items: start;
+         grid-template-columns: minmax(0, 1fr) 340px; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+  #lobbies { display: grid; gap: 16px; align-content: start;
+             grid-template-columns: repeat(auto-fill, minmax(430px, 1fr)); }
   .lobby { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); overflow: hidden; }
   .lobby > h3 { margin: 0; padding: 9px 12px; font-size: 13px; letter-spacing: .08em;
                 border-bottom: 1px solid var(--line); display: flex; gap: 8px; align-items: baseline; }
@@ -63,6 +66,30 @@
   .waiting { width: 100%; aspect-ratio: 16 / 9; background: #05060c; border: 1px dashed var(--line);
              border-radius: 3px; display: grid; place-items: center; color: var(--dim); font-size: 11px; }
   #empty { color: var(--dim); padding: 40px 16px; text-align: center; grid-column: 1 / -1; }
+
+  /* the log: what people did, newest first */
+  #feed { border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+          position: sticky; top: 62px; display: flex; flex-direction: column;
+          max-height: calc(100vh - 90px); }
+  #feed > h3 { margin: 0; padding: 9px 12px; font-size: 13px; letter-spacing: .08em;
+               border-bottom: 1px solid var(--line); display: flex; align-items: baseline; }
+  #feed > h3 span { margin-left: auto; color: var(--dim); font-size: 11px; }
+  #log { list-style: none; margin: 0; padding: 4px 0; overflow-y: auto; }
+  #log li { padding: 4px 12px; display: flex; gap: 8px; align-items: baseline;
+            border-left: 2px solid transparent; }
+  #log li time { color: #55608a; font-size: 11px; flex: none; }
+  #log li span { word-break: break-word; }
+  #log li.k-open   { border-left-color: #4a7ad9; }
+  #log li.k-join   { border-left-color: var(--ok); }
+  #log li.k-start  { border-left-color: var(--hot); }
+  #log li.k-round,
+  #log li.k-won    { border-left-color: #d9b34a; }
+  #log li.k-kick,
+  #log li.k-rest,
+  #log li.k-shut   { border-left-color: var(--hot); color: #ffb3a8; }
+  #log li.k-leave,
+  #log li.k-gone   { color: var(--dim); }
+  #log li.fresh { background: #182036; }
 </style>
 </head>
 <body>
@@ -86,7 +113,13 @@
   <select id="fps"></select>
   <span class="pill" id="ping">-</span>
 </header>
-<main hidden id="grid"></main>
+<main hidden id="grid">
+  <div id="lobbies"></div>
+  <section id="feed">
+    <h3>ACTIVITY <span id="feedcount">0</span></h3>
+    <ul id="log"></ul>
+  </section>
+</main>
 
 <script>
 // The watch page. It holds one socket, says the password down it, and from
@@ -98,6 +131,8 @@
 
 const $ = (id) => document.getElementById(id);
 const gate = $('gate'), bar = $('bar'), grid = $('grid');
+const lobbyBox = $('lobbies'), log = $('log');
+let logged = 0;
 
 const wsUrl = () => (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/watch';
 
@@ -131,6 +166,11 @@ function open(pass) {
     if (m.t === 'denied') { $('err').textContent = m.why || 'NO'; try { sock.close(); } catch {} return; }
     if (m.t === 'watching') {
       gate.hidden = true; bar.hidden = false; grid.hidden = false;
+      // what happened before this page was opened, oldest first so the
+      // newest ends up on top like everything after it
+      log.textContent = ''; logged = 0;
+      for (const e of m.events ?? []) addEvent(e, false);
+      if (m.door) showDoor(m.door);
       // keep it, so a reload does not mean typing it again on a home network
       try { sessionStorage.setItem('aether.watch.pass', pass); } catch {}
       setInterval(() => send({ t: 'ping', at: Date.now() }), 3000);
@@ -138,6 +178,7 @@ function open(pass) {
     }
     if (m.t === 'pong') { $('ping').textContent = (Date.now() - m.at) + 'MS'; return; }
     if (m.t === 'wlobbies') { render(m.list, m.door); return; }
+    if (m.t === 'wevent') { addEvent(m.event, true); return; }
     if (m.t === 'wframe') {
       const img = frames.get(m.key);
       if (img) { img.src = m.img; img.dataset.cold = ''; }
@@ -153,27 +194,50 @@ function open(pass) {
   };
 }
 
+/** One line in the log. Server-written text, put in as text and never as HTML. */
+function addEvent(e, fresh) {
+  const li = document.createElement('li');
+  li.className = 'k-' + (e.kind || 'x') + (fresh ? ' fresh' : '');
+  const t = document.createElement('time');
+  const d = new Date(e.at);
+  t.textContent = String(d.getHours()).padStart(2, '0') + ':' +
+                  String(d.getMinutes()).padStart(2, '0') + ':' +
+                  String(d.getSeconds()).padStart(2, '0');
+  const s = document.createElement('span');
+  s.textContent = e.text;
+  li.append(t, s);
+  log.prepend(li);
+  logged++;
+  $('feedcount').textContent = logged;
+  // the highlight is a hint that something just happened, not a state
+  if (fresh) setTimeout(() => li.classList.remove('fresh'), 1200);
+  while (log.children.length > 300) log.lastChild.remove();
+}
+
+function showDoor(door) {
+  $('door').textContent = door.now + ' ' + (door.tz || '') + ' - ' + door.message;
+  $('door').className = 'pill ' + (door.open ? 'open' : 'shut');
+}
+
 function render(list, door) {
   $('count').textContent = list.length + (list.length === 1 ? ' LOBBY' : ' LOBBIES');
-  if (door) {
-    $('door').textContent = door.now + ' ' + (door.tz || '') + ' - ' + door.message;
-    $('door').className = 'pill ' + (door.open ? 'open' : 'shut');
-  }
+  if (door) showDoor(door);
   // Rebuild only when the shape changed; otherwise the <img> elements would be
   // thrown away twice a second and every screen would flicker.
   const sig = JSON.stringify(list.map((l) => [l.id, l.name, l.started, l.seats.map((s) => s.key + s.name)]));
   if (sig === lastList) return;
   lastList = sig;
 
-  grid.textContent = '';
+  lobbyBox.textContent = '';
   frames = new Map();
   if (!list.length) {
     const p = document.createElement('div');
     p.id = 'empty';
     p.textContent = door && !door.open
-      ? 'THE SERVER IS SHUT UNTIL ' + door.opensAt + '. NOBODY CAN OPEN A LOBBY.'
+      ? (door.resting ? 'THE SERVER IS RESTING UNTIL ' + door.opensAt + '.'
+                      : 'THE SERVER IS SHUT UNTIL ' + door.opensAt + '. NOBODY CAN OPEN A LOBBY.')
       : 'NOBODY IS IN A LOBBY RIGHT NOW.';
-    grid.append(p);
+    lobbyBox.append(p);
     return;
   }
 
@@ -221,7 +285,7 @@ function render(list, door) {
       seats.append(cell);
     }
     card.append(seats);
-    grid.append(card);
+    lobbyBox.append(card);
   }
 }
 

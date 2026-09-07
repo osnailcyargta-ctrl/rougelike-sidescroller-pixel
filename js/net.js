@@ -86,7 +86,9 @@ export function probeServer(timeoutMs = 10000) {
   Net.probeStarted = performance.now();
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
-  return fetch(httpUrl(serverUrl()), { signal: ctl.signal, cache: 'no-store' })
+  // /status, not /: the server's own address is a page for a person to look
+  // at, so the machine-readable answer lives one step along.
+  return fetch(`${httpUrl(serverUrl()).replace(/\/+$/, '')}/status`, { signal: ctl.signal, cache: 'no-store' })
     .then((r) => r.ok)
     .catch(() => false)
     .finally(() => clearTimeout(timer));
@@ -217,6 +219,15 @@ export function kickGuest() { send({ t: 'kick' }); }
 export function refreshLobbies() { send({ t: 'list' }); }
 export function matchOver() { send({ t: 'over' }); }
 export function pingServer() { send({ t: 'ping', at: performance.now() }); }
+
+/**
+ * How the fight is going, for the log on the server's own page. Only the host
+ * sends it, and only numbers: the wording is written on the server, so nothing
+ * a player can type ever reaches whoever is watching.
+ */
+export function reportScore(kind, host, guest, round) {
+  return send({ t: 'note', k: kind, h: host, g: guest, n: round });
+}
 
 /** Is the door open right now, as far as we have been told? */
 export function serverOpen() { return !Net.door || Net.door.open !== false; }
