@@ -331,7 +331,9 @@ export const BOSS_RUSH = {
   slotSpin: 2.1,             // how long the reel runs before it settles
   slotRerolls: 1,            // and how many times you may send it round again
   weapons: {
-    melee: ['sword', 'twindagger', 'nukerang'],
+    // the Stident is only ever a Poitnus drop in a normal run, so a rush -
+    // which never meets Poitnus unless it rolls that far - offers it here
+    melee: ['sword', 'twindagger', 'nukerang', 'stident'],
     ranger: ['bow', 'shardgun', 'stingergun'],
     origamist: ['bookairplane', 'bookmissile'],
   },

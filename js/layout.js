@@ -47,6 +47,11 @@ export function padLayout() {
       btn('shoot', VIEW_W - 22, 148, R, 'FIRE', 'hold', Theme.uiAccent),
       btn('grapple', VIEW_W - 71, 143, R, 'HOOK', 'tap', Theme.hookColor),
       btn('interact', VIEW_W - 107, 176, R, 'USE', 'tap', Theme.platformGlow),
+      // the Origamist's two style keys, in toward the middle from the fire
+      // stick - only drawn when that player is running styles rather than
+      // the wheel
+      btn('foldPrev', VIEW_W - 152, 132, R, '<', 'tap', Theme.ui),
+      btn('foldNext', VIEW_W - 118, 118, R, '>', 'tap', Theme.ui),
       // left thumb: mirrored, so both hands learn the same shape
       btn('autoFire', 71, 143, L, 'AUTO', 'toggle', Theme.uiAccent),
       btn('inventory', 107, 176, L, 'BAG', 'tap', Theme.ui),

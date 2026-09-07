@@ -16,6 +16,9 @@ export const OPTION_DEFS = [
   { id: 'touchOpacity', label: 'PAD OPACITY', group: 'touch', type: 'range', def: 0.6, max: 1 },
   { id: 'lowPower', label: 'LOW POWER MODE', group: 'touch', type: 'bool', def: false },
   { id: 'autoGraphics', label: 'AUTO GRAPHICS', group: 'touch', type: 'bool', def: true },
+  // Origamist only: swap the fold wheel for a style you carry and change with
+  // a key. With this on, attacking throws immediately.
+  { id: 'foldSwitch', label: 'ORIGAMIST STYLE BUTTONS', group: 'touch', type: 'bool', def: false },
   // Not a slider and not a switch: which tier to run at, or AUTO to let the
   // watchdog choose. Drawn by hand in the Visuals tab.
   { id: 'gfxTier', label: 'GRAPHICS', group: 'none', type: 'enum', def: 'auto' },

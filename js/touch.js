@@ -16,12 +16,12 @@
 //     input.js, never by poking gameplay state directly. Dash, ground slam,
 //     drop-through and hold-to-move then work on touch for free, because they
 //     are the keyboard's own double-tap and hold rules running unmodified.
-import { VIEW_W, VIEW_H, BLOCK } from './config.js';
+import { VIEW_W, VIEW_H, BLOCK, ORIGAMI } from './config.js';
 import { Input, Binds, virtualKeyDown, virtualKeyUp, virtualKeyTap } from './input.js';
 import { Options } from './settings.js';
 import { Theme } from './theme.js';
 import { clamp, rgba, TAU } from './util.js';
-import { drawText } from './font.js';
+import { drawText, drawTextFit } from './font.js';
 import { pxRect, glowDot } from './gfx.js';
 import { Sfx } from './audio.js';
 import { HOTBAR_SIZE } from './items.js';
@@ -65,10 +65,22 @@ export const Pad = {
 
 function hit(t, c) { return Math.hypot(t.vx - c.x, t.vy - c.y) <= c.r; }
 
+// The style pair belongs to one class, one setting and one weapon; for
+// everyone else those two circles are not there at all.
+function foldButtonsOn(game) {
+  const p = game.player;
+  if (!Options.foldSwitch || !p || p.classId !== 'origamist') return false;
+  const w = p.inventory.selectedWeapon();
+  return !!(w && w.weapon === 'paper') && game.foldsKnown().length > 1;
+}
+
 function claimFor(t, g, game) {
   if (hit(t, g.pause)) return 'btn:pause';
   if (hit(t, g.book)) return 'btn:book';
-  for (const b of g.buttons) if (hit(t, { x: b.x, y: b.y, r: b.r + 4 })) return 'btn:' + b.id;
+  for (const b of g.buttons) {
+    if ((b.id === 'foldPrev' || b.id === 'foldNext') && !foldButtonsOn(game)) continue;
+    if (hit(t, { x: b.x, y: b.y, r: b.r + 4 })) return 'btn:' + b.id;
+  }
   // the hotbar is the one piece of HUD you still need mid-fight
   for (let i = 0; i < HOTBAR_SIZE; i++) {
     const r = hotbarSlotRect(i);
@@ -118,6 +130,10 @@ function drainTouches(game, g, active) {
         Sfx.ui();
       } else if (claim === 'btn:grapple') {
         virtualKeyTap(Binds.grapple);
+      } else if (claim === 'btn:foldPrev') {
+        game.cycleFold(-1);
+      } else if (claim === 'btn:foldNext') {
+        game.cycleFold(1);
       } else if (claim === 'btn:inventory') {
         virtualKeyTap(Binds.inventory);
       }
@@ -344,13 +360,26 @@ export function drawTouchPad(ctx, game) {
   drawStick(ctx, g.left, Pad.left, Theme.ui, 'MOVE', a);
   drawStick(ctx, g.right, Pad.right, Theme.uiAccent, 'AIM', a);
 
+  const foldsOn = foldButtonsOn(game);
   for (const b of g.buttons) {
+    if ((b.id === 'foldPrev' || b.id === 'foldNext') && !foldsOn) continue;
     const down = heldButton(b.id);
     let lit = false;
     let enabled = true;
     if (b.id === 'autoFire') lit = Pad.autoFire;
     if (b.id === 'grapple') enabled = !!p && p.inventory.has('graplinghook');
     drawButton(ctx, b, down, lit, a, enabled);
+  }
+  // the style the two of them are stepping through, named between them
+  if (foldsOn) {
+    const known = game.foldsKnown();
+    const name = (ORIGAMI.forms[known[clamp(p.foldStyle ?? 0, 0, known.length - 1)]] ?? {}).name ?? '';
+    const a2 = g.buttons.find((b) => b.id === 'foldPrev');
+    const b2 = g.buttons.find((b) => b.id === 'foldNext');
+    if (a2 && b2) {
+      drawTextFit(ctx, name.toUpperCase(), (a2.x + b2.x) / 2, (a2.y + b2.y) / 2 - 16,
+                  rgba(Theme.ui, a), 74, 1, 'center');
+    }
   }
 
   // pause draws its own glyph: the font has no bar character

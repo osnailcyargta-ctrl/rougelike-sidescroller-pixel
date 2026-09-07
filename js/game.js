@@ -665,6 +665,7 @@ export class Game {
       this.toast('BOSS RUSH UNLOCKED');
     }
     this.roomCleared = false;
+    this.rushGrab = null;
     closeRightWall();          // every room starts closed in again
     this.portal = null;
     this.boss = null;
@@ -1249,15 +1250,41 @@ export class Game {
 
   // Attacking with paper stops the world and asks which fold you want. Only
   // folds you own the tutor book for are on the wheel.
+  /** Every fold this player can throw right now, in a stable order. */
+  foldsKnown() {
+    const p = this.player;
+    if (!p) return [];
+    const known = p.inventory.knownFolds();
+    // the Paper set teaches a fold no book does
+    if (p.armorSet === 'paper' && !known.includes('shield')) known.push('shield');
+    return known;
+  }
+
+  /** Step the carried fold style, for the key binds and the on-screen pair. */
+  cycleFold(dir) {
+    const p = this.player;
+    const known = this.foldsKnown();
+    if (!p || known.length < 2) return;
+    p.foldStyle = ((p.foldStyle ?? 0) + dir + known.length) % known.length;
+    this.toast(ORIGAMI.forms[known[p.foldStyle]].name.toUpperCase());
+    Sfx.ui();
+  }
+
   openFoldWheel() {
     const p = this.player;
     if (!p || this.fold) return;
     if (p.attackCd > 0) return;              // folds have their own cadence
-    if (p.attackCd > 0) return;              // folds have their own cadence
-    const known = p.inventory.knownFolds();
-    // the Paper set teaches a fold no book does
-    if (p.armorSet === 'paper' && !known.includes('shield')) known.push('shield');
+    const known = this.foldsKnown();
     if (!known.length) return;
+    // Nothing to choose between, or the player has asked to carry a style
+    // instead of picking one every throw: fold it and go.
+    if (known.length === 1) { this.chooseFold(known[0]); return; }
+    if (Options.foldSwitch) {
+      const i = clamp(p.foldStyle ?? 0, 0, known.length - 1);
+      p.foldStyle = i;
+      this.chooseFold(known[i]);
+      return;
+    }
     const options = known.map((id) => {
       const cfg = ORIGAMI.forms[id];
       return { id, name: cfg.name, cost: cfg.cost };
@@ -1589,17 +1616,11 @@ export class Game {
       if (id) {
         const x = clamp(boss.x ?? VIEW_W / 2, 24, VIEW_W - 24);
         const y = clamp((boss.y ?? 100) + 20, 30, GROUND_Y - 20);
-        // A rush clears the floor the moment the spoils screen closes, so a
-        // dropped weapon would be swept up unheld. It goes straight in.
-        if (this.mode === 'bossrush') {
-          if (inv.add(id, 1) === 0) {
-            this.player.recomputeStats();
-            this.toast(`${ITEMS[id].name.toUpperCase()} TAKEN`);
-          }
-        } else {
-          this.pickups.push(new Pickup(id, x, y, null, { falling: true, vy: -140 }));
-          this.toast(`${ITEMS[id].name.toUpperCase()} DROPPED`);
-        }
+        // It falls on the floor like anything else it leaves behind. In a
+        // rush that means the spoils screen has to wait for you to pick it
+        // up - see clearRoom - rather than the weapon being handed over.
+        this.pickups.push(new Pickup(id, x, y, null, { falling: true, vy: -140 }));
+        this.toast(`${ITEMS[id].name.toUpperCase()} DROPPED`);
         burst(x, y, 26, {
           color: RARITY[ITEMS[id].rarity].color, color2: '#ffffff',
           speedMin: 30, speedMax: 150, lifeMin: 0.3, lifeMax: 0.8, gravity: 140,
@@ -1881,6 +1902,11 @@ export class Game {
       this.invOpen = !this.invOpen;
       Sfx.ui();
     }
+    // stepping the carried fold style, when the player runs it that way
+    if (Options.foldSwitch && this.screen === 'playing' && !p.dead && !this.invOpen) {
+      if (Input.pressed.has(Binds.foldPrev)) this.cycleFold(-1);
+      if (Input.pressed.has(Binds.foldNext)) this.cycleFold(1);
+    }
     if (!this.invOpen) {
       if (Input.wheel !== 0) {
         p.inventory.cycle(sign(Input.wheel));
@@ -1957,6 +1983,15 @@ export class Game {
     if (!frozen) this.updatePaperShields(dt);
     for (const pk of this.pickups) pk.update(dt);
     if (this.anvil) this.anvil.update(dt, this.player);
+    // waiting on the player to pick up what a rush boss dropped
+    if (this.rushGrab) {
+      this.rushGrab.t += dt;
+      const left = this.pickups.some((pk) => !pk.disabled);
+      if (!left || this.rushGrab.t >= this.rushGrab.limit) {
+        this.rushGrab = null;
+        this.openRushReward();
+      }
+    }
     if (this.portal) this.portal.update(dt);
     // in the field there is nothing to click: past the edge of the map is the
     // next room
@@ -2046,7 +2081,18 @@ export class Game {
     if (this.roomIndex >= this.lastRoom) { this.finishRun(); return; }
     // A rush has no room to walk around picking things up in: the spoils are
     // offered on their own screen and the next boss follows on a timer.
-    if (this.mode === 'bossrush') { this.openRushReward(); return; }
+    if (this.mode === 'bossrush') {
+      // Anything the boss left is on the floor, and the spoils screen leads
+      // straight into the next room, which sweeps it. Give the player the
+      // time to walk over and take it.
+      if (this.pickups.some((pk) => !pk.disabled)) {
+        this.rushGrab = { t: 0, limit: 10 };
+        this.toast('TAKE WHAT IT DROPPED');
+        return;
+      }
+      this.openRushReward();
+      return;
+    }
     if (this.isBossRoom()) {
       // two offers on the centre platform, one pick
       const inv = this.player.inventory;
