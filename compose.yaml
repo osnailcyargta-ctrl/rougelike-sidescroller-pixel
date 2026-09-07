@@ -1,0 +1,74 @@
+# The duel server for Ascent to the Aether, for a NAS.
+#
+# This runs the SERVER ONLY. The game itself is served from GitHub Pages and
+# fetches this box for its lobby list, so there is nothing to build here and
+# no web root to keep in sync - only server/pvp.js and the page it serves at
+# /watch.
+#
+#   docker compose up -d          start it
+#   docker compose logs -f        watch it
+#   docker compose down           stop it
+#
+# Before the first start, put the watch password in its own file:
+#
+#   mkdir -p server/secret
+#   printf 'pls_open\n' > server/secret/watch-password.txt
+#
+# It is mounted read-only below and is the only place the password exists.
+# Nothing in this file and nothing in the image contains it, so this file is
+# safe to commit and that one is not.
+
+services:
+  aether-pvp:
+    image: node:22-alpine
+    container_name: aether-pvp
+    restart: unless-stopped
+    working_dir: /app
+    # --expose-gc lets the memory watchdog check a reading over the line
+    # against an actual collection, instead of trusting a number V8 may only
+    # be holding out of habit. Without it the server still works; it just has
+    # to believe the raw figure.
+    command: ["node", "--expose-gc", "server/pvp.js"]
+    ports:
+      # host:container - the game and the watch page both live behind this one
+      - "8897:8897"
+    environment:
+      PORT: "8897"
+      # The clock the opening hours are read in. This is the server's clock,
+      # deliberately: a player in another timezone does not get their own set
+      # of opening hours.
+      TZ: "Asia/Jakarta"
+      # Shut at 21:00, open again at 04:00. While shut there is no lobby
+      # system at all - nothing to fetch and nothing to create - and the game
+      # is told which hour it comes back.
+      QUIET_FROM: "21"
+      QUIET_TO: "4"
+      PASS_FILE: "/run/secrets/watch-password"
+      # If it ever passes this, it shuts itself the same way nine o'clock
+      # shuts it and rests. Ten lobbies fighting at once with somebody
+      # watching all of them costs about 72 MB, so this is roughly twice the
+      # worst honest load: reaching it means something is wrong.
+      MEM_LIMIT_MB: "150"
+      REST_MINUTES: "30"
+    volumes:
+      # The whole checkout, read-only: the server file, and index.html beside
+      # it - the page you get when you open this box in a browser. Nothing here
+      # is ever written to.
+      - .:/app:ro
+      # and the password again under a name of its own, so PASS_FILE points at
+      # one thing and one thing only
+      - ./server/secret/watch-password.txt:/run/secrets/watch-password:ro
+    # Node's own healthcheck, so the NAS can see whether it is answering.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8897/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    # It holds sockets and a few frames in flight; it does not need much.
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "3"
