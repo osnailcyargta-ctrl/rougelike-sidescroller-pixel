@@ -6,9 +6,17 @@
 // on the default port. A ?pvp= in the URL overrides both, which is how two
 // browsers on one machine are pointed at one server for testing.
 
-const STORE = 'aether.pvp.server';
-export const DEFAULT_PORT = 8787;
+import { PVP_SERVER, PVP_PORT } from './pvpserver.js';
 
+const STORE = 'aether.pvp.server';
+export const DEFAULT_PORT = PVP_PORT;
+
+/**
+ * Where to talk to, most specific first: what this page was opened with, then
+ * what this browser was told to remember, then the address the game ships
+ * pointed at, and only then the page's own host - which is the right answer
+ * when you are running both halves on one machine.
+ */
 export function serverUrl() {
   const q = new URLSearchParams(location.search).get('pvp');
   if (q) return q;
@@ -16,6 +24,7 @@ export function serverUrl() {
     const saved = localStorage.getItem(STORE);
     if (saved) return saved;
   } catch { /* storage off: fall through to the default */ }
+  if (PVP_SERVER) return PVP_SERVER;
   const host = location.hostname || 'localhost';
   return `${host}:${DEFAULT_PORT}`;
 }
@@ -56,6 +65,13 @@ export const Net = {
   onmatch: null,        // every {t:'net'} message from the other player
   onclosed: null,
   ongone: null,        // the other player is no longer in the lobby
+  // The server's own opening hours, in the server's own clock. Null until it
+  // has told us; after that the menu shows it whether the door is open or not.
+  door: null,
+  // How often the server wants a picture of this screen, and zero - which is
+  // the usual answer - means it wants none. It only ever asks while somebody
+  // is watching the lobby list on the box itself.
+  captureFps: 0,
   error: '',
   probeStarted: 0,
 };
@@ -133,15 +149,35 @@ function route(msg) {
       Net.you = msg.you;
       Net.lobbies = msg.list ?? [];
       Net.maxLobbies = msg.maxLobbies ?? 10;
+      if (msg.door) Net.door = msg.door;
       break;
     case 'lobbies':
       Net.lobbies = msg.list ?? [];
+      if (msg.door) Net.door = msg.door;
+      break;
+    case 'hi':
+      if (msg.door) Net.door = msg.door;
+      break;
+    case 'door':
+      Net.door = msg.door ?? Net.door;
+      break;
+    // The lobby system is not merely empty during quiet hours - it is not
+    // there, and this is the answer to every request that touches it.
+    case 'closed':
+      Net.door = msg.door ?? Net.door;
+      Net.lobbies = [];
+      Net.lobby = null;
+      Net.error = String(msg.why || (Net.door && Net.door.message) || 'THE SERVER IS SHUT').toUpperCase();
+      break;
+    case 'capture':
+      Net.captureFps = Math.max(0, Math.min(30, msg.fps ?? 0));
       break;
     case 'lobby':
       Net.lobby = msg;
       break;
     case 'lobbyClosed':
       Net.lobby = null;
+      if (msg.door) Net.door = msg.door;
       Net.error = (msg.why || 'the lobby closed').toUpperCase();
       if (Net.ongone) Net.ongone('the lobby closed');
       break;
@@ -181,3 +217,34 @@ export function kickGuest() { send({ t: 'kick' }); }
 export function refreshLobbies() { send({ t: 'list' }); }
 export function matchOver() { send({ t: 'over' }); }
 export function pingServer() { send({ t: 'ping', at: performance.now() }); }
+
+/** Is the door open right now, as far as we have been told? */
+export function serverOpen() { return !Net.door || Net.door.open !== false; }
+
+/**
+ * A picture of this screen, for whoever is watching the lobby list on the box
+ * that runs the server. Half size and lossy: it is a preview, not a recording,
+ * and the players' upload is not ours to spend freely.
+ */
+let frameCanvas = null;
+export function sendFrame(source) {
+  if (!Net.captureFps || !source) return false;
+  if (!frameCanvas) {
+    frameCanvas = document.createElement('canvas');
+    frameCanvas.width = Math.round(source.width / 2);
+    frameCanvas.height = Math.round(source.height / 2);
+  }
+  const ctx = frameCanvas.getContext('2d');
+  if (!ctx) return false;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(source, 0, 0, frameCanvas.width, frameCanvas.height);
+  let img = '';
+  try {
+    img = frameCanvas.toDataURL('image/webp', 0.45);
+    // a browser with no webp encoder hands back a PNG, which is far too big
+    if (!img.startsWith('data:image/webp')) img = frameCanvas.toDataURL('image/jpeg', 0.5);
+  } catch {
+    return false;
+  }
+  return send({ t: 'frame', img });
+}

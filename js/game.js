@@ -43,7 +43,7 @@ import {
 import { PVP } from './config.js';
 import { Net, probeServer, connect as netConnect, disconnect as netDisconnect,
   createLobby, joinLobby, leaveLobby as netLeaveLobby, kickGuest, refreshLobbies,
-  pingServer } from './net.js';
+  pingServer, sendFrame, serverOpen } from './net.js';
 import {
   Duel, Duelist, beginDuel, bothPicked, lockPick, startDuelRound, updateDuel,
   duelFrozen, onDuelMessage, onDuelDeath, endDuel, duelPerkPool, randomOf, onOpponentGone,
@@ -650,6 +650,22 @@ export class Game {
   // Everything from "I picked PVP" to "the room is on the floor". The rules of
   // the fight itself live in pvp.js; this is the paperwork around it.
 
+  /**
+   * A picture of this screen for the server's watch page - but only while the
+   * server has actually asked for one, which it only does while somebody is
+   * looking. The rest of the time this costs a comparison against zero.
+   */
+  pvpFrameTick(dt) {
+    if (this.mode !== 'pvp' || !Net.captureFps || Net.state !== 'online') {
+      this.frameT = 0;
+      return;
+    }
+    this.frameT = (this.frameT ?? 0) + dt;
+    if (this.frameT < 1 / Net.captureFps) return;
+    this.frameT = 0;
+    sendFrame(this.scene);
+  }
+
   /** What the HUD needs to know about a duel, or null when there is no duel. */
   pvpDuelInfo() {
     if (this.mode !== 'pvp' || !Duel.active || !Duel.map) return null;
@@ -744,12 +760,18 @@ export class Game {
 
   createPvpLobby() {
     if (performance.now() < this.pvpCooldownUntil) return;
+    if (!serverOpen()) { Net.error = (Net.door?.message ?? 'THE SERVER IS SHUT'); Sfx.ui(); return; }
     createLobby(this.pvpLobbyName?.trim() || undefined);
     this.screen = 'pvpRoom';
     Sfx.ui();
   }
 
-  joinPvpLobby(id) { joinLobby(id); this.screen = 'pvpRoom'; Sfx.ui(); }
+  joinPvpLobby(id) {
+    if (!serverOpen()) { Net.error = (Net.door?.message ?? 'THE SERVER IS SHUT'); Sfx.ui(); return; }
+    joinLobby(id);
+    this.screen = 'pvpRoom';
+    Sfx.ui();
+  }
   leavePvpLobby() { netLeaveLobby(); this.screen = 'pvpLobbies'; Sfx.ui(); }
   kickPvpGuest() { kickGuest(); Sfx.ui(); }
   refreshPvpLobbies() { refreshLobbies(); Sfx.ui(); }
@@ -2113,6 +2135,7 @@ export class Game {
 
       this.render(dt);
       this.present(dt);
+      this.pvpFrameTick(dt);
     } catch (err) {
       if (!this._loggedError) { console.error('frame error', err); this._loggedError = true; }
       this.ctx.setTransform(1, 0, 0, 1, 0, 0);

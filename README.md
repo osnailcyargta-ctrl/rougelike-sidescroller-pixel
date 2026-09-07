@@ -61,19 +61,30 @@ deliberately absent from the in-game Controls screen.
 Two people, one room, five rounds. `PVP` sits beside Normal and Boss Rush on the
 mode screen.
 
-It needs a server for the two games to talk through, and the game does not ship
-one running anywhere — start it yourself on any machine both players can reach:
+It needs a server for the two games to talk through. There is nothing to
+install — one file, no dependencies, WebSocket over node's own `http` module —
+and `compose.yaml` at the root puts it on a NAS:
 
 ```sh
-node server/pvp.js            # listens on :8787; PORT=… to change it
+docker compose up -d          # port 8897; see server/README.md
+node server/pvp.js            # or just run it, PORT=… to move it
 ```
 
-There is nothing to install: it speaks WebSocket over node's own `http`
-module. Point the game at it from the Visuals-side address field on the PvP
-connect screen, or with `?pvp=host:port` in the URL. The connect screen tries
-for ten seconds and then offers **BACK TO MENU** or **KEEP TRYING** — the
-attempt underneath never stops, so it moves on by itself the moment the server
-answers.
+The game ships pointed at whatever address is in `js/pvpserver.js`; a player
+can override it with `?pvp=host:port` in the URL or by typing one on the
+connect screen. That screen tries for ten seconds and then offers **BACK TO
+MENU** or **KEEP TRYING** — the attempt underneath never stops, so it moves on
+by itself the moment the server answers.
+
+**Opening hours.** The server has them, in its own clock, and between them
+there is no lobby system at all — nothing to fetch and nothing to create. The
+menu says which hour it shuts and which hour it comes back. See
+`server/README.md`.
+
+**Watching.** `http://<server>:8897/watch`, behind a password kept in a file of
+its own, shows every live lobby as a moving picture of what both players are
+looking at. Nobody's game sends a single frame unless somebody has that page
+open.
 
 - **Lobbies.** Up to ten open at once. The owner may kick the challenger, which
   keeps them out for two seconds. Both seats filled starts the duel after a

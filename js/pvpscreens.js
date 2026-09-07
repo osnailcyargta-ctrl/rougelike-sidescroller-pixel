@@ -12,7 +12,7 @@ import { panel, button, textField, inside, UI } from './ui.js';
 import { drawItemIcon, ITEMS, RARITY } from './items.js';
 import { Sfx } from './audio.js';
 import { Input } from './input.js';
-import { Net, serverUrl, setServerUrl } from './net.js';
+import { Net, serverUrl, setServerUrl, serverOpen } from './net.js';
 import { Duel } from './pvp.js';
 import { drawMenuBackdrop } from './screens.js';
 
@@ -21,6 +21,36 @@ const ROW_H = 20;
 
 function wrapText(ctx, lines, x, y, color, gap = 9) {
   for (let i = 0; i < lines.length; i++) drawText(ctx, lines[i], x, y + i * gap, color, 1, 'center');
+}
+
+/**
+ * The server's opening hours, in the server's clock. Drawn wherever a player
+ * might be about to try something the door will refuse - and it says the hour
+ * even while it is open, so nobody is surprised at nine.
+ */
+function doorStrip(ctx, y) {
+  const d = Net.door;
+  if (!d) return;
+  const shut = d.open === false;
+  const w = 300, x = VIEW_W / 2 - w / 2;
+  pxRect(ctx, x, y, w, 13, rgba(shut ? '#2a0f0f' : '#000000', shut ? 0.8 : 0.4));
+  pxRect(ctx, x, y, 2, 13, shut ? Theme.hp : rgba(Theme.uiDim, 0.6));
+  drawTextFit(ctx, d.message, VIEW_W / 2, y + 3, shut ? Theme.hp : Theme.uiDim, w - 14, 1, 'center');
+  const clock = `SERVER CLOCK ${d.now}${d.tz ? ` ${d.tz}` : ''}`;
+  drawTextFit(ctx, clock, VIEW_W / 2, y + 15, rgba(Theme.uiDim, 0.75), w, 1, 'center');
+}
+
+/**
+ * How long until the door next moves, as a line of words rather than a
+ * countdown that ticks: the exact second does not matter, and a clock the
+ * player cannot act on is just something to stare at.
+ */
+function untilText(d) {
+  if (!d || !d.changesAt) return '';
+  const mins = Math.max(0, Math.round((d.changesAt - Date.now()) / 60000));
+  const h = Math.floor(mins / 60), m = mins % 60;
+  const span = h > 0 ? `${h}H ${m}M` : `${m}M`;
+  return d.open === false ? `OPENS IN ${span}` : `SHUTS IN ${span}`;
 }
 
 // --- finding the server ---------------------------------------------------
@@ -81,6 +111,28 @@ export function drawPvpLobbies(ctx, game, t) {
            VIEW_W / 2, 30, Theme.uiDim, 1, 'center');
 
   const pw = 300, px = Math.round((VIEW_W - pw) / 2), py = 42;
+
+  // Quiet hours are not an empty lobby list - there is no lobby system at all
+  // until the server opens, and nothing on this screen pretends otherwise.
+  if (!serverOpen()) {
+    const d = Net.door;
+    panel(ctx, px, py, pw, 118, { accent: Theme.hp });
+    glowDot(ctx, VIEW_W / 2, py + 34, 40, Theme.hp, 0.14 + Math.sin(t * 1.6) * 0.05);
+    drawTextShadow(ctx, 'THE SERVER IS ASLEEP', VIEW_W / 2, py + 22, Theme.hp, 2, 'center');
+    drawText(ctx, `SHUTS ${d?.closesAt ?? '21:00'}   -   OPENS ${d?.opensAt ?? '04:00'}`,
+             VIEW_W / 2, py + 46, Theme.ui, 1, 'center');
+    drawText(ctx, 'ON THE SERVER\'S CLOCK, NOT YOURS', VIEW_W / 2, py + 58, Theme.uiDim, 1, 'center');
+    const until = untilText(d);
+    if (until) drawTextShadow(ctx, until, VIEW_W / 2, py + 74, Theme.uiAccent, 2, 'center');
+    drawText(ctx, 'NO LOBBIES CAN BE OPENED OR JOINED UNTIL THEN.',
+             VIEW_W / 2, py + 96, Theme.uiDim, 1, 'center');
+    doorStrip(ctx, py + 124);
+    drawText(ctx, `PING ${Net.ping}MS`, VIEW_W - 8, VIEW_H - 12, Theme.uiDim, 1, 'right');
+    if (button(ctx, 'pvpleave', 8, VIEW_H - 24, 74, 16, 'BACK')) game.leavePvp();
+    if (button(ctx, 'pvprefresh', 88, VIEW_H - 24, 74, 16, 'CHECK AGAIN')) game.refreshPvpLobbies();
+    return;
+  }
+
   panel(ctx, px, py, pw, 150, { accent: Theme.hp });
 
   const x0 = px + 10, ry0 = py + 14, w = pw - 20;
@@ -155,7 +207,8 @@ export function drawPvpLobbies(ctx, game, t) {
     game.createPvpLobby();
   }
 
-  if (Net.error) drawText(ctx, Net.error, VIEW_W / 2, VIEW_H - 38, Theme.hp, 1, 'center');
+  if (Net.error) drawText(ctx, Net.error, VIEW_W / 2, VIEW_H - 46, Theme.hp, 1, 'center');
+  else doorStrip(ctx, VIEW_H - 52);
   drawText(ctx, `PING ${Net.ping}MS`, VIEW_W - 8, VIEW_H - 12, Theme.uiDim, 1, 'right');
   if (button(ctx, 'pvpleave', 8, VIEW_H - 24, 74, 16, 'BACK')) game.leavePvp();
   if (button(ctx, 'pvprefresh', 88, VIEW_H - 24, 74, 16, 'REFRESH')) game.refreshPvpLobbies();

@@ -1,20 +1,37 @@
-// The PvP server: lobbies, and a relay between the two players in one.
+// The PvP server: lobbies, a relay between the two players in one, and a
+// window onto them for whoever runs the box.
 //
 // Run it with plain node - `node server/pvp.js` - and nothing else. It speaks
 // WebSocket over the raw http module rather than pulling in a library, so
-// there is no install step between someone cloning this and playing.
+// there is no install step between someone cloning this and playing, and
+// nothing to audit but this file. `compose.yaml` at the root of the repo puts
+// it on a NAS on port 8897.
 //
 // It knows nothing about the game. Two clients agree that one of them is the
 // host, the host simulates the fight and sends snapshots, the guest sends its
 // input, and this only decides who is talking to whom. That keeps the rules in
 // one place - the game - and keeps this small enough to read.
+//
+// Three things it does know about:
+//
+//   * Quiet hours. Between QUIET_FROM and QUIET_TO in the server's own clock -
+//     not the player's - it is shut. Not "empty": shut. Lobbies are closed,
+//     the lobby list is refused, and the status the game fetches says so and
+//     names the hour it opens again.
+//   * The watch page at /watch, behind a password kept in a file of its own.
+//     It shows every live lobby as a moving picture of what those two players
+//     are looking at.
+//   * Frames. A player only sends pictures of their screen while somebody is
+//     actually watching, and only as often as that watcher asked for.
 
 'use strict';
 
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
-const PORT = Number(process.env.PORT || 8787);
+const PORT = Number(process.env.PORT || 8897);
 
 // Where a duel is fought. Kept here as well as in the game so the roll happens
 // on the server - a client cannot ask for a map, only be told one.
@@ -33,6 +50,98 @@ const KICK_BAN = 2000;           // how long a kicked player is kept out
 const START_DELAY = 3000;        // both in the lobby, then this, then the game
 const IDLE_TIMEOUT = 120000;     // a lobby nobody has touched
 const MAX_FRAME = 1 << 20;       // a megabyte of one message is not a game
+
+// --- when it is shut ------------------------------------------------------
+// Read in the server's own local time, which is the whole point: a player in
+// another timezone does not get their own set of opening hours. Set TZ in
+// compose.yaml to say which clock that is.
+// Written as an hour ("21") or as a time ("21:30"); kept as minutes past
+// midnight, so a window that wraps over midnight is one comparison either way.
+function parseClock(v, fallback) {
+  const m = /^\s*(\d{1,2})(?::(\d{2}))?\s*$/.exec(String(v ?? ''));
+  if (!m) return fallback;
+  const h = Number(m[1]), min = Number(m[2] ?? 0);
+  if (h > 23 || min > 59) return fallback;
+  return h * 60 + min;
+}
+
+const QUIET_FROM = parseClock(process.env.QUIET_FROM, 21 * 60);   // 21:00, inclusive
+const QUIET_TO = parseClock(process.env.QUIET_TO, 4 * 60);        // 04:00, exclusive
+
+// --- the watch page -------------------------------------------------------
+// The password lives in a file, never in this one and never in compose.yaml,
+// so the thing that has to be secret is the one thing you do not commit.
+const PASS_FILE = process.env.PASS_FILE || path.join(__dirname, 'secret', 'watch-password.txt');
+const FPS_MIN = 10;              // what the watcher may ask each player for
+const FPS_MAX = 30;
+
+function watchPassword() {
+  // Read every time rather than once at boot: changing the file is then the
+  // whole job, with nothing to restart.
+  try {
+    return fs.readFileSync(PASS_FILE, 'utf8').trim();
+  } catch {
+    return '';
+  }
+}
+
+/** Constant-time compare, so a wrong guess tells you nothing by how long it took. */
+function passwordOk(given) {
+  const want = watchPassword();
+  if (!want) return false;                 // no file, no way in
+  const a = Buffer.from(String(given ?? ''));
+  const b = Buffer.from(want);
+  if (a.length !== b.length) {
+    // still burn a comparison, so length is not readable off the clock either
+    crypto.timingSafeEqual(b, b);
+    return false;
+  }
+  return crypto.timingSafeEqual(a, b);
+}
+
+// --- the clock ------------------------------------------------------------
+
+/** Is that minute of the day inside the quiet window? The window may wrap midnight. */
+function minuteIsQuiet(mins) {
+  if (QUIET_FROM === QUIET_TO) return false;
+  return QUIET_FROM < QUIET_TO
+    ? (mins >= QUIET_FROM && mins < QUIET_TO)
+    : (mins >= QUIET_FROM || mins < QUIET_TO);
+}
+
+function isQuiet(at = new Date()) { return minuteIsQuiet(at.getHours() * 60 + at.getMinutes()); }
+
+/** The next time the door changes state, as a timestamp in ms. */
+function nextEdge(mins, at = new Date()) {
+  const d = new Date(at);
+  d.setSeconds(0, 0);
+  d.setHours(Math.floor(mins / 60), mins % 60);
+  if (d <= at) d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
+
+function hhmm(mins) {
+  return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+}
+
+/** Everything the game needs to say when the door is shut - or open. */
+function doorState(at = new Date()) {
+  const quiet = isQuiet(at);
+  return {
+    open: !quiet,
+    quiet,
+    // in the server's clock, and said so, because that is the clock that counts
+    now: `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`,
+    tz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'server time',
+    closesAt: hhmm(QUIET_FROM),
+    opensAt: hhmm(QUIET_TO),
+    // and when that next actually happens, so a countdown needs no arithmetic
+    changesAt: quiet ? nextEdge(QUIET_TO, at) : nextEdge(QUIET_FROM, at),
+    message: quiet
+      ? `PVP IS SHUT UNTIL ${hhmm(QUIET_TO)} SERVER TIME`
+      : `PVP SHUTS AT ${hhmm(QUIET_FROM)} SERVER TIME`,
+  };
+}
 
 // --- the tiny WebSocket layer --------------------------------------------
 // Only what this needs: text frames, close, ping/pong, no extensions, no
@@ -154,7 +263,8 @@ class Socket {
 
 let nextId = 1;
 const lobbies = new Map();        // id -> lobby
-const clients = new Set();        // every connected socket wrapper
+const clients = new Set();        // every connected player socket
+const watchers = new Set();       // and everyone looking in through /watch
 
 const now = () => Date.now();
 
@@ -174,6 +284,7 @@ function lobbyList() {
 }
 
 function broadcastLobbies() {
+  pushWatchList();
   const list = lobbyList();
   for (const c of clients) {
     if (c.lobby) continue;        // people already in one do not need the list
@@ -249,16 +360,123 @@ function other(l, c) {
   return null;
 }
 
+// --- watching -------------------------------------------------------------
+// A watcher sees the shape of every lobby, and a moving picture of what each
+// player in it is looking at. The pictures are not free, so nobody sends any
+// until somebody is watching, and they stop the moment the last watcher goes.
+
+/** The rate the players should be sending at: the fastest anybody asked for. */
+function wantedFps() {
+  let fps = 0;
+  for (const w of watchers) if (w.ok) fps = Math.max(fps, w.fps);
+  return Math.min(FPS_MAX, fps);
+}
+
+/**
+ * Tell every player how often to send a picture of their screen - which is
+ * usually "not at all". Only sent when the answer changes, so a lobby full of
+ * people does not get a message per watcher per second.
+ */
+function syncCapture() {
+  const fps = wantedFps();
+  for (const c of clients) {
+    if (c.captureFps === fps) continue;
+    c.captureFps = fps;
+    c.sock.send({ t: 'capture', fps });
+  }
+}
+
+/** What the watch page draws: one card per lobby, with who is in it. */
+function watchList() {
+  const out = [];
+  for (const l of lobbies.values()) {
+    out.push({
+      id: l.id,
+      name: l.name,
+      started: l.started,
+      seats: [
+        l.host ? { key: `${l.id}:h`, name: l.host.name, role: 'HOST' } : null,
+        l.guest ? { key: `${l.id}:g`, name: l.guest.name, role: 'CHALLENGER' } : null,
+      ].filter(Boolean),
+    });
+  }
+  return out;
+}
+
+function pushWatchList() {
+  const list = watchList();
+  const door = doorState();
+  for (const w of watchers) {
+    if (w.ok) w.sock.send({ t: 'wlobbies', list, door });
+  }
+}
+
+/** One player's screen, on its way to everyone looking. */
+function pushFrame(c, img) {
+  if (!c.lobby || !watchers.size) return;
+  const key = `${c.lobby.id}:${c.lobby.host === c ? 'h' : 'g'}`;
+  const msg = { t: 'wframe', key, id: c.lobby.id, name: c.name, img };
+  for (const w of watchers) if (w.ok) w.sock.send(msg);
+}
+
+function handleWatcher(w, msg) {
+  const t = msg && msg.t;
+  if (t === 'watch') {
+    if (!passwordOk(msg.pass)) {
+      w.sock.send({ t: 'denied', why: watchPassword() ? 'WRONG PASSWORD' : 'NO PASSWORD FILE ON THE SERVER' });
+      return;
+    }
+    w.ok = true;
+    w.fps = clampFps(msg.fps);
+    w.sock.send({ t: 'watching', fpsMin: FPS_MIN, fpsMax: FPS_MAX, fps: w.fps });
+    pushWatchList();
+    syncCapture();
+    return;
+  }
+  if (!w.ok) return;              // nothing else works until the password does
+  if (t === 'fps') { w.fps = clampFps(msg.n); syncCapture(); return; }
+  if (t === 'ping') { w.sock.send({ t: 'pong', at: msg.at }); return; }
+}
+
+function clampFps(n) {
+  const v = Math.round(Number(n) || FPS_MIN);
+  return Math.max(FPS_MIN, Math.min(FPS_MAX, v));
+}
+
 // --- the protocol ---------------------------------------------------------
 
 function handle(c, msg) {
   const t = msg && msg.t;
-  if (t === 'hello') {
-    c.name = String(msg.name || 'PLAYER').slice(0, 12).toUpperCase();
-    c.sock.send({ t: 'welcome', you: c.name, list: lobbyList(), maxLobbies: MAX_LOBBIES });
+
+  // A picture of somebody's screen, on its way to the watch page. Allowed at
+  // any hour: it is not a way into a game.
+  if (t === 'frame') {
+    if (typeof msg.img === 'string' && msg.img.length < MAX_FRAME) pushFrame(c, msg.img);
     return;
   }
-  if (t === 'list') { c.sock.send({ t: 'lobbies', list: lobbyList() }); return; }
+  if (t === 'ping') { c.sock.send({ t: 'pong', at: msg.at }); return; }
+
+  if (t === 'hello') {
+    c.name = String(msg.name || 'PLAYER').slice(0, 12).toUpperCase();
+    c.sock.send({
+      t: 'welcome', you: c.name, list: lobbyList(), maxLobbies: MAX_LOBBIES,
+      door: doorState(),
+    });
+    if (c.captureFps) c.sock.send({ t: 'capture', fps: c.captureFps });
+    return;
+  }
+
+  // Everything below this line is the lobby system, and during quiet hours
+  // the lobby system does not exist. Not "there are no lobbies" - there is
+  // nothing to fetch and nothing to make, and the answer says when that
+  // changes.
+  if (isQuiet()) {
+    const door = doorState();
+    c.sock.send({ t: 'closed', door, why: door.message });
+    return;
+  }
+
+  if (t === 'list') { c.sock.send({ t: 'lobbies', list: lobbyList(), door: doorState() }); return; }
 
   if (t === 'create') {
     if (c.lobby) return;
@@ -340,20 +558,43 @@ function handle(c, msg) {
     return;
   }
 
-  if (t === 'ping') { c.sock.send({ t: 'pong', at: msg.at }); return; }
 }
 
 // --- wiring ---------------------------------------------------------------
 
+const WATCH_PAGE = path.join(__dirname, 'watch.html');
+
 const server = http.createServer((req, res) => {
-  // A plain GET is how the client checks the server is there before it shows
+  const url = (req.url || '/').split('?')[0];
+
+  // The watch page. Served to anybody who asks - it is a password box and
+  // nothing else. What it shows arrives over the socket, after the password.
+  if (url === '/watch' || url === '/watch/') {
+    fs.readFile(WATCH_PAGE, (err, body) => {
+      if (err) { res.writeHead(500, { 'content-type': 'text/plain' }); res.end('watch.html is missing'); return; }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.end(body);
+    });
+    return;
+  }
+
+  // A plain GET is how the game checks the server is there before it shows
   // the menu, so answer it cheaply and allow it from the game's own origin.
+  // During quiet hours it still answers - it has to, or the game could not
+  // tell "shut until four" apart from "no server at all".
+  const door = doorState();
   res.writeHead(200, {
     'content-type': 'application/json',
     'access-control-allow-origin': '*',
     'cache-control': 'no-store',
   });
-  res.end(JSON.stringify({ ok: true, game: 'ascent-to-the-aether', lobbies: lobbies.size, max: MAX_LOBBIES }));
+  res.end(JSON.stringify({
+    ok: true,
+    game: 'ascent-to-the-aether',
+    lobbies: door.open ? lobbies.size : 0,
+    max: MAX_LOBBIES,
+    door,
+  }));
 });
 
 server.on('upgrade', (req, socket) => {
@@ -366,12 +607,58 @@ server.on('upgrade', (req, socket) => {
     `Sec-WebSocket-Accept: ${accept(key)}\r\n\r\n`);
 
   const sock = new Socket(socket);
-  const c = { sock, name: 'PLAYER', lobby: null, cooldownUntil: 0 };
+  const watching = (req.url || '').startsWith('/watch');
+
+  if (watching) {
+    // A watcher is not a player: it never gets a lobby, and until it has said
+    // the password it gets nothing at all.
+    const w = { sock, ok: false, fps: FPS_MIN };
+    watchers.add(w);
+    sock.onmessage = (msg) => { try { handleWatcher(w, msg); } catch { /* ignore */ } };
+    sock.onclose = () => { watchers.delete(w); syncCapture(); };
+    sock.send({ t: 'hi', watch: true, door: doorState() });
+    return;
+  }
+
+  const c = { sock, name: 'PLAYER', lobby: null, cooldownUntil: 0, captureFps: 0 };
   clients.add(c);
   sock.onmessage = (msg) => { try { handle(c, msg); } catch { /* one bad message is not fatal */ } };
   sock.onclose = () => { leaveLobby(c); clients.delete(c); };
-  sock.send({ t: 'hi' });
+  sock.send({ t: 'hi', door: doorState() });
+  // if somebody is already watching, this player starts sending pictures too
+  const fps = wantedFps();
+  if (fps) { c.captureFps = fps; sock.send({ t: 'capture', fps }); }
 });
+
+// --- the door -------------------------------------------------------------
+// On the stroke of the quiet hour every lobby is closed and everybody in one
+// is told why and when it opens again. Checked every ten seconds rather than
+// scheduled, so a NAS that suspends and wakes lands on the right side of it.
+
+let wasQuiet = isQuiet();
+setInterval(() => {
+  const quiet = isQuiet();
+  if (quiet === wasQuiet) return;
+  wasQuiet = quiet;
+  const door = doorState();
+  if (quiet) {
+    for (const l of [...lobbies.values()]) {
+      for (const seat of [l.host, l.guest]) {
+        if (!seat) continue;
+        seat.sock.send({ t: 'lobbyClosed', why: door.message, door });
+        seat.lobby = null;
+      }
+      clearTimeout(l.timer);
+      lobbies.delete(l.id);
+    }
+    console.log(`shut for the night - open again at ${door.opensAt}`);
+  } else {
+    console.log(`open - shut again at ${door.closesAt}`);
+  }
+  // everybody hears about it either way, in a lobby or not
+  for (const c of clients) c.sock.send({ t: 'door', door });
+  pushWatchList();
+}, 5000);
 
 // lobbies nobody is using do not sit there holding a slot
 setInterval(() => {
@@ -390,6 +677,13 @@ setInterval(() => {
   }
 }, 15000);
 
+// the watch page wants the list moving even when nobody joins or leaves
+setInterval(() => { if (watchers.size) pushWatchList(); }, 2000);
+
 server.listen(PORT, () => {
+  const door = doorState();
   console.log(`pvp server on :${PORT}  (max ${MAX_LOBBIES} lobbies)`);
+  console.log(`clock: ${door.now} ${door.tz} - ${door.message}`);
+  console.log(`watch: http://<this-box>:${PORT}/watch  (password from ${PASS_FILE})`);
+  if (!watchPassword()) console.log('WARNING: no password file, so the watch page cannot be opened at all');
 });
